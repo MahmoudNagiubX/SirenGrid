@@ -1,7 +1,7 @@
 # SirenGrid Phase 02 Geospatial and Traffic Design
 
 Date: 2026-09-06  
-Status: Owner-approved design captured for implementation review  
+Status: Owner-approved with review revisions incorporated
 Scope: Phase 02 only
 
 ## Objective
@@ -14,7 +14,8 @@ This phase does not implement Phase 03 or later behavior.
 
 ### Base data
 
-- Refresh the Phase 01 bootstrap graph from current OpenStreetMap data using the approved OSMnx/Overpass workflow.
+- Owner-approved Phase 02 implementation decision: use bounded direct OSMnx/Overpass acquisition for the Nasr City MVP road graph. Geofabrik Egypt remains an approved reproducibility/fallback source rather than the mandatory direct acquisition path for this phase.
+- Refresh the Phase 01 bootstrap graph from current OpenStreetMap data using that bounded OSMnx/Overpass workflow.
 - Preserve source-represented directionality, one-way state, and access restrictions.
 - Add base speed and travel-time attributes using OSMnx's documented processing.
 - Do not claim turn-restriction compliance. Record `turn_restriction_support_status = NOT_PROCESSED_OR_VALIDATED`.
@@ -73,7 +74,7 @@ A bounded preprocessing command:
 
 Graph and infrastructure artifacts are `REAL_DERIVED`. Their underlying source is `REAL_PUBLIC`. They are `STATIC` operational inputs even when freshly downloaded; their provenance records the actual retrieval time rather than claiming live status. Existing 500-meter operational zones remain unchanged except for validation against the refreshed boundary.
 
-Geofabrik Egypt remains an approved reproducibility source. For the bounded Nasr City refresh, OSMnx/Overpass polygon queries are the direct acquisition path because they avoid downloading and clipping a country-sized extract. The provenance document retains the approved Geofabrik reference and states which direct source produced each artifact.
+Direct OSMnx/Overpass acquisition for the bounded Nasr City MVP graph is an explicit owner-approved Phase 02 implementation decision. Geofabrik Egypt remains an approved reproducibility/fallback source. This resolves the earlier Geofabrik-oriented processing language without changing the requirement that every produced artifact identify its actual direct source. The provenance document retains the approved Geofabrik reference and states whether direct Overpass acquisition or a separately executed Geofabrik workflow produced each artifact. A failed acquisition or validation preserves the last validated real graph unchanged.
 
 ### 3. TomTom client and snapshot cache
 
@@ -83,7 +84,7 @@ An immutable snapshot contains:
 
 - snapshot ID/version;
 - source and source reference;
-- retrieval and last-updated timestamps;
+- local `retrieved_at` and an optional provider-originated `provider_last_updated` timestamp;
 - freshness status;
 - data reality (`REAL_LIVE` only after a successful real retrieval);
 - graph fingerprint;
@@ -96,6 +97,8 @@ An immutable snapshot contains:
 The cache permits at most one provider refresh attempt in each 60-second interval, including failed attempts. Route preview may request a refresh when no cached attempt exists in the interval, then uses the captured result or falls back. This prevents request-driven retry loops without inventing provider quota values.
 
 Missing credentials, timeout, rate limiting, non-success status, malformed JSON, invalid values, or partial unusable responses produce an observable unavailable/malformed snapshot state and base-route fallback. Provider response bodies and API keys are not logged.
+
+Freshness age is measured from local `retrieved_at` unless TomTom supplies an explicit provider update timestamp that passes parsing and temporal validation. Only then may `provider_last_updated` be populated and used as the freshness origin. Local retrieval time is never presented as provider-originated `last_updated`, and the runtime never fabricates a provider timestamp.
 
 ### 4. Corridor-first matching without a new ambiguity threshold
 
@@ -118,20 +121,25 @@ For a matched, usable observation:
 - current and free-flow travel times must both be finite and strictly positive;
 - no invented speed, congestion, ETA, clamp, or default factor is allowed.
 
-Unmatched edges use their unchanged base travel time. The selected route is labeled `TOMTOM_TRAFFIC_ADJUSTED` only if at least one traversed edge actually used a validated observation. Otherwise the returned route remains `OSM_BASE_TRAVEL_TIME` even if a usable snapshot exists elsewhere.
+Unmatched edges use their unchanged base travel time. The selected route is labeled `TOMTOM_TRAFFIC_ADJUSTED` only when the validated overlay materially affects routing by either:
+
+- changing the weight of at least one edge traversed by the selected traffic-aware route; or
+- making a matched edge unavailable through a validated TomTom road closure and thereby changing path selection.
+
+A closure affects path selection when a validated closed edge occurs on the independently calculated base-optimal path and the traffic-aware path avoids it. Such a result remains `TOMTOM_TRAFFIC_ADJUSTED` even though the closed edge is not traversed. A usable observation or closure elsewhere that does not affect either selected-path weights or path selection does not change the route label.
 
 The response exposes:
 
-- base ETA;
-- selected/effective ETA;
+- `base_eta`, calculated from the independently selected base-optimal route using immutable base weights;
+- `effective_eta`, calculated for the independently selected traffic-aware route using the captured overlay;
 - routing source;
 - snapshot ID/version and freshness when a snapshot was considered;
 - matched traversed-edge count;
 - total traversed-edge count;
-- traffic coverage ratio (`matched / total`, or `0` for an empty path);
+- traffic coverage ratio, calculated as the sum of traffic-covered traversed-edge lengths divided by total traversed route length;
 - explicit fallback reason when traffic was not applied.
 
-The base ETA is independently recomputed from the same path's immutable base weights. A traffic-adjusted route may differ from the base path. Phase 02 may return one meaningfully distinct alternative when the graph provides one, but it does not create future-phase replanning behavior.
+The base route and traffic-aware route are computed independently. `base_eta` always means the ETA of the base-optimal route under immutable OSM weights. `effective_eta` means the ETA of the selected traffic-aware route under the captured overlay. If the base-weight cost of the traffic-selected path is exposed for explanation, its field is `traffic_selected_path_base_eta`, never `base_eta`. A traffic-adjusted route may differ from the base path. Phase 02 may return one meaningfully distinct alternative when the graph provides one, but it does not create future-phase replanning behavior.
 
 ### 6. Minimum API contracts
 
@@ -150,15 +158,16 @@ The OpenAPI contract must distinguish `OSM_BASE_TRAVEL_TIME` from `TOMTOM_TRAFFI
 | Provider timeout/server error | unavailable with sanitized reason | OSM base |
 | HTTP 429 | rate-limited | OSM base; no retry inside 60 s |
 | Malformed/invalid payload | malformed | OSM base |
-| Snapshot age 0–60 s | LIVE | eligible if matches pass |
-| Snapshot age >60–120 s | FRESH | eligible if matches pass |
-| Snapshot age >120 s | STALE | visible, never applied |
+| Validated freshness-origin age 0–60 s | LIVE | eligible if matches pass |
+| Validated freshness-origin age >60–120 s | FRESH | eligible if matches pass |
+| Validated freshness-origin age >120 s | STALE | visible, never applied |
 | Confidence <0.80 | unmatched | affected OSM edges remain base |
 | Separation >30 m | unmatched | affected OSM edges remain base |
 | Direction difference >30° | unmatched | affected OSM edges remain base |
 | Multiple/branching candidate chains | unmatched/ambiguous | affected OSM edges remain base |
 | Usable overlay outside selected path | snapshot visible | selected route remains base-labeled |
-| At least one selected-path edge adjusted | usable mixed or full overlay | traffic-adjusted label and coverage |
+| At least one selected-path edge weight adjusted | usable mixed or full overlay | traffic-adjusted label and length coverage |
+| Validated closure changes path selection | closure provenance visible | traffic-adjusted label even though the closed edge is not traversed |
 
 ## Testing Strategy
 
@@ -167,6 +176,7 @@ Behavioral work follows focused red-green-refactor cycles. Provider tests use de
 Required automated coverage:
 
 - freshness boundaries at exactly 60 and 120 seconds, and immediately above each;
+- local retrieval versus validated provider update timestamp semantics, including rejection of fabricated/future provider timestamps;
 - fixed `absolute`/zoom `22` request construction and recorded metadata;
 - valid and malformed Flow Segment parsing;
 - rate-limit, timeout, server-error, missing-key, and failed-attempt cache behavior;
@@ -174,8 +184,9 @@ Required automated coverage:
 - each failed safety gate;
 - structural ambiguity and unmatched observations;
 - stale snapshot visibility and routing exclusion;
-- mixed-state adjustment and coverage ratio;
-- traffic label only when a selected edge was adjusted;
+- mixed-state adjustment and length-weighted coverage ratio;
+- traffic label only when a selected edge weight was adjusted or a validated closure changed path selection;
+- independent base-optimal `base_eta` and overlay-optimal `effective_eta` calculations;
 - closure handling in overlay-only routing;
 - graph fingerprint mismatch fallback;
 - base graph attribute/topology fingerprint unchanged before and after traffic routing;
@@ -238,4 +249,3 @@ What is rejected and why:
 - Emergency corridor preemption logic, driver alerts, and traffic-signal control.
 - WebSocket operations, movement simulation, dynamic replanning, multi-incident optimization, and frontend implementation.
 - Phase 03 or later behavior.
-
