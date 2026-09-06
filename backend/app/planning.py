@@ -9,8 +9,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models import EmergencyResource, Incident, ResponsePlan, TimelineEvent
-from app.resources import is_planner_eligible
+from app.models import Approval, EmergencyResource, Incident, ResponsePlan, TimelineEvent
+from app.resources import is_planner_eligible, serialize_resource
 from app.routing import (
     RouteNotFoundError,
     RouteResult,
@@ -19,6 +19,7 @@ from app.routing import (
     load_routing_graph,
 )
 from app.schemas import (
+    ApprovePlanRequest,
     Coordinate,
     IncidentStatus,
     ResourceStatus,
@@ -30,6 +31,7 @@ __all__ = [
     "router",
     "generate_response_plan",
     "serialize_plan",
+    "approve_response_plan",
 ]
 
 router = APIRouter(tags=["planning"])
@@ -289,3 +291,227 @@ def generate_response_plan(
     db.refresh(incident)
 
     return serialize_plan(plan)
+
+
+@router.post(
+    "/plans/{plan_id}/approve",
+    status_code=status.HTTP_200_OK,
+    response_model=None,
+)
+def approve_response_plan(
+    plan_id: str,
+    payload: ApprovePlanRequest,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Execute version-checked transactional approval of a candidate response plan.
+
+    Validation rules:
+    1. Response plan must exist; 404 if missing.
+    2. Referenced incident must exist; 404 if missing.
+    3. Plan status must be RECOMMENDED. If already APPROVED, returns 409 with PLAN_ALREADY_APPROVED.
+       Any other non-RECOMMENDED status returns 409.
+    4. Incident status must be AWAITING_APPROVAL; otherwise 409.
+    5. Expected incident version must match current incident version; mismatch returns 409.
+    6. Expected plan version must match current plan version; mismatch returns 409.
+    7. Plan must not contain duplicate resource IDs; conflict returns 409.
+    8. Every selected resource must exist, remain status AVAILABLE, and have no assigned_incident_id;
+       any conflict returns 409.
+
+    Atomic transaction:
+    - Sets plan.status = APPROVED.
+    - Sets incident.status = RESPONSE_ACTIVE.
+    - Increments incident.version exactly once.
+    - Sets each selected resource.status = ASSIGNED and assigned_incident_id = incident.id,
+      incrementing each resource.version exactly once.
+    - Inserts Approval row recording operator reference, action, and expected versions.
+    - Appends auditable PLAN_APPROVED and RESOURCES_ASSIGNED timeline events.
+    - Commits exactly once.
+    """
+    plan = db.get(ResponsePlan, plan_id)
+    if plan is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Response plan '{plan_id}' not found",
+        )
+
+    incident = db.get(Incident, plan.incident_id)
+    if incident is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Referenced incident '{plan.incident_id}' not found",
+        )
+
+    if plan.status == ResponsePlanStatus.APPROVED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="PLAN_ALREADY_APPROVED: response plan has already been approved",
+        )
+
+    if plan.status != ResponsePlanStatus.RECOMMENDED:
+        status_val = (
+            plan.status.value
+            if hasattr(plan.status, "value")
+            else str(plan.status)
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Response plan status is '{status_val}', expected '{ResponsePlanStatus.RECOMMENDED.value}'",
+        )
+
+    if incident.status != IncidentStatus.AWAITING_APPROVAL:
+        inc_status_val = (
+            incident.status.value
+            if hasattr(incident.status, "value")
+            else str(incident.status)
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Incident status is '{inc_status_val}', expected '{IncidentStatus.AWAITING_APPROVAL.value}'",
+        )
+
+    if payload.expected_incident_version != incident.version:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Stale incident version: expected {payload.expected_incident_version}, "
+                f"current {incident.version}"
+            ),
+        )
+
+    if payload.expected_plan_version != plan.plan_version:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Stale plan version: expected {payload.expected_plan_version}, "
+                f"current {plan.plan_version}"
+            ),
+        )
+
+    selected_resource_ids = plan.resource_ids_json or []
+    if len(selected_resource_ids) != len(set(selected_resource_ids)):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Response plan contains duplicate resource IDs",
+        )
+
+    resources: list[EmergencyResource] = []
+    for res_id in selected_resource_ids:
+        res = db.get(EmergencyResource, res_id)
+        if res is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Selected resource '{res_id}' not found in registry",
+            )
+        if res.status != ResourceStatus.AVAILABLE:
+            res_status_val = (
+                res.status.value
+                if hasattr(res.status, "value")
+                else str(res.status)
+            )
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Resource '{res_id}' is not AVAILABLE (current: '{res_status_val}')",
+            )
+        if res.assigned_incident_id:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Resource '{res_id}' is already assigned to incident '{res.assigned_incident_id}'",
+            )
+        resources.append(res)
+
+    now_utc = datetime.now(timezone.utc)
+
+    # Atomic single-transaction mutations
+    plan.status = ResponsePlanStatus.APPROVED
+
+    incident.status = IncidentStatus.RESPONSE_ACTIVE
+    incident.version = incident.version + 1
+    incident.updated_at = now_utc
+
+    for res in resources:
+        res.status = ResourceStatus.ASSIGNED
+        res.assigned_incident_id = incident.id
+        res.version = res.version + 1
+        res.last_updated = now_utc
+
+    approval = Approval(
+        id=str(uuid.uuid4()),
+        plan_id=plan.id,
+        incident_id=incident.id,
+        operator_reference=payload.operator_reference,
+        action="APPROVE_PLAN",
+        expected_incident_version=payload.expected_incident_version,
+        expected_plan_version=payload.expected_plan_version,
+        created_at=now_utc,
+    )
+
+    plan_approved_event = TimelineEvent(
+        id=str(uuid.uuid4()),
+        incident_id=incident.id,
+        event_type="PLAN_APPROVED",
+        details_json={
+            "plan_id": plan.id,
+            "plan_version": plan.plan_version,
+            "incident_version": incident.version,
+            "operator_reference": payload.operator_reference,
+            "action": "APPROVE_PLAN",
+        },
+        created_at=now_utc,
+    )
+
+    resources_assigned_event = TimelineEvent(
+        id=str(uuid.uuid4()),
+        incident_id=incident.id,
+        event_type="RESOURCES_ASSIGNED",
+        details_json={
+            "plan_id": plan.id,
+            "incident_id": incident.id,
+            "resource_ids": [r.id for r in resources],
+            "resource_count": len(resources),
+            "operator_reference": payload.operator_reference,
+        },
+        created_at=now_utc,
+    )
+
+    try:
+        db.add(approval)
+        db.add(plan_approved_event)
+        db.add(resources_assigned_event)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    db.refresh(plan)
+    db.refresh(incident)
+    for res in resources:
+        db.refresh(res)
+    db.refresh(approval)
+
+    serialized_plan = serialize_plan(plan)
+    inc_status_str = (
+        incident.status.value
+        if hasattr(incident.status, "value")
+        else str(incident.status)
+    )
+
+    return {
+        **serialized_plan,
+        "incident_status": inc_status_str,
+        "incident": {
+            "id": incident.id,
+            "status": inc_status_str,
+            "version": incident.version,
+        },
+        "resources": [serialize_resource(res) for res in resources],
+        "approval": {
+            "id": approval.id,
+            "plan_id": approval.plan_id,
+            "incident_id": approval.incident_id,
+            "action": approval.action,
+            "operator_reference": approval.operator_reference,
+            "expected_incident_version": approval.expected_incident_version,
+            "expected_plan_version": approval.expected_plan_version,
+            "created_at": approval.created_at.isoformat() if approval.created_at else None,
+        },
+    }
