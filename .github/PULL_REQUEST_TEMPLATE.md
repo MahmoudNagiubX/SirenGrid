@@ -17,7 +17,7 @@
 - [ ] No unapproved product scope added or removed
 - [ ] Simulated integrations/data are clearly represented as simulated
 - [ ] No secrets or credentials committed
-- [ ] Reused/reference code was checked for license and product fit
+- [ ] Reused/reference code was understood and verified for product fit
 
 ## Not Implemented / Out of Scope
 
