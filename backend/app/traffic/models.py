@@ -66,6 +66,13 @@ class TrafficObservation(BaseModel):
         )
         if not all(math.isfinite(value) for value in numeric_values):
             raise ValueError("traffic observation numbers must be finite")
+        if (
+            not self.road_closure
+            and not math.isfinite(
+                self.current_travel_time_s / self.free_flow_travel_time_s
+            )
+        ):
+            raise ValueError("traffic observation factor must be finite")
         return self
 
 
@@ -86,7 +93,7 @@ class TrafficOverlayEntry(BaseModel):
 
     edge_key: EdgeKey
     observation_id: str
-    traffic_factor: float | None = Field(default=None, gt=0)
+    traffic_factor: float | None = Field(default=None, gt=0, allow_inf_nan=False)
     road_closure: bool = False
 
 

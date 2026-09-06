@@ -145,6 +145,18 @@ def test_parse_flow_segment_accepts_zero_speed_for_reported_closure() -> None:
     assert observation.road_closure is True
 
 
+def test_parse_flow_segment_rejects_non_finite_derived_factor() -> None:
+    with pytest.raises(TomTomPayloadError):
+        parse_flow_segment(
+            payload=flow_payload(
+                currentTravelTime=1e308,
+                freeFlowTravelTime=1e-308,
+            ),
+            sample=SAMPLES[0],
+            retrieved_at=NOW,
+        )
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [
