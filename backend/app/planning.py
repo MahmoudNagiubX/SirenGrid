@@ -93,7 +93,8 @@ def generate_response_plan(
     3. Exclude route infeasible candidates. Fail clearly with HTTP 409 if routeable candidates < count.
     4. Sort routeable candidates by eta_seconds ascending and select exact count. Never reuse a resource.
     5. Construct ResponsePlan with actual computed metrics and strict score breakdown.
-    6. In one atomic DB transaction: persist ResponsePlan, set incident status AWAITING_APPROVAL,
+    6. In one atomic DB transaction: persist ResponsePlan with incident_version matching the post-generation
+       incident version, mark prior current RECOMMENDED plan SUPERSEDED, set incident status AWAITING_APPROVAL,
        increment incident version, set current_plan_id, and log PLAN_GENERATED timeline event.
     """
     incident = db.get(Incident, incident_id)
@@ -239,7 +240,13 @@ def generate_response_plan(
     }
 
     # 7. Plan versioning and metadata
-    incident_version_before = incident.version
+    post_gen_incident_version = incident.version + 1
+
+    # Minimally and atomically mark prior current RECOMMENDED plan SUPERSEDED
+    if incident.current_plan_id:
+        prev_plan = db.get(ResponsePlan, incident.current_plan_id)
+        if prev_plan and prev_plan.status == ResponsePlanStatus.RECOMMENDED:
+            prev_plan.status = ResponsePlanStatus.SUPERSEDED
 
     existing_plans = db.scalars(
         select(ResponsePlan).where(ResponsePlan.incident_id == incident.id)
@@ -256,7 +263,7 @@ def generate_response_plan(
     plan = ResponsePlan(
         id=plan_id,
         incident_id=incident.id,
-        incident_version=incident_version_before,
+        incident_version=post_gen_incident_version,
         plan_version=plan_version,
         status=ResponsePlanStatus.RECOMMENDED,
         resource_ids_json=[res.id for res in selected_resources],
@@ -268,7 +275,7 @@ def generate_response_plan(
 
     # 8. Atomic single-transaction commit
     incident.status = IncidentStatus.AWAITING_APPROVAL
-    incident.version = incident_version_before + 1
+    incident.version = post_gen_incident_version
     incident.current_plan_id = plan_id
     incident.updated_at = now_utc
 
@@ -279,7 +286,7 @@ def generate_response_plan(
         details_json={
             "plan_id": plan_id,
             "plan_version": plan_version,
-            "incident_version": incident.version,
+            "incident_version": post_gen_incident_version,
             "resource_ids": [res.id for res in selected_resources],
             "selected_resource_count": selected_count,
             "max_arrival_eta_seconds": max_eta,
@@ -360,10 +367,12 @@ def approve_response_plan(
     3. Plan status must be RECOMMENDED. If already APPROVED, returns 409 with PLAN_ALREADY_APPROVED.
        Any other non-RECOMMENDED status returns 409.
     4. Incident status must be AWAITING_APPROVAL; otherwise 409.
-    5. Expected incident version must match current incident version; mismatch returns 409.
-    6. Expected plan version must match current plan version; mismatch returns 409.
-    7. Plan must not contain duplicate resource IDs; conflict returns 409.
-    8. Every selected resource must exist, remain status AVAILABLE, and have no assigned_incident_id;
+    5. Incident current_plan_id must match plan.id; mismatch returns 409.
+    6. Plan incident_version must match current incident.version; mismatch returns 409.
+    7. Expected incident version must match current incident version; mismatch returns 409.
+    8. Expected plan version must match current plan version; mismatch returns 409.
+    9. Plan must not contain duplicate resource IDs; conflict returns 409.
+    10. Every selected resource must exist, remain status AVAILABLE, and have no assigned_incident_id;
        any conflict returns 409.
 
     Atomic transaction:
@@ -416,6 +425,24 @@ def approve_response_plan(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Incident status is '{inc_status_val}', expected '{IncidentStatus.AWAITING_APPROVAL.value}'",
+        )
+
+    if incident.current_plan_id != plan.id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Response plan '{plan.id}' is not the current plan for incident '{incident.id}' "
+                f"(current_plan_id: '{incident.current_plan_id}')"
+            ),
+        )
+
+    if plan.incident_version != incident.version:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Plan incident version mismatch: plan has incident_version {plan.incident_version}, "
+                f"current incident version is {incident.version}"
+            ),
         )
 
     if payload.expected_incident_version != incident.version:

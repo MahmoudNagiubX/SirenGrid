@@ -482,7 +482,7 @@ def test_generate_plan_metrics_score_breakdown_routes_and_timeline_contracts(
     # Plan top-level properties
     assert uuid.UUID(data["id"])
     assert data["incident_id"] == incident.id
-    assert data["incident_version"] == 1  # version before mutation
+    assert data["incident_version"] == 2  # matches post-generation incident version
     assert data["plan_version"] == 1
     assert data["status"] == ResponsePlanStatus.RECOMMENDED.value
 
@@ -571,7 +571,8 @@ def test_generate_plan_repeated_generation_increments_plan_version(
     assert resp1.status_code == 201
     plan1 = resp1.json()
     assert plan1["plan_version"] == 1
-    assert plan1["incident_version"] == 1
+    assert plan1["incident_version"] == 2
+    assert plan1["status"] == ResponsePlanStatus.RECOMMENDED.value
 
     db_session.expire_all()
     inc1 = db_session.get(Incident, incident.id)
@@ -584,7 +585,8 @@ def test_generate_plan_repeated_generation_increments_plan_version(
     assert resp2.status_code == 201
     plan2 = resp2.json()
     assert plan2["plan_version"] == 2
-    assert plan2["incident_version"] == 2
+    assert plan2["incident_version"] == 3
+    assert plan2["status"] == ResponsePlanStatus.RECOMMENDED.value
     assert plan2["id"] != plan1["id"]
 
     db_session.expire_all()
@@ -592,6 +594,11 @@ def test_generate_plan_repeated_generation_increments_plan_version(
     assert inc2 is not None
     assert inc2.version == 3
     assert inc2.current_plan_id == plan2["id"]
+
+    # Prior current plan must be marked SUPERSEDED
+    reloaded_p1 = db_session.get(ResponsePlan, plan1["id"])
+    assert reloaded_p1 is not None
+    assert reloaded_p1.status == ResponsePlanStatus.SUPERSEDED
 
 
 def test_generate_plan_real_osm_routing_integration(

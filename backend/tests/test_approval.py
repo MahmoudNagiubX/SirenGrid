@@ -12,6 +12,7 @@ import app.models as _models  # noqa: F401
 from app.db import init_db
 from app.main import app
 from app.models import Approval, EmergencyResource, Incident, ResponsePlan, TimelineEvent
+from app.routing import RouteResult
 from app.schemas import (
     ConfidenceLevel,
     IncidentStatus,
@@ -100,13 +101,18 @@ def create_test_resource(
 def create_test_plan(
     db: Session,
     incident_id: str,
-    incident_version: int = 1,
+    incident_version: int | None = None,
     plan_version: int = 1,
     status: ResponsePlanStatus = ResponsePlanStatus.RECOMMENDED,
     resource_ids: list[str] | None = None,
     routes: list[dict[str, Any]] | None = None,
     metrics: dict[str, Any] | None = None,
+    set_as_current: bool = True,
 ) -> ResponsePlan:
+    inc = db.get(Incident, incident_id)
+    if incident_version is None:
+        incident_version = inc.version if inc is not None else 1
+
     if resource_ids is None:
         resource_ids = []
     if routes is None:
@@ -145,6 +151,12 @@ def create_test_plan(
     db.add(plan)
     db.commit()
     db.refresh(plan)
+
+    if set_as_current and inc is not None and inc.current_plan_id is None:
+        inc.current_plan_id = plan.id
+        db.commit()
+        db.refresh(inc)
+
     return plan
 
 
@@ -157,7 +169,7 @@ def test_approve_plan_success(client: TestClient, db_session: Session) -> None:
     plan = create_test_plan(
         db=db_session,
         incident_id=incident.id,
-        incident_version=1,
+        incident_version=2,
         plan_version=1,
         status=ResponsePlanStatus.RECOMMENDED,
         resource_ids=[res1.id, res2.id],
@@ -259,7 +271,7 @@ def test_repeated_approval_returns_409_with_code_and_no_duplicate_mutations(
     plan = create_test_plan(
         db=db_session,
         incident_id=incident.id,
-        incident_version=1,
+        incident_version=2,
         plan_version=1,
         status=ResponsePlanStatus.RECOMMENDED,
         resource_ids=[res.id],
@@ -318,7 +330,7 @@ def test_stale_expected_incident_version_returns_409_without_mutation(
     plan = create_test_plan(
         db=db_session,
         incident_id=incident.id,
-        incident_version=1,
+        incident_version=2,
         plan_version=1,
         status=ResponsePlanStatus.RECOMMENDED,
         resource_ids=[res.id],
@@ -365,7 +377,7 @@ def test_stale_expected_plan_version_returns_409_without_mutation(
     plan = create_test_plan(
         db=db_session,
         incident_id=incident.id,
-        incident_version=1,
+        incident_version=2,
         plan_version=1,
         status=ResponsePlanStatus.RECOMMENDED,
         resource_ids=[res.id],
@@ -413,7 +425,7 @@ def test_resource_status_conflict_aborts_entire_transaction(
     plan = create_test_plan(
         db=db_session,
         incident_id=incident.id,
-        incident_version=1,
+        incident_version=2,
         plan_version=1,
         status=ResponsePlanStatus.RECOMMENDED,
         resource_ids=[res1.id, res2.id],
@@ -469,7 +481,7 @@ def test_resource_already_assigned_aborts_transaction(
     plan = create_test_plan(
         db=db_session,
         incident_id=incident.id,
-        incident_version=1,
+        incident_version=2,
         plan_version=1,
         status=ResponsePlanStatus.RECOMMENDED,
         resource_ids=[res.id],
@@ -671,6 +683,7 @@ def test_full_generate_then_approve_flow(
     plan_id = gen_data["id"]
     assert gen_data["status"] == "RECOMMENDED"
     assert gen_data["plan_version"] == 1
+    assert gen_data["incident_version"] == 2
     assert gen_data["resource_ids"] == [res.id]
 
     # Verify incident transitioned to AWAITING_APPROVAL and version incremented to 2
@@ -684,8 +697,8 @@ def test_full_generate_then_approve_flow(
     appr_resp = client.post(
         f"/api/v1/plans/{plan_id}/approve",
         json={
-            "expected_incident_version": 2,
-            "expected_plan_version": 1,
+            "expected_incident_version": gen_data["incident_version"],
+            "expected_plan_version": gen_data["plan_version"],
             "operator_reference": "dispatcher-flow",
         },
     )
@@ -708,3 +721,166 @@ def test_full_generate_then_approve_flow(
     )
     assert repeat_resp.status_code == 409
     assert "PLAN_ALREADY_APPROVED" in repeat_resp.json()["detail"]
+
+
+def test_approval_rejects_superseded_plan_even_with_current_incident_version(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: generate Plan v1, generate Plan v2, then attempt to approve Plan v1
+
+    using the current incident version; assert HTTP 409 and zero resource, Approval,
+    PLAN_APPROVED, and RESOURCES_ASSIGNED mutations.
+    """
+    incident = create_test_incident(
+        db=db_session,
+        version=1,
+        status=IncidentStatus.ACTIVE_UNCONFIRMED,
+        lat=30.0561,
+        lon=31.3452,
+        required_resources=[{"resource_type": "AMBULANCE", "count": 1}],
+    )
+    res = create_test_resource(
+        db=db_session,
+        resource_id="res-amb-reg",
+        name="Reg Ambulance",
+        resource_type=ResourceType.AMBULANCE,
+        status=ResourceStatus.AVAILABLE,
+        lat=30.0570,
+        lon=31.3460,
+        version=1,
+    )
+
+    def mock_compute(graph: Any, origin: Any, destination: Any) -> RouteResult:
+        return RouteResult(
+            nodes=[101, 102],
+            geometry={"type": "LineString", "coordinates": [[31.3460, 30.0570], [31.3452, 30.0561]]},
+            distance_m=1000.0,
+            eta_seconds=120.0,
+            origin_snap_distance_m=5.0,
+            destination_snap_distance_m=5.0,
+            routing_source="OSM_BASE_TRAVEL_TIME",
+        )
+
+    monkeypatch.setattr("app.planning.load_routing_graph", lambda: None)
+    monkeypatch.setattr("app.planning.compute_route_on_graph", mock_compute)
+
+    # 1. Generate Plan v1
+    resp1 = client.post(f"/api/v1/incidents/{incident.id}/plans/generate")
+    assert resp1.status_code == 201, resp1.text
+    plan1 = resp1.json()
+    assert plan1["plan_version"] == 1
+    assert plan1["incident_version"] == 2
+
+    # 2. Generate Plan v2
+    resp2 = client.post(f"/api/v1/incidents/{incident.id}/plans/generate")
+    assert resp2.status_code == 201, resp2.text
+    plan2 = resp2.json()
+    assert plan2["plan_version"] == 2
+    assert plan2["incident_version"] == 3
+    assert plan2["id"] != plan1["id"]
+
+    db_session.expire_all()
+    inc_current = db_session.get(Incident, incident.id)
+    assert inc_current is not None
+    assert inc_current.version == 3
+    assert inc_current.current_plan_id == plan2["id"]
+
+    # 3. Attempt to approve Plan v1 using current incident version (3) and plan1's plan_version (1)
+    appr_resp = client.post(
+        f"/api/v1/plans/{plan1['id']}/approve",
+        json={
+            "expected_incident_version": 3,
+            "expected_plan_version": 1,
+            "operator_reference": "dispatcher-reg",
+        },
+    )
+    assert appr_resp.status_code == 409
+
+    # 4. Assert zero resource, Approval, PLAN_APPROVED, and RESOURCES_ASSIGNED mutations
+    db_session.expire_all()
+    reloaded_res = db_session.get(EmergencyResource, res.id)
+    assert reloaded_res is not None
+    assert reloaded_res.status == ResourceStatus.AVAILABLE
+    assert reloaded_res.assigned_incident_id is None
+    assert reloaded_res.version == 1
+
+    approvals = db_session.scalars(select(Approval)).all()
+    assert len(approvals) == 0
+
+    plan_approved_events = db_session.scalars(
+        select(TimelineEvent).where(TimelineEvent.event_type == "PLAN_APPROVED")
+    ).all()
+    assert len(plan_approved_events) == 0
+
+    resources_assigned_events = db_session.scalars(
+        select(TimelineEvent).where(TimelineEvent.event_type == "RESOURCES_ASSIGNED")
+    ).all()
+    assert len(resources_assigned_events) == 0
+
+    # Incident remains AWAITING_APPROVAL with version 3 and current_plan_id pointing to plan2
+    reloaded_inc = db_session.get(Incident, incident.id)
+    assert reloaded_inc is not None
+    assert reloaded_inc.status == IncidentStatus.AWAITING_APPROVAL
+    assert reloaded_inc.version == 3
+    assert reloaded_inc.current_plan_id == plan2["id"]
+
+
+def test_approval_rejects_when_plan_not_current_plan_for_incident(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    """Approval must reject with 409 if incident.current_plan_id != plan.id."""
+    incident = create_test_incident(db=db_session, version=2, status=IncidentStatus.AWAITING_APPROVAL)
+    res = create_test_resource(db=db_session, resource_id="res-not-curr", name="Amb")
+    plan = create_test_plan(
+        db=db_session,
+        incident_id=incident.id,
+        incident_version=2,
+        plan_version=1,
+        status=ResponsePlanStatus.RECOMMENDED,
+        resource_ids=[res.id],
+        set_as_current=False,
+    )
+    incident.current_plan_id = "some-other-plan-id"
+    db_session.commit()
+
+    resp = client.post(
+        f"/api/v1/plans/{plan.id}/approve",
+        json={
+            "expected_incident_version": 2,
+            "expected_plan_version": 1,
+        },
+    )
+    assert resp.status_code == 409
+    assert "current plan" in resp.json()["detail"].lower()
+
+
+def test_approval_rejects_when_plan_incident_version_mismatch(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    """Approval must reject with 409 if plan.incident_version != incident.version."""
+    incident = create_test_incident(db=db_session, version=3, status=IncidentStatus.AWAITING_APPROVAL)
+    res = create_test_resource(db=db_session, resource_id="res-ver-mismatch", name="Amb")
+    plan = create_test_plan(
+        db=db_session,
+        incident_id=incident.id,
+        incident_version=2,  # mismatch with incident.version (3)
+        plan_version=1,
+        status=ResponsePlanStatus.RECOMMENDED,
+        resource_ids=[res.id],
+    )
+    incident.current_plan_id = plan.id
+    db_session.commit()
+
+    resp = client.post(
+        f"/api/v1/plans/{plan.id}/approve",
+        json={
+            "expected_incident_version": 3,
+            "expected_plan_version": 1,
+        },
+    )
+    assert resp.status_code == 409
+    assert "incident version" in resp.json()["detail"].lower()

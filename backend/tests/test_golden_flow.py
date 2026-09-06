@@ -139,7 +139,7 @@ def test_phase01_golden_flow(client: TestClient, db_session: Session) -> None:
 
     assert plan_data["status"] == ResponsePlanStatus.RECOMMENDED.value
     assert plan_data["plan_version"] == 1
-    assert plan_data["incident_version"] == 1
+    assert plan_data["incident_version"] == 2
 
     selected_ids = plan_data["resource_ids"]
     assert len(selected_ids) == 2
@@ -191,16 +191,16 @@ def test_phase01_golden_flow(client: TestClient, db_session: Session) -> None:
     assert plan_get_data["id"] == plan_id
     assert plan_get_data["status"] == ResponsePlanStatus.RECOMMENDED.value
     assert plan_get_data["plan_version"] == 1
-    assert plan_get_data["incident_version"] == 1
+    assert plan_get_data["incident_version"] == 2
     assert plan_get_data["resource_ids"] == selected_ids
     assert plan_get_data["routes"] == routes
     assert plan_get_data["metrics"] == plan_data["metrics"]
     assert plan_get_data["score_breakdown"] == plan_data["score_breakdown"]
 
-    # 8. POST /api/v1/plans/{plan_id}/approve with expected_incident_version 2, expected_plan_version 1
+    # 8. POST /api/v1/plans/{plan_id}/approve with expected versions from generated plan directly
     approve_payload: dict[str, Any] = {
-        "expected_incident_version": 2,
-        "expected_plan_version": 1,
+        "expected_incident_version": plan_data["incident_version"],
+        "expected_plan_version": plan_data["plan_version"],
         "operator_reference": "dispatcher-op-gold-01",
     }
     with patch("urllib.request.urlopen") as mock_url:
