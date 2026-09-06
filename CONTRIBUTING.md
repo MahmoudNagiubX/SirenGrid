@@ -6,7 +6,7 @@
 2. Confirm your task is inside the approved scope.
 3. If a product decision is unclear, ask the team instead of inventing behavior.
 4. Search relevant public GitHub repositories and technical references before building a non-trivial subsystem from scratch.
-5. Reuse code only after checking its license, understanding it, and confirming that it fits SirenGrid.
+5. Reuse code only after understanding it and confirming that it fits SirenGrid.
 
 ## Branching
 
@@ -31,7 +31,7 @@ Each PR should state:
 - tests/verification performed,
 - what is intentionally not implemented,
 - any assumptions,
-- reused/reference repositories and relevant licenses, if any.
+- reused/reference repositories, if any.
 
 Keep PRs focused. Do not mix unrelated refactors or features.
 
