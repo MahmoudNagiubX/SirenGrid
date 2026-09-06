@@ -30,6 +30,15 @@ This phase does not implement Phase 03 or later behavior.
 - `LIVE` and `FRESH` snapshots may be used when matching succeeds.
 - `STALE` snapshots remain observable but cannot affect routing.
 
+### Prototype refresh timeout
+
+- `TOMTOM_REFRESH_TIMEOUT_SECONDS = 10`.
+- The 10 seconds are one total budget shared by the complete multi-observation corridor refresh, not a per-request timeout.
+- One monotonic deadline governs the cycle. The client stops issuing or awaiting remaining provider requests when that deadline is exhausted.
+- Timeout or provider failure is not retried immediately and remains subject to the 60-second refresh/cache interval.
+- Partial observations may become usable only when each independently passes schema, freshness, confidence, geometry, direction, ambiguity, graph-fingerprint, and snapshot-consistency validation. Other partial data may remain observable but cannot affect routing.
+- This value is a SirenGrid prototype runtime timeout, not a TomTom quota, SLA, or emergency dispatch standard.
+
 ### Prototype matching safety gates
 
 These are SirenGrid prototype safety thresholds, not official TomTom dispatch thresholds:
@@ -94,7 +103,7 @@ An immutable snapshot contains:
 - provider/error state without secrets;
 - matched-edge count and observation counts.
 
-The cache permits at most one provider refresh attempt in each 60-second interval, including failed attempts. Route preview may request a refresh when no cached attempt exists in the interval, then uses the captured result or falls back. This prevents request-driven retry loops without inventing provider quota values.
+The cache permits at most one provider refresh attempt in each 60-second interval, including failed attempts. Route preview may request a refresh when no cached attempt exists in the interval, then uses the captured result or falls back. One monotonic deadline limits the complete refresh to 10 seconds; every provider request receives only the budget remaining at issue time, and no further request is issued after exhaustion. This prevents request-driven retry loops without inventing provider quota values.
 
 Missing credentials, timeout, rate limiting, non-success status, malformed JSON, invalid values, or partial unusable responses produce an observable unavailable/malformed snapshot state and base-route fallback. Provider response bodies and API keys are not logged.
 
@@ -156,6 +165,7 @@ The OpenAPI contract must distinguish `OSM_BASE_TRAVEL_TIME` from `TOMTOM_TRAFFI
 |---|---|---|
 | No API key | unavailable, no secret detail | OSM base |
 | Provider timeout/server error | unavailable with sanitized reason | OSM base |
+| Total 10-second refresh budget exhausted | timed out/partial with completed observation metadata | only independently valid, snapshot-consistent partial matches may be eligible; otherwise OSM base |
 | HTTP 429 | rate-limited | OSM base; no retry inside 60 s |
 | Malformed/invalid payload | malformed | OSM base |
 | Validated freshness-origin age 0–60 s | LIVE | eligible if matches pass |
@@ -180,6 +190,7 @@ Required automated coverage:
 - fixed `absolute`/zoom `22` request construction and recorded metadata;
 - valid and malformed Flow Segment parsing;
 - rate-limit, timeout, server-error, missing-key, and failed-attempt cache behavior;
+- one monotonic 10-second total deadline across a multi-observation refresh, including exhaustion before all requests are issued;
 - successful confidence/geometry/direction match;
 - each failed safety gate;
 - structural ambiguity and unmatched observations;
