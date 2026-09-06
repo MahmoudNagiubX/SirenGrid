@@ -4,7 +4,8 @@ from datetime import datetime, timezone
 from typing import Any
 import uuid
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
@@ -12,19 +13,71 @@ from app.models import Incident, TimelineEvent
 from app.schemas import (
     DataReality,
     FreshnessStatus,
+    IncidentRead,
     IncidentStatus,
     ManualIncidentCreate,
 )
 
-__all__ = ["router", "create_manual_incident"]
+__all__ = [
+    "router",
+    "create_manual_incident",
+    "serialize_incident",
+    "list_incidents",
+    "get_incident",
+]
 
 router = APIRouter(tags=["incidents"])
+
+
+def serialize_incident(incident: Incident) -> dict[str, Any]:
+    """Serialize an Incident ORM instance into a frontend-agnostic dictionary."""
+    status_str = (
+        incident.status.value
+        if hasattr(incident.status, "value")
+        else str(incident.status)
+    )
+    severity_str = (
+        incident.severity.value
+        if hasattr(incident.severity, "value")
+        else str(incident.severity)
+    )
+    confidence_str = (
+        incident.confidence_level.value
+        if hasattr(incident.confidence_level, "value")
+        else str(incident.confidence_level)
+    )
+    return {
+        "id": incident.id,
+        "version": incident.version,
+        "status": status_str,
+        "incident_type": incident.incident_type,
+        "severity": severity_str,
+        "confidence_level": confidence_str,
+        "location": {
+            "lat": incident.latitude,
+            "lon": incident.longitude,
+        },
+        "latitude": incident.latitude,
+        "longitude": incident.longitude,
+        "location_text": incident.location_text,
+        "casualty_count": incident.casualty_count,
+        "casualty_range": incident.casualty_range,
+        "trapped_person": incident.trapped_person,
+        "road_blockage": incident.road_blockage,
+        "required_resources": incident.required_resources_json or [],
+        "required_resources_json": incident.required_resources_json or [],
+        "current_plan_id": incident.current_plan_id,
+        "created_at": incident.created_at.isoformat() if incident.created_at else None,
+        "updated_at": incident.updated_at.isoformat() if incident.updated_at else None,
+        "provenance": incident.provenance_json or {},
+        "provenance_json": incident.provenance_json or {},
+    }
 
 
 @router.post(
     "/intake/manual",
     status_code=status.HTTP_201_CREATED,
-    response_model=None,
+    response_model=IncidentRead,
 )
 def create_manual_incident(
     payload: ManualIncidentCreate,
@@ -98,29 +151,38 @@ def create_manual_incident(
     db.commit()
     db.refresh(incident)
 
-    return {
-        "id": incident.id,
-        "version": incident.version,
-        "status": incident.status.value if hasattr(incident.status, "value") else incident.status,
-        "incident_type": incident.incident_type,
-        "severity": incident.severity.value if hasattr(incident.severity, "value") else incident.severity,
-        "confidence_level": incident.confidence_level.value if hasattr(incident.confidence_level, "value") else incident.confidence_level,
-        "location": {
-            "lat": incident.latitude,
-            "lon": incident.longitude,
-        },
-        "latitude": incident.latitude,
-        "longitude": incident.longitude,
-        "location_text": incident.location_text,
-        "casualty_count": incident.casualty_count,
-        "casualty_range": incident.casualty_range,
-        "trapped_person": incident.trapped_person,
-        "road_blockage": incident.road_blockage,
-        "required_resources": incident.required_resources_json,
-        "required_resources_json": incident.required_resources_json,
-        "current_plan_id": incident.current_plan_id,
-        "created_at": incident.created_at.isoformat() if incident.created_at else None,
-        "updated_at": incident.updated_at.isoformat() if incident.updated_at else None,
-        "provenance": incident.provenance_json,
-        "provenance_json": incident.provenance_json,
-    }
+    return serialize_incident(incident)
+
+
+@router.get(
+    "/incidents",
+    status_code=status.HTTP_200_OK,
+    response_model=list[IncidentRead],
+)
+def list_incidents(
+    db: Session = Depends(get_db),
+) -> list[dict[str, Any]]:
+    """Retrieve all persisted incidents ordered deterministically by creation time descending then ID ascending."""
+    stmt = select(Incident).order_by(Incident.created_at.desc(), Incident.id.asc())
+    incidents = db.scalars(stmt).all()
+    return [serialize_incident(inc) for inc in incidents]
+
+
+@router.get(
+    "/incidents/{incident_id}",
+    status_code=status.HTTP_200_OK,
+    response_model=IncidentRead,
+)
+def get_incident(
+    incident_id: str,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Retrieve detailed state for a specific incident by unique identifier."""
+    incident = db.get(Incident, incident_id)
+    if incident is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Incident '{incident_id}' not found",
+        )
+    return serialize_incident(incident)
+

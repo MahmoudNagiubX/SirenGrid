@@ -19,11 +19,13 @@ from app.routing import (
     load_routing_graph,
 )
 from app.schemas import (
+    ApprovalResult,
     ApprovePlanRequest,
     Coordinate,
     IncidentStatus,
     ResourceStatus,
     ResourceType,
+    ResponsePlanRead,
     ResponsePlanStatus,
 )
 
@@ -32,6 +34,9 @@ __all__ = [
     "generate_response_plan",
     "serialize_plan",
     "approve_response_plan",
+    "list_incident_plans",
+    "get_response_plan",
+    "SCORE_BREAKDOWN_PHASE01",
 ]
 
 router = APIRouter(tags=["planning"])
@@ -74,7 +79,7 @@ def serialize_plan(plan: ResponsePlan) -> dict[str, Any]:
 @router.post(
     "/incidents/{incident_id}/plans/generate",
     status_code=status.HTTP_201_CREATED,
-    response_model=None,
+    response_model=ResponsePlanRead,
 )
 def generate_response_plan(
     incident_id: str,
@@ -293,10 +298,54 @@ def generate_response_plan(
     return serialize_plan(plan)
 
 
+@router.get(
+    "/incidents/{incident_id}/plans",
+    status_code=status.HTTP_200_OK,
+    response_model=list[ResponsePlanRead],
+)
+def list_incident_plans(
+    incident_id: str,
+    db: Session = Depends(get_db),
+) -> list[dict[str, Any]]:
+    """Retrieve all persisted response plans for a given incident ordered deterministically."""
+    incident = db.get(Incident, incident_id)
+    if incident is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Incident '{incident_id}' not found",
+        )
+    stmt = (
+        select(ResponsePlan)
+        .where(ResponsePlan.incident_id == incident_id)
+        .order_by(ResponsePlan.plan_version.asc(), ResponsePlan.id.asc())
+    )
+    plans = db.scalars(stmt).all()
+    return [serialize_plan(p) for p in plans]
+
+
+@router.get(
+    "/plans/{plan_id}",
+    status_code=status.HTTP_200_OK,
+    response_model=ResponsePlanRead,
+)
+def get_response_plan(
+    plan_id: str,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Retrieve detailed state for a specific response plan by its unique identifier."""
+    plan = db.get(ResponsePlan, plan_id)
+    if plan is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Response plan '{plan_id}' not found",
+        )
+    return serialize_plan(plan)
+
+
 @router.post(
     "/plans/{plan_id}/approve",
     status_code=status.HTTP_200_OK,
-    response_model=None,
+    response_model=ApprovalResult,
 )
 def approve_response_plan(
     plan_id: str,

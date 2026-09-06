@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.models import EmergencyResource
-from app.schemas import ResourceStatus, ResourceType
+from app.schemas import ResourceRead, ResourceStatus, ResourceType
 
 __all__ = [
     "router",
@@ -92,7 +92,7 @@ def serialize_resource(resource: EmergencyResource) -> dict[str, Any]:
 @router.get(
     "/resources",
     status_code=status.HTTP_200_OK,
-    response_model=None,
+    response_model=list[ResourceRead],
 )
 def list_resources(
     resource_type: ResourceType | None = Query(
@@ -121,7 +121,7 @@ def list_resources(
 @router.get(
     "/resources/{resource_id}",
     status_code=status.HTTP_200_OK,
-    response_model=None,
+    response_model=ResourceRead,
 )
 def get_resource(
     resource_id: str,
