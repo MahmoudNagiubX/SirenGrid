@@ -1,0 +1,133 @@
+{
+  "scenario_id": "phase01_resources_bootstrap",
+  "description": "Deterministic simulated emergency resources for Nasr City Phase 01 Golden Flow",
+  "created_at": "2026-09-06T00:00:00Z",
+  "resources": [
+    {
+      "id": "10000000-0000-0000-0000-000000000001",
+      "name": "Ambulance Bravo-01",
+      "resource_type": "AMBULANCE",
+      "capability_tags": ["BLS", "ALS"],
+      "status": "AVAILABLE",
+      "latitude": 30.066518,
+      "longitude": 31.326171,
+      "home_zone": "Zone 1 - Rabaa",
+      "assigned_incident_id": null,
+      "provenance": {
+        "source": "scenario_phase01_seed",
+        "data_reality": "SIMULATED",
+        "freshness_status": "STATIC",
+        "last_updated": "2026-09-06T00:00:00Z",
+        "source_reference": "data/scenarios/phase01_resources.json"
+      }
+    },
+    {
+      "id": "10000000-0000-0000-0000-000000000002",
+      "name": "Ambulance Bravo-02",
+      "resource_type": "AMBULANCE",
+      "capability_tags": ["BLS", "ALS", "TRAUMA"],
+      "status": "AVAILABLE",
+      "latitude": 30.065843,
+      "longitude": 31.338050,
+      "home_zone": "Zone 2 - Tayaran",
+      "assigned_incident_id": null,
+      "provenance": {
+        "source": "scenario_phase01_seed",
+        "data_reality": "SIMULATED",
+        "freshness_status": "STATIC",
+        "last_updated": "2026-09-06T00:00:00Z",
+        "source_reference": "data/scenarios/phase01_resources.json"
+      }
+    },
+    {
+      "id": "10000000-0000-0000-0000-000000000003",
+      "name": "Ambulance Bravo-03",
+      "resource_type": "AMBULANCE",
+      "capability_tags": ["BLS"],
+      "status": "AVAILABLE",
+      "latitude": 30.056160,
+      "longitude": 31.357740,
+      "home_zone": "Zone 3 - Eighth District",
+      "assigned_incident_id": null,
+      "provenance": {
+        "source": "scenario_phase01_seed",
+        "data_reality": "SIMULATED",
+        "freshness_status": "STATIC",
+        "last_updated": "2026-09-06T00:00:00Z",
+        "source_reference": "data/scenarios/phase01_resources.json"
+      }
+    },
+    {
+      "id": "10000000-0000-0000-0000-000000000004",
+      "name": "Ambulance Bravo-04",
+      "resource_type": "AMBULANCE",
+      "capability_tags": ["BLS", "ALS"],
+      "status": "ASSIGNED",
+      "latitude": 30.059537,
+      "longitude": 31.324981,
+      "home_zone": "Zone 1 - Rabaa",
+      "assigned_incident_id": "00000000-0000-0000-0000-000000000099",
+      "provenance": {
+        "source": "scenario_phase01_seed",
+        "data_reality": "SIMULATED",
+        "freshness_status": "STATIC",
+        "last_updated": "2026-09-06T00:00:00Z",
+        "source_reference": "data/scenarios/phase01_resources.json"
+      }
+    },
+    {
+      "id": "20000000-0000-0000-0000-000000000001",
+      "name": "Fire Engine Alpha-01",
+      "resource_type": "FIRE_RESCUE",
+      "capability_tags": ["FIRE_SUPPRESSION", "EXTRICATION"],
+      "status": "AVAILABLE",
+      "latitude": 30.067249,
+      "longitude": 31.368958,
+      "home_zone": "Zone 4 - Makram Ebeid",
+      "assigned_incident_id": null,
+      "provenance": {
+        "source": "scenario_phase01_seed",
+        "data_reality": "SIMULATED",
+        "freshness_status": "STATIC",
+        "last_updated": "2026-09-06T00:00:00Z",
+        "source_reference": "data/scenarios/phase01_resources.json"
+      }
+    },
+    {
+      "id": "20000000-0000-0000-0000-000000000002",
+      "name": "Fire Rescue Alpha-02",
+      "resource_type": "FIRE_RESCUE",
+      "capability_tags": ["HEAVY_RESCUE", "EXTRICATION"],
+      "status": "AVAILABLE",
+      "latitude": 30.057500,
+      "longitude": 31.343000,
+      "home_zone": "Zone 5 - Abbas El Akkad",
+      "assigned_incident_id": null,
+      "provenance": {
+        "source": "scenario_phase01_seed",
+        "data_reality": "SIMULATED",
+        "freshness_status": "STATIC",
+        "last_updated": "2026-09-06T00:00:00Z",
+        "source_reference": "data/scenarios/phase01_resources.json"
+      }
+    },
+    {
+      "id": "20000000-0000-0000-0000-000000000003",
+      "name": "Heavy Rescue Alpha-03",
+      "resource_type": "FIRE_RESCUE",
+      "capability_tags": ["HAZMAT", "HEAVY_RESCUE"],
+      "status": "OUT_OF_SERVICE",
+      "latitude": 30.062000,
+      "longitude": 31.332000,
+      "home_zone": "Zone 2 - Tayaran",
+      "assigned_incident_id": null,
+      "provenance": {
+        "source": "scenario_phase01_seed",
+        "data_reality": "SIMULATED",
+        "freshness_status": "STATIC",
+        "last_updated": "2026-09-06T00:00:00Z",
+        "source_reference": "data/scenarios/phase01_resources.json"
+      }
+    }
+  ]
+}
