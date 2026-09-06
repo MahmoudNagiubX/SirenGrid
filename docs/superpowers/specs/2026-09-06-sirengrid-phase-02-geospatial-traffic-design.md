@@ -93,7 +93,7 @@ An immutable snapshot contains:
 
 - snapshot ID/version;
 - source and source reference;
-- local `retrieved_at` and an optional provider-originated `provider_last_updated` timestamp;
+- local `refresh_attempted_at`, optional local `retrieved_at`, and an optional provider-originated `provider_last_updated` timestamp;
 - freshness status;
 - data reality (`REAL_LIVE` only after a successful real retrieval);
 - graph fingerprint;
@@ -107,7 +107,7 @@ The cache permits at most one provider refresh attempt in each 60-second interva
 
 Missing credentials, timeout, rate limiting, non-success status, malformed JSON, invalid values, or partial unusable responses produce an observable unavailable/malformed snapshot state and base-route fallback. Provider response bodies and API keys are not logged.
 
-Freshness age is measured from local `retrieved_at` unless TomTom supplies an explicit provider update timestamp that passes parsing and temporal validation. Only then may `provider_last_updated` be populated and used as the freshness origin. Local retrieval time is never presented as provider-originated `last_updated`, and the runtime never fabricates a provider timestamp.
+Every successfully retrieved observation records its local response-receipt time. Snapshot `retrieved_at` is the earliest retrieval time among its usable observations, which gives a conservative age for a refresh lasting multiple requests. A failed attempt with no successfully retrieved observation records `refresh_attempted_at`, leaves `retrieved_at` null, has `UNKNOWN` freshness, and is unusable. Freshness age is measured from local `retrieved_at` unless TomTom supplies an explicit provider update timestamp that passes parsing and temporal validation. Only then may `provider_last_updated` be populated and used as the freshness origin. Local retrieval time is never presented as provider-originated `last_updated`, and the runtime never fabricates a provider timestamp.
 
 ### 4. Corridor-first matching without a new ambiguity threshold
 
