@@ -454,4 +454,3 @@ def test_map_route_contracts_exposed_without_live_labels(client: TestClient) -> 
     assert route_example["routing_source"] == "OSM_BASE_TRAVEL_TIME"
     assert "TomTom" not in str(route_example)
     assert "live traffic" not in str(route_example).lower()
-

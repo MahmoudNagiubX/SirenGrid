@@ -708,4 +708,3 @@ def test_full_generate_then_approve_flow(
     )
     assert repeat_resp.status_code == 409
     assert "PLAN_ALREADY_APPROVED" in repeat_resp.json()["detail"]
-
