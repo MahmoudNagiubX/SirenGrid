@@ -5,7 +5,7 @@ from typing import Any
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.db import get_db
@@ -349,6 +349,18 @@ def get_response_plan(
     return serialize_plan(plan)
 
 
+def _acquire_write_lock(db: Session) -> None:
+    """Acquire an immediate SQLite write transaction to serialize validation and mutation.
+
+    This ensures concurrent approval requests wait for an active approval transaction
+    to complete before reading plan, incident, or resource state, preventing race
+    conditions and duplicate approvals.
+    """
+    bind = db.get_bind()
+    if bind.dialect.name == "sqlite":
+        db.execute(text("BEGIN IMMEDIATE"))
+
+
 @router.post(
     "/plans/{plan_id}/approve",
     status_code=status.HTTP_200_OK,
@@ -385,6 +397,8 @@ def approve_response_plan(
     - Appends auditable PLAN_APPROVED and RESOURCES_ASSIGNED timeline events.
     - Commits exactly once.
     """
+    _acquire_write_lock(db)
+
     plan = db.get(ResponsePlan, plan_id)
     if plan is None:
         raise HTTPException(

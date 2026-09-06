@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import concurrent.futures
+import threading
 from typing import Any
 import uuid
 
@@ -884,3 +886,127 @@ def test_approval_rejects_when_plan_incident_version_mismatch(
     )
     assert resp.status_code == 409
     assert "incident version" in resp.json()["detail"].lower()
+
+
+def test_concurrent_plan_approvals_serialized_with_single_success_and_conflict(
+    db_session: Session,
+) -> None:
+    """Two concurrent approval HTTP requests for the same plan must serialize so that
+
+    exactly one response is HTTP 200 and exactly one is HTTP 409, preventing double-assignment
+    and duplicate approvals.
+    """
+    # 1. Setup the target incident, resources, and candidate plan under test
+    incident = create_test_incident(
+        db=db_session,
+        version=2,
+        status=IncidentStatus.AWAITING_APPROVAL,
+    )
+    res1 = create_test_resource(
+        db=db_session,
+        resource_id="res-concurrent-01",
+        name="Ambulance Concurrency 01",
+        version=1,
+    )
+    res2 = create_test_resource(
+        db=db_session,
+        resource_id="res-concurrent-02",
+        name="Ambulance Concurrency 02",
+        version=1,
+    )
+    plan = create_test_plan(
+        db=db_session,
+        incident_id=incident.id,
+        incident_version=2,
+        plan_version=1,
+        status=ResponsePlanStatus.RECOMMENDED,
+        resource_ids=[res1.id, res2.id],
+    )
+    incident.current_plan_id = plan.id
+    db_session.commit()
+
+    plan_id = plan.id
+    incident_id = incident.id
+    res1_id = res1.id
+    res2_id = res2.id
+
+    # 2. Synchronize two concurrent requests using a barrier and separate client contexts
+    start_barrier = threading.Barrier(2)
+
+    def execute_approval(worker_id: int) -> tuple[int, dict[str, Any] | str]:
+        with TestClient(app) as client:
+            start_barrier.wait(timeout=5.0)
+            response = client.post(
+                f"/api/v1/plans/{plan_id}/approve",
+                json={
+                    "expected_incident_version": 2,
+                    "expected_plan_version": 1,
+                    "operator_reference": f"dispatcher-concurrent-{worker_id}",
+                },
+            )
+            try:
+                return response.status_code, response.json()
+            except Exception:
+                return response.status_code, response.text
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        future1 = executor.submit(execute_approval, 1)
+        future2 = executor.submit(execute_approval, 2)
+        code1, data1 = future1.result(timeout=10.0)
+        code2, data2 = future2.result(timeout=10.0)
+
+    status_codes = [code1, code2]
+
+    # Assert exactly one response is HTTP 200 and exactly one is HTTP 409
+    assert status_codes.count(200) == 1, f"Expected exactly one 200, got {status_codes}. Data: {data1}, {data2}"
+    assert status_codes.count(409) == 1, f"Expected exactly one 409, got {status_codes}. Data: {data1}, {data2}"
+
+    # Query final persisted state
+    db_session.expire_all()
+
+    # Assert exactly one Approval exists for the plan
+    approvals = db_session.scalars(
+        select(Approval).where(Approval.plan_id == plan_id)
+    ).all()
+    assert len(approvals) == 1, f"Expected exactly 1 Approval, got {len(approvals)}"
+    assert approvals[0].incident_id == incident_id
+    assert approvals[0].action == "APPROVE_PLAN"
+
+    # Assert each selected resource is ASSIGNED to the incident and its version increments exactly once (1 -> 2)
+    reloaded_res1 = db_session.get(EmergencyResource, res1_id)
+    assert reloaded_res1 is not None
+    assert reloaded_res1.status == ResourceStatus.ASSIGNED
+    assert reloaded_res1.assigned_incident_id == incident_id
+    assert reloaded_res1.version == 2
+
+    reloaded_res2 = db_session.get(EmergencyResource, res2_id)
+    assert reloaded_res2 is not None
+    assert reloaded_res2.status == ResourceStatus.ASSIGNED
+    assert reloaded_res2.assigned_incident_id == incident_id
+    assert reloaded_res2.version == 2
+
+    # Assert incident transitions and increments exactly once (2 -> 3, RESPONSE_ACTIVE)
+    reloaded_inc = db_session.get(Incident, incident_id)
+    assert reloaded_inc is not None
+    assert reloaded_inc.status == IncidentStatus.RESPONSE_ACTIVE
+    assert reloaded_inc.version == 3
+
+    # Assert PLAN_APPROVED occurs exactly once
+    plan_approved_events = db_session.scalars(
+        select(TimelineEvent)
+        .where(
+            TimelineEvent.incident_id == incident_id,
+            TimelineEvent.event_type == "PLAN_APPROVED",
+        )
+    ).all()
+    assert len(plan_approved_events) == 1, f"Expected 1 PLAN_APPROVED event, got {len(plan_approved_events)}"
+
+    # Assert RESOURCES_ASSIGNED occurs exactly once
+    resources_assigned_events = db_session.scalars(
+        select(TimelineEvent)
+        .where(
+            TimelineEvent.incident_id == incident_id,
+            TimelineEvent.event_type == "RESOURCES_ASSIGNED",
+        )
+    ).all()
+    assert len(resources_assigned_events) == 1, f"Expected 1 RESOURCES_ASSIGNED event, got {len(resources_assigned_events)}"
