@@ -1,5 +1,5 @@
 # SirenGrid / City Emergency AI
-## Master Product & System Behavior Plan — v1.1
+## Master Product & System Behavior Plan — v1.2
 
 > **Status:** Product concept locked for implementation planning  
 > **Primary purpose of this file:** Single source of truth for humans and AI coding agents  
@@ -12,6 +12,7 @@
 > **Secondary users:** Incident Commander, ambulance/fire-response teams, receiving hospital staff  
 > **Reference demo candidate:** Multi-casualty urban road incident (NOT locked; final demo scenario remains open)  
 > **Bonus feature after core completion:** Social Media Intelligence
+> **Revision v1.2:** Clarifies that SirenGrid intake begins on the control-room side through existing emergency communication channels; the MVP has no citizen-facing SirenGrid reporting app.
 
 ---
 
@@ -177,6 +178,7 @@ SirenGrid is NOT:
 - merely an ambulance-routing app,
 - merely a hospital finder,
 - merely a fire-reporting app,
+- a citizen-facing emergency-reporting app,
 - merely an incident classifier,
 - merely a traffic-light controller,
 - a “smart city operating system for everything,”
@@ -292,6 +294,29 @@ Naming rule:
 - “City Emergency AI” may remain as an explanatory subtitle/descriptor, not the primary product name.
 - Do not introduce alternative product names in code, UI, or documentation without explicit approval.
 
+---
+
+## 4.7 Control-room-side intake / no citizen-facing reporting app
+
+**SirenGrid is an operator/control-room system, not a citizen reporting application.**
+
+For the MVP, citizens continue using normal existing emergency behavior, such as calling the relevant emergency service. SirenGrid begins on the **control-room side** when emergency information reaches the operator environment.
+
+Primary intake may include:
+
+- emergency-call audio or transcript received through an existing emergency communication channel,
+- dispatcher/operator-entered text or structured information,
+- caller location or location metadata made available to the control room,
+- image/video evidence received or forwarded through an existing authorized operational channel,
+- responder updates,
+- hospital updates.
+
+The MVP must **not** require citizens to discover, install, open, or submit reports through a SirenGrid application.
+
+Social Media Intelligence remains a separate bonus source of **unverified external signals** and is not a citizen reporting workflow.
+
+This decision changes the intake boundary, not the immediate-response rule: a single credible urgent report received by the control room is still enough to create an incident and begin response planning.
+
 # 5. UNLOCKED / DEFERRED DECISIONS
 
 These are intentionally not locked yet.
@@ -400,16 +425,15 @@ Minimum conceptual fields:
 
 A Report is one incoming piece of information.
 
-Possible sources:
+Possible sources on the control-room side:
 
-- emergency call / voice report,
-- citizen text report,
-- image,
-- video frame or visual evidence,
+- emergency-call audio or transcript received through an existing emergency communication channel,
+- dispatcher/operator-entered text or structured information,
+- caller location or location metadata made available to the control room,
+- image/video evidence received or forwarded through an existing authorized operational channel,
 - responder update,
 - hospital update,
-- operator-entered information,
-- bonus: social-media signal.
+- bonus: social-media signal treated as unverified external intelligence.
 
 A report may create a new incident or be attached to an existing incident.
 
@@ -545,16 +569,19 @@ An incident may become **ACTIVE** before every detail is verified.
 
 This is the main product behavior.
 
-## Phase A — Emergency enters the system
+## Phase A — Emergency information reaches the control room
 
-A citizen/operator provides one or more of:
+Citizens use normal existing emergency channels; they do **not** open SirenGrid to create a report.
 
-- Egyptian Arabic voice,
-- text,
-- image,
-- location.
+SirenGrid receives information on the control-room side, such as:
 
-The system immediately captures source and timestamp.
+- emergency-call audio or transcript,
+- dispatcher/operator-entered text,
+- caller location or available location metadata,
+- image/video evidence received or forwarded through an existing authorized channel,
+- responder or hospital updates.
+
+The system immediately captures source and timestamp and preserves provenance.
 
 ---
 
@@ -585,7 +612,7 @@ If the report is credible and potentially urgent:
 - show it in the operator dashboard,
 - begin response planning immediately.
 
-Do NOT wait for a second citizen report.
+Do NOT wait for a second independent report.
 
 ---
 
@@ -782,19 +809,19 @@ Retain a clear event history:
 
 ---
 
-# F01 — MULTIMODAL EMERGENCY INTAKE
+# F01 — CONTROL-ROOM MULTIMODAL EMERGENCY INTAKE
 
 ## Purpose
-Turn messy emergency input into structured operational information quickly.
+Turn messy emergency information reaching the control room into structured operational information quickly.
 
 ## Supported conceptual inputs
 
 Core:
 
-- voice report,
-- text report,
-- image,
-- location.
+- emergency-call audio or transcript,
+- dispatcher/operator-entered text or structured report,
+- image/video evidence available to the control room,
+- caller location or available location metadata.
 
 Optional if implementation time permits:
 
@@ -818,7 +845,9 @@ Unknown information remains unknown.
 
 ## Egyptian Arabic
 
-The main citizen voice experience should support natural Egyptian Arabic.
+Emergency-call intake should support natural Egyptian Arabic from callers.
+
+Callers do not interact with a SirenGrid citizen application; their speech reaches SirenGrid through the existing emergency-call/control-room workflow.
 
 The system should not require callers to speak formal Arabic or English.
 
@@ -2301,7 +2330,7 @@ Goal:
 
 - avoid reinventing solved infrastructure,
 - learn proven patterns,
-- reuse legally compatible code when appropriate,
+- reuse understood code or patterns when technically useful and appropriate,
 - accelerate hackathon development,
 - compare architecture/algorithms,
 - identify edge cases.
@@ -2413,16 +2442,16 @@ Useful to inspect for:
 
 Before copying/reusing code:
 
-1. Check repository license.
-2. Understand the code.
-3. Verify it matches our product requirements.
-4. Remove assumptions tied to another city/domain.
-5. Write tests around reused critical behavior.
-6. Credit/license as required.
-7. Never copy secrets or API keys.
-8. Never inherit product scope from the repository.
-9. Never force our design to match a repo simply because code already exists.
-10. Never paste a large unknown codebase into the project without review.
+1. Understand the code.
+2. Verify it matches our product requirements.
+3. Remove assumptions tied to another city/domain.
+4. Write tests around reused critical behavior.
+5. Never copy secrets or API keys.
+6. Never inherit product scope from the repository.
+7. Never force our design to match a repo simply because code already exists.
+8. Never paste a large unknown codebase into the project without review.
+
+Repository reconnaissance should prioritize technical usefulness, correctness, and product fit. Do not let licensing research slow down ordinary reference/reuse reconnaissance; avoid blindly copying large unfamiliar codebases without understanding and adapting them.
 
 ---
 
@@ -2775,7 +2804,7 @@ A second serious incident consumes/needs shared resources → availability and c
 This is an example, not the final locked demo.
 
 ### 00:00
-Caller:
+An existing emergency call reaches the control room. Caller:
 > “في حادثة كبيرة على طريق النصر، أتوبيس خبط في عربيتين وفي ناس جوه العربيات.”
 
 ### 00:05
@@ -2816,7 +2845,7 @@ Emergency corridor simulated.
 Forward driver alert appears.
 
 ### 00:40
-Second report arrives with image and more casualty information.
+A second report reaches the control room through an existing operational channel with image evidence and more casualty information.
 System merges it and updates severity.
 
 ### 00:50
@@ -2846,7 +2875,7 @@ Demo ends with operational view and preserved coverage.
 
 Alternative example.
 
-Caller reports:
+An existing emergency call reaches the control room. Caller reports:
 > “في حريق في عمارة ومفيش ناس عارفة تنزل.”
 
 System:
@@ -2985,7 +3014,7 @@ This is the product.
 
 **Build SirenGrid / City Emergency AI as a focused emergency-response coordination system for Nasr City, Cairo.**
 
-The system receives a citizen emergency report through Egyptian Arabic voice/text plus optional image/location. A single credible urgent report is enough to create and activate an incident; the system must never wait for multiple independent reports before beginning response planning.
+SirenGrid is a control-room-side system, not a citizen reporting application. Citizens continue using normal existing emergency channels, such as calling the relevant emergency service. SirenGrid receives emergency-call audio/transcripts, operator-entered information, available location metadata, and evidence forwarded through existing authorized operational channels. A single credible urgent report received by the control room is enough to create and activate an incident; the system must never wait for multiple independent reports before beginning response planning.
 
 Additional reports can later merge into the incident, update confidence/severity, or add evidence.
 
@@ -3003,7 +3032,7 @@ Social Media Intelligence is a bonus feature and may only be started after the c
 
 Do not add predictive accidents, blockchain, drones, IoT hardware, generic chatbot behavior, autonomous emergency dispatch, 3D city visualization, or other new scope without explicit human approval.
 
-Before implementing any non-trivial subsystem, search relevant public GitHub repositories and technical references for reusable or proven implementations. Reuse only when licensing and product fit are understood. Never let an existing repository change the product scope.
+Before implementing any non-trivial subsystem, search relevant public GitHub repositories and technical references for reusable or proven implementations. Reuse only when the implementation is understood and clearly fits SirenGrid. Never let an existing repository change the product scope.
 
 If this Master Plan does not define a product decision that affects user-visible behavior, safety, scope, authority, real-vs-simulated status, or feature meaning, **ask the human developer instead of inventing an answer.**
 
@@ -3021,6 +3050,22 @@ Changes from v1.0:
 
 No tech stack or implementation architecture was selected by this revision.
 
+---
+
+# 56.2 v1.2 CHANGE SUMMARY
+
+Changes from v1.1:
+
+1. Locked SirenGrid as a **control-room-side system**, not a citizen-facing reporting application.
+2. Clarified that citizens continue using existing emergency channels, such as normal emergency calls.
+3. Updated the Report entity, Golden Flow, multimodal intake feature, reference demo stories, and final locked summary to reflect control-room-side intake.
+4. Clarified that caller audio/transcripts, operator-entered information, location metadata, and forwarded evidence enter through existing operational channels.
+5. Preserved the immediate-response rule: one credible urgent report received by the control room is sufficient to begin response planning.
+6. Preserved Social Media Intelligence as a separate bonus source of unverified external signals, not a citizen reporting workflow.
+7. Aligned repository-reuse wording with the current project workflow: technical usefulness, understanding, and product fit are the primary reconnaissance criteria.
+
+No tech stack or implementation architecture was selected by this revision.
+
 # 56. END STATE
 
 When the core system is complete, a judge should be able to watch one emergency move through this story:
@@ -3034,7 +3079,7 @@ Everything else is secondary.
 ---
 
 ## Document Version
-**v1.1 — Locked Product Master Plan**
+**v1.2 — Locked Product Master Plan**
 
 ## Next document
 A separate architecture/technical plan should later translate this behavior into software architecture and a tech stack without changing the product contract defined here.
