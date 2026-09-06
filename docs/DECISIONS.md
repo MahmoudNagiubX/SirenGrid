@@ -86,3 +86,27 @@ Implementation must support the approved product workflow without depending stru
 **Social Media Intelligence** is the only currently approved bonus feature.
 
 It should begin only after the core end-to-end workflow is stable and demo-ready.
+
+---
+
+## PD-005 — Control-Room-Side Emergency Intake
+
+**Date:** 2026-09-06  
+**Status:** Approved
+
+### Decision
+SirenGrid is an **operator/control-room system**, not a citizen-facing emergency-reporting application.
+
+Citizens continue using normal existing emergency behavior, such as calling the relevant emergency service. SirenGrid begins on the control-room side when emergency information reaches the operator environment.
+
+Primary intake may include emergency-call audio/transcripts, operator-entered information, available caller location/metadata, evidence received or forwarded through existing authorized operational channels, responder updates, and hospital updates.
+
+The MVP must not require citizens to discover, install, open, or submit reports through a SirenGrid application.
+
+Social Media Intelligence remains a separate bonus source of unverified external signals and is not a citizen reporting workflow.
+
+### Reason
+This matches realistic emergency behavior and keeps SirenGrid focused on its actual primary user: the Emergency Control Room Operator / Dispatcher.
+
+### Impact
+The intake model, golden flow, multimodal intake wording, reference demo stories, and final Master Plan summary are updated to use a control-room-side intake boundary. The immediate-response rule is unchanged: one credible urgent report received by the control room can activate the incident workflow.
