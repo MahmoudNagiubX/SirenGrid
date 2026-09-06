@@ -153,7 +153,6 @@ def create_manual_incident(
 
     return serialize_incident(incident)
 
-
 @router.get(
     "/incidents",
     status_code=status.HTTP_200_OK,
@@ -185,4 +184,3 @@ def get_incident(
             detail=f"Incident '{incident_id}' not found",
         )
     return serialize_incident(incident)
-

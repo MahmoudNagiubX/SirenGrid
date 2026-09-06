@@ -652,4 +652,3 @@ class MapLayerResponse(BaseModel):
     layer: str
     geojson: dict[str, Any]
     provenance: dict[str, Any]
-
