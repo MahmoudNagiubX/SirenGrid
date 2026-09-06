@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -19,6 +20,9 @@ __all__ = [
     "ResourceRequirement",
     "ManualIncidentCreate",
     "ApprovePlanRequest",
+    "RoutePreviewRequest",
+    "RoutePreviewResponse",
+    "MapLayerResponse",
 ]
 
 
@@ -127,3 +131,26 @@ class ApprovePlanRequest(BaseModel):
     expected_incident_version: int = Field(gt=0)
     expected_plan_version: int = Field(gt=0)
     operator_reference: str = "demo-operator"
+
+
+class RoutePreviewRequest(BaseModel):
+    origin: Coordinate
+    destination: Coordinate
+
+
+class RoutePreviewResponse(BaseModel):
+    origin: Coordinate
+    destination: Coordinate
+    geometry: dict[str, Any]
+    distance_m: float = Field(gt=0)
+    eta_seconds: float = Field(gt=0)
+    origin_snap_distance_m: float = Field(ge=0)
+    destination_snap_distance_m: float = Field(ge=0)
+    nodes: list[Any]
+    routing_source: str = "OSM_BASE_TRAVEL_TIME"
+
+
+class MapLayerResponse(BaseModel):
+    layer: str
+    geojson: dict[str, Any]
+    provenance: dict[str, Any]
