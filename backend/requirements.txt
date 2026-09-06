@@ -1,0 +1,12 @@
+fastapi
+uvicorn[standard]
+pydantic>=2,<3
+sqlalchemy>=2,<3
+httpx
+osmnx
+networkx
+shapely
+pyproj
+geopandas
+pytest
+ruff
