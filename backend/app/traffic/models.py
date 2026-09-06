@@ -37,7 +37,7 @@ class TrafficObservation(BaseModel):
     observation_id: str
     sample_id: str
     frc: str
-    current_speed_kph: float = Field(gt=0)
+    current_speed_kph: float = Field(ge=0)
     free_flow_speed_kph: float = Field(gt=0)
     current_travel_time_s: float = Field(gt=0)
     free_flow_travel_time_s: float = Field(gt=0)
