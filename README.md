@@ -71,7 +71,7 @@ The detailed product contract lives in [`docs/MASTER_PLAN.md`](docs/MASTER_PLAN.
 - Keep the implementation focused on the approved Master Plan.
 - Do not add features just because they are technically interesting.
 - Search relevant public repositories before rebuilding solved subsystems from scratch.
-- Reuse code only when the license and product fit are understood.
+- Reuse useful code/reference implementations when they are understood and clearly fit SirenGrid.
 - Never present simulated data or integrations as live/official.
 - Work in focused branches and keep unrelated changes out of the same task.
 
