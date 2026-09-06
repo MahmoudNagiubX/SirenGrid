@@ -1,0 +1,8 @@
+{
+  "source_repo": "MahmoudNagiubX/Egypt-Smart-City-Digital-Twin",
+  "source_commit": "93ca9e90e2fc52c914dd5ccbe42bdc84ce745d3d",
+  "data_reality": "REAL_DERIVED",
+  "freshness_status": "STATIC",
+  "purpose": "Phase 01 Nasr City geospatial bootstrap",
+  "refresh_policy": "bootstrap only; refresh current OSM/Geofabrik/Overpass in Phase 02"
+}
