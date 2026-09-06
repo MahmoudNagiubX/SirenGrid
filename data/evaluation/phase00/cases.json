@@ -1,0 +1,99 @@
+[
+  {
+    "id": "case-01-crash-trapped",
+    "text": "في حادثة كبيرة عند عباس العقاد، في شخص محبوس جوه العربية ومش عارف يطلع.",
+    "expected": {
+      "incident_type": "road_crash",
+      "trapped_person": true,
+      "casualty_count": null,
+      "latitude": null,
+      "longitude": null
+    },
+    "unknown_fields": ["casualty_count", "latitude", "longitude"]
+  },
+  {
+    "id": "case-02-ambiguous-casualties",
+    "text": "في حادثة على طريق النصر، يمكن يكون فيه اتنين مصابين، العدد مش مؤكد.",
+    "expected": {
+      "incident_type": "road_crash",
+      "casualty_count": null,
+      "road_blockage": null,
+      "latitude": null,
+      "longitude": null
+    },
+    "unknown_fields": ["casualty_count", "road_blockage", "latitude", "longitude"]
+  },
+  {
+    "id": "case-03-vague-landmark",
+    "text": "الحادثة جنب سيتي ستارز ناحية شارع مكرم عبيد.",
+    "expected": {
+      "incident_type": "road_crash",
+      "location_text": "سيتي ستارز",
+      "casualty_count": null,
+      "latitude": null,
+      "longitude": null
+    },
+    "unknown_fields": ["casualty_count", "latitude", "longitude"]
+  },
+  {
+    "id": "case-04-road-blockage",
+    "text": "عربيتين خابطين وقافلين حارتين عند الطيران.",
+    "expected": {
+      "incident_type": "road_crash",
+      "road_blockage": true,
+      "casualty_count": null,
+      "latitude": null,
+      "longitude": null
+    },
+    "unknown_fields": ["casualty_count", "latitude", "longitude"]
+  },
+  {
+    "id": "case-05-building-fire",
+    "text": "في دخان ونار طالعة من عمارة في شارع الطيران.",
+    "expected": {
+      "incident_type": "building_fire",
+      "road_blockage": null,
+      "casualty_count": null,
+      "latitude": null,
+      "longitude": null
+    },
+    "unknown_fields": ["road_blockage", "casualty_count", "latitude", "longitude"]
+  },
+  {
+    "id": "case-06-conflicting-details",
+    "text": "البلاغ بيقول حادثة كبيرة، لكن مش واضح عدد المصابين ولا إذا كان فيه حد محبوس.",
+    "expected": {
+      "incident_type": "road_crash",
+      "casualty_count": null,
+      "trapped_person": null,
+      "latitude": null,
+      "longitude": null
+    },
+    "unknown_fields": ["casualty_count", "trapped_person", "latitude", "longitude"]
+  },
+  {
+    "id": "case-07-low-information-urgent",
+    "text": "في بلاغ عاجل عند عباس العقاد ومحتاجين مساعدة بسرعة.",
+    "expected": {
+      "location_text": "عباس العقاد",
+      "casualty_count": null,
+      "trapped_person": null,
+      "road_blockage": null,
+      "latitude": null,
+      "longitude": null
+    },
+    "unknown_fields": ["casualty_count", "trapped_person", "road_blockage", "latitude", "longitude"]
+  },
+  {
+    "id": "case-08-unknown-service",
+    "text": "في حادثة ومحتاجين خدمة طوارئ، بس نوع الخدمة مش معروف.",
+    "expected": {
+      "incident_type": "road_crash",
+      "required_services": [],
+      "casualty_count": null,
+      "latitude": null,
+      "longitude": null
+    },
+    "unknown_fields": ["casualty_count", "latitude", "longitude"]
+  }
+]
