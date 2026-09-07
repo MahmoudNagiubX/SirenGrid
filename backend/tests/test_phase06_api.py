@@ -373,6 +373,7 @@ def test_claim_ingress_preserves_conflict_and_requires_review_without_version_in
     assert second.status_code == 200, second.text
     assert second.json()["processing_status"] == "REQUIRES_REVIEW"
     assert len(second.json()["claims"]) == 2
+    assert second.json()["resolved_facts"]["casualty_count"]["claim_count"] == 2
     current = db_session.get(Incident, incident["id"])
     assert current is not None
     assert current.version == 1

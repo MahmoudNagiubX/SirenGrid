@@ -697,7 +697,11 @@ def ingest_report_claims(
     )
     all_claims = list(_report_claims(report))
     if report.incident_id:
-        all_claims.extend(_incident_claims(db, report.incident_id))
+        all_claims.extend(
+            claim
+            for claim in _incident_claims(db, report.incident_id)
+            if claim.report_id != report.id
+        )
     resolved = resolve_claims(all_claims)
     conflict_fields = sorted(
         field_name
