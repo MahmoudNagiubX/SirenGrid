@@ -25,7 +25,7 @@ from app.config import settings
 from app.coverage import load_population_zones
 from app.models import Approval, EmergencyResource, Incident, ResponsePlan, TimelineEvent
 from app.incidents import serialize_incident
-from app.resources import is_planner_eligible, serialize_resource
+from app.resources import interpolate_route_progress, is_planner_eligible, serialize_resource
 from app.response_requirements import (
     ResponseRequirement,
     ResponseRequirementsUnavailableError,
@@ -143,6 +143,16 @@ def generate_response_plan(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Cannot generate response plan for incident with status {incident.status.value}",
         )
+    if incident.current_plan_id:
+        active_plan = db.get(ResponsePlan, incident.current_plan_id)
+        if active_plan is not None and active_plan.status == ResponsePlanStatus.APPROVED:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Incident already has an active APPROVED plan; use the Phase 07 "
+                    "replan trigger/evaluation flow"
+                ),
+            )
 
     requirements = incident.required_resources_json or []
     if not requirements:
@@ -380,6 +390,65 @@ def _phase04_source_requirements(
     return tuple(parsed)
 
 
+def resource_coordinate_for_replan(
+    resource: EmergencyResource,
+    active_plan: ResponsePlan | None,
+    *,
+    incident_id: str,
+) -> Coordinate:
+    """Capture an assigned responder's current modeled route position.
+
+    Phase 07 route replacement must start from the current position of an
+    ``EN_ROUTE`` responder. The position is derived from the immutable active
+    route and explicit cumulative-distance progress.
+    """
+    coordinate = Coordinate(lat=resource.latitude, lon=resource.longitude)
+    if (
+        active_plan is None
+        or resource.assigned_incident_id != incident_id
+        or resource.status != ResourceStatus.EN_ROUTE
+    ):
+        return coordinate
+
+    movement = (resource.provenance_json or {}).get("movement")
+    if not isinstance(movement, dict):
+        return coordinate
+    raw_progress = movement.get("route_progress")
+    if not isinstance(raw_progress, (int, float)) or isinstance(raw_progress, bool):
+        raise ValueError(f"Resource '{resource.id}' has invalid route progress")
+    progress = float(raw_progress)
+    if not 0.0 <= progress <= 1.0:
+        raise ValueError(f"Resource '{resource.id}' has invalid route progress")
+
+    route_record = next(
+        (
+            route
+            for route in (active_plan.routes_json or [])
+            if isinstance(route, dict) and route.get("resource_id") == resource.id
+        ),
+        None,
+    )
+    if route_record is None:
+        raise ValueError(
+            f"Active plan '{active_plan.id}' has no route for resource '{resource.id}'"
+        )
+    geometry = (
+        movement.get("route_geometry")
+        or route_record.get("geometry")
+        or route_record.get("route_geometry")
+    )
+    if not isinstance(geometry, dict) or geometry.get("type") != "LineString":
+        raise ValueError(f"Active route for resource '{resource.id}' has invalid geometry")
+    coordinates = geometry.get("coordinates")
+    try:
+        longitude, latitude = interpolate_route_progress(coordinates, progress)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"Active route for resource '{resource.id}' cannot resolve current position: {exc}"
+        ) from exc
+    return Coordinate(lat=latitude, lon=longitude)
+
+
 def evaluate_phase04_candidate_set(
     db: Session,
     incident: Incident,
@@ -408,6 +477,11 @@ def evaluate_phase04_candidate_set(
         wall_clock=lambda: datetime.now(timezone.utc),
         monotonic=time.monotonic,
     )
+    active_plan = (
+        db.get(ResponsePlan, incident.current_plan_id)
+        if planning_incident_id and incident.current_plan_id
+        else None
+    )
     resources = tuple(
         CandidateResource(
             resource_id=resource.id,
@@ -415,7 +489,11 @@ def evaluate_phase04_candidate_set(
             capability_tags=tuple(resource.capability_tags_json or ()),
             status=resource.status,
             assigned_incident_id=resource.assigned_incident_id,
-            coordinate=Coordinate(lat=resource.latitude, lon=resource.longitude),
+            coordinate=resource_coordinate_for_replan(
+                resource,
+                active_plan,
+                incident_id=planning_incident_id or incident.id,
+            ),
             data_reality=DataReality(
                 (resource.provenance_json or {}).get(
                     "data_reality", DataReality.SIMULATED.value
@@ -1018,7 +1096,13 @@ def approve_response_plan(
         for previous_resource_id in sorted(previous_resource_ids - set(selected_resource_ids)):
             previous_resource = db.get(EmergencyResource, previous_resource_id)
             assert previous_resource is not None
-            previous_resource.status = ResourceStatus.AVAILABLE
+            # Releasing an explicitly unavailable resource must not reactivate
+            # it as a side effect of approving a replacement plan.
+            previous_resource.status = (
+                ResourceStatus.OUT_OF_SERVICE
+                if previous_resource.status == ResourceStatus.OUT_OF_SERVICE
+                else ResourceStatus.AVAILABLE
+            )
             previous_resource.assigned_incident_id = None
             previous_resource.version += 1
             previous_resource.last_updated = now_utc
