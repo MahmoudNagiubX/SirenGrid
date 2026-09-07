@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from app.db import init_db
 from app.main import app
-from app.models import EmergencyResource, Incident, ReplanEvaluation, ResponsePlan
+from app.models import EmergencyResource, HospitalDestination, Incident, ReplanEvaluation, ResponsePlan
 from app.replanning import merge_pending_trigger
 from app.candidate_generation import CandidateResource, _is_hard_eligible
 from app.candidate_generation import CandidateCombination, CandidateResponder
@@ -553,3 +553,68 @@ def test_required_assigned_resource_outage_records_replan_trigger(
     assert saved_resource.status == ResourceStatus.OUT_OF_SERVICE
     assert pending is not None
     assert pending.trigger_reasons_json == ["RESOURCE_UNAVAILABLE"]
+
+
+def test_selected_hospital_not_accepting_records_replan_trigger(
+    isolated_engine: Engine,
+    db_session: Session,
+) -> None:
+    init_db(isolated_engine)
+    incident = Incident(
+        id=str(uuid.uuid4()),
+        version=4,
+        incident_type="traffic_collision",
+        severity=Severity.HIGH,
+        confidence_level=ConfidenceLevel.HIGH,
+        status=IncidentStatus.RESPONSE_ACTIVE,
+        latitude=30.05,
+        longitude=31.34,
+        current_plan_id="approved-plan",
+    )
+    plan = ResponsePlan(
+        id="approved-plan",
+        incident_id=incident.id,
+        incident_version=4,
+        plan_version=1,
+        status=ResponsePlanStatus.APPROVED,
+        resource_ids_json=[],
+        routes_json=[],
+        metrics_json={},
+        score_breakdown_json={},
+    )
+    destination = HospitalDestination(
+        id="destination-1",
+        incident_id=incident.id,
+        plan_id=plan.id,
+        option_set_id="option-set-1",
+        hospital_id="osm:('node', 443368255)",
+        status="SELECTED",
+        incident_version=incident.version,
+        plan_version=plan.plan_version,
+    )
+    db_session.add_all([incident, plan, destination])
+    db_session.commit()
+
+    response = TestClient(app).patch(
+        "/api/v1/hospitals/osm:('node', 443368255)/simulation-state",
+        json={
+            "accepting_state": "NOT_ACCEPTING",
+            "operator_reference": "operator-hospital-1",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    db_session.expire_all()
+    pending = db_session.scalar(
+        select(ReplanEvaluation).where(
+            ReplanEvaluation.incident_id == incident.id,
+            ReplanEvaluation.status == "PENDING",
+        )
+    )
+    assert pending is not None
+    assert pending.trigger_reasons_json == ["HOSPITAL_STATE_CHANGED"]
+    assert pending.input_references_json == {
+        "hospital_id": "osm:('node', 443368255)",
+        "hospital_not_accepting": True,
+        "accepting_state": "NOT_ACCEPTING",
+    }

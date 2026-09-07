@@ -298,6 +298,34 @@ def patch_hospital_simulation_state(
     }
     db.commit()
     db.refresh(row)
+    if row.accepting_state == HospitalAcceptingState.NOT_ACCEPTING.value:
+        # Hospital operational invalidation is a material Phase 07 trigger,
+        # but it must never rewrite the active plan or redirect a destination.
+        # Record it only for incidents whose selected destination still belongs
+        # to their active approved plan.
+        from app.replanning import record_replan_trigger
+
+        selected_destinations = db.scalars(
+            select(HospitalDestination).where(
+                HospitalDestination.hospital_id == hospital_id,
+                HospitalDestination.status == "SELECTED",
+            )
+        ).all()
+        for destination in selected_destinations:
+            incident = db.get(Incident, destination.incident_id)
+            if incident is None or incident.current_plan_id != destination.plan_id:
+                continue
+            record_replan_trigger(
+                db,
+                incident_id=incident.id,
+                expected_incident_version=incident.version,
+                trigger_reasons=["HOSPITAL_STATE_CHANGED"],
+                input_references={
+                    "hospital_id": hospital_id,
+                    "hospital_not_accepting": True,
+                    "accepting_state": row.accepting_state,
+                },
+            )
     return _serialize_hospital(hospital, _snapshot(db, hospital_id))
 
 
