@@ -41,6 +41,7 @@ __all__ = [
     "HospitalPreAlert",
     "CorridorState",
     "DriverAlert",
+    "ReplanEvaluation",
 ]
 
 
@@ -228,6 +229,46 @@ class ResponsePlan(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
+    )
+
+
+class ReplanEvaluation(Base):
+    __tablename__ = "replan_evaluations"
+
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+    )
+    incident_id: Mapped[str] = mapped_column(String(36))
+    active_plan_id: Mapped[str] = mapped_column(String(36))
+    pending_plan_id: Mapped[str | None] = mapped_column(
+        String(36),
+        nullable=True,
+        default=None,
+    )
+    input_fingerprint: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String, default="PENDING")
+    trigger_reasons_json: Mapped[list[str]] = mapped_column(JSON, default=list)
+    input_references_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    explanation_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    first_triggered_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+    )
+    last_triggered_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+    )
+    debounce_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        default=None,
+    )
+    evaluated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        default=None,
     )
 
 class Approval(Base):

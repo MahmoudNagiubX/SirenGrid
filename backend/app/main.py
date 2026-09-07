@@ -13,6 +13,7 @@ from app.operational_api import router as operational_router
 from app.phase06_api import router as phase06_router
 from app.planning import router as planning_router
 from app.resources import router as resources_router
+from app.replanning import router as replanning_router
 from app.traffic.api import router as traffic_router
 from app.websocket import router as websocket_router
 
@@ -47,6 +48,7 @@ api_router.include_router(corridor_router)
 api_router.include_router(driver_alert_router)
 api_router.include_router(operational_router)
 api_router.include_router(resources_router)
+api_router.include_router(replanning_router)
 api_router.include_router(planning_router)
 api_router.include_router(map_router)
 api_router.include_router(traffic_router)

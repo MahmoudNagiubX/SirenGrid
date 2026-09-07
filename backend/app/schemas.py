@@ -497,6 +497,31 @@ class ResponsePlanRead(BaseModel):
     candidate_count: int | None = None
 
 
+class ReplanTriggerRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_incident_version: int = Field(ge=1)
+    trigger_reasons: list[str] = Field(min_length=1, max_length=16)
+    input_references: dict[str, Any] = Field(default_factory=dict)
+
+
+class ReplanEvaluationRead(BaseModel):
+    id: str
+    incident_id: str
+    active_plan_id: str
+    pending_plan_id: str | None = None
+    input_fingerprint: str
+    status: str
+    trigger_reasons: list[str] = Field(default_factory=list)
+    input_references: dict[str, Any] = Field(default_factory=dict)
+    explanation: dict[str, Any] = Field(default_factory=dict)
+    first_triggered_at: str | None = None
+    last_triggered_at: str | None = None
+    debounce_until: str | None = None
+    evaluated_at: str | None = None
+    incident_version: int
+
+
 class PlanIncidentSummary(BaseModel):
     id: str
     status: IncidentStatus
