@@ -888,6 +888,7 @@ def patch_incident_facts(
                 trigger_reasons=["INCIDENT_FACT_CHANGED"],
                 input_references={
                     "changed_fields": list(changed_fields),
+                    "changed_values": new_values,
                     "requirements_changed": True,
                 },
                 now=now_utc,

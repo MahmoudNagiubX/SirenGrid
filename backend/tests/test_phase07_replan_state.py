@@ -123,6 +123,21 @@ def test_replan_candidate_filter_allows_only_same_incident_active_resources() ->
 
     assert _is_hard_eligible(same_incident, requirement, incident_id="incident-1")
     assert not _is_hard_eligible(other_incident, requirement, incident_id="incident-1")
+    reserved_same_incident = CandidateResource(
+        resource_id="res-reserved",
+        resource_type=ResourceType.AMBULANCE,
+        capability_tags=(),
+        status=ResourceStatus.RESERVED,
+        assigned_incident_id="incident-1",
+        coordinate=Coordinate(lat=30.05, lon=31.34),
+        data_reality=DataReality.SIMULATED,
+        source="test",
+    )
+    assert _is_hard_eligible(
+        reserved_same_incident,
+        requirement,
+        incident_id="incident-1",
+    )
 
 
 def test_trigger_endpoint_coalesces_without_incrementing_incident_version(
@@ -802,6 +817,11 @@ def test_planning_fact_correction_records_replan_trigger_after_version_increment
     assert pending.trigger_reasons_json == ["INCIDENT_FACT_CHANGED"]
     assert pending.input_references_json == {
         "changed_fields": ["required_resources"],
+        "changed_values": {
+            "required_resources": [
+                {"resource_type": "AMBULANCE", "count": 2},
+            ]
+        },
         "requirements_changed": True,
     }
 

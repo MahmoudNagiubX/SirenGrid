@@ -89,7 +89,11 @@ def _is_hard_eligible(
     same_incident_active = (
         incident_id is not None
         and resource.assigned_incident_id == incident_id
-        and resource.status in (ResourceStatus.ASSIGNED, ResourceStatus.EN_ROUTE)
+        and resource.status in (
+            ResourceStatus.RESERVED,
+            ResourceStatus.ASSIGNED,
+            ResourceStatus.EN_ROUTE,
+        )
     )
     return (
         (
