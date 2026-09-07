@@ -10,10 +10,15 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, s
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy.orm import Session
 
-from app.ai import EvidenceClaim, StructuredExtractionStatus
+from app.ai import (
+    EvidenceClaim,
+    ProviderClaimDraft,
+    StructuredExtractionStatus,
+    build_evidence_claims,
+)
 from app.ai_processing import ASRResult, ASRStatus, process_structured_extraction, transcribe_with_fallback
 from app.asr import configured_groq_transcriber
-from app.claims import append_claims_to_evidence_items
+from app.claims import append_claims_to_evidence_items, resolve_claims
 from app.db import get_db
 from app.fusion import FusionDecision, FusionReport, evaluate_report_association
 from app.incidents import (
@@ -70,6 +75,15 @@ class DuplicateMergeRequest(BaseModel):
     expected_incident_version: int = Field(ge=1)
     expected_canonical_incident_version: int = Field(ge=1)
     operator_reference: str = Field(min_length=1, max_length=200)
+
+
+class ClaimsIngestRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str = Field(min_length=1, max_length=100)
+    model: str = Field(min_length=1, max_length=150)
+    evidence_id: str | None = None
+    claims: list[ProviderClaimDraft] = Field(default_factory=list, max_length=32)
 
 
 def _report_claims(report: Report) -> list[EvidenceClaim]:
@@ -648,6 +662,84 @@ def get_report_claims(report_id: str, db: Session = Depends(get_db)) -> dict[str
         "report_id": report.id,
         "claims": [claim.model_dump(mode="json") for claim in _report_claims(report)],
         "processing_status": report.processing_status,
+    }
+
+
+@router.post("/reports/{report_id}/claims")
+def ingest_report_claims(
+    report_id: str,
+    payload: ClaimsIngestRequest,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    report = db.get(Report, report_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail=f"Report '{report_id}' not found")
+    now_utc = datetime.now(timezone.utc)
+    evidence_id = payload.evidence_id or str(uuid.uuid4())
+    claims = build_evidence_claims(
+        payload.claims,
+        evidence_id=evidence_id,
+        report_id=report.id,
+        provider=payload.provider,
+        model=payload.model,
+        observed_at=now_utc,
+        provenance={
+            "source": "provider_claim_ingress",
+            "provider": payload.provider,
+            "model": payload.model,
+            "data_reality": DataReality.REAL_DERIVED.value,
+            "observed_at": now_utc.isoformat(),
+        },
+    )
+    report.evidence_items_json = append_claims_to_evidence_items(
+        report.evidence_items_json,
+        claims,
+    )
+    all_claims = list(_report_claims(report))
+    if report.incident_id:
+        all_claims.extend(_incident_claims(db, report.incident_id))
+    resolved = resolve_claims(all_claims)
+    conflict_fields = sorted(
+        field_name
+        for field_name, fact in resolved.items()
+        if fact.state.value == "CONFLICT"
+    )
+    report.processing_status = "REQUIRES_REVIEW" if conflict_fields else "CLAIMS_PERSISTED"
+    event = None
+    if report.incident_id:
+        incident = db.get(Incident, report.incident_id)
+        if incident is not None:
+            provenance = dict(incident.provenance_json or {})
+            provenance["fact_review_required"] = bool(conflict_fields)
+            provenance["fact_review_fields"] = conflict_fields
+            incident.provenance_json = provenance
+            db.add(incident)
+        event = _timeline_event(
+            incident_id=report.incident_id,
+            event_type="CLAIMS_PERSISTED",
+            details={
+                "report_id": report.id,
+                "claims_added": len(claims),
+                "conflict_fields": conflict_fields,
+                "incident_review_required": bool(conflict_fields),
+            },
+            created_at=now_utc,
+        )
+        db.add(event)
+    db.add(report)
+    db.commit()
+    db.refresh(report)
+    if event:
+        publish_operations_event(
+            event="timeline.appended",
+            incident_id=report.incident_id,
+            payload=serialize_timeline_event(event),
+        )
+    return {
+        "report_id": report.id,
+        "processing_status": report.processing_status,
+        "claims": [claim.model_dump(mode="json") for claim in _report_claims(report)],
+        "resolved_facts": {field: value.model_dump(mode="json") for field, value in resolved.items()},
     }
 
 

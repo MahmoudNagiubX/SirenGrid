@@ -321,6 +321,63 @@ def test_explicit_asr_action_appends_transcript_without_mutating_incident(
     assert current.version == 1
 
 
+def test_claim_ingress_preserves_conflict_and_requires_review_without_version_increment(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    incident = client.post("/api/v1/intake/manual", json=_incident_payload()).json()
+    report = client.post(
+        "/api/v1/reports",
+        json={
+            "incident_id": incident["id"],
+            "source_type": "control_room_text",
+            "source_reference": "conflict-report",
+            "raw_text": "Two callers disagree about casualties.",
+        },
+    ).json()
+
+    first = client.post(
+        f"/api/v1/reports/{report['id']}/claims",
+        json={
+            "provider": "test-provider",
+            "model": "test-model",
+            "evidence_id": "evidence-a",
+            "claims": [
+                {
+                    "field_name": "casualty_count",
+                    "value": 2,
+                    "fact_state": "ASSERTED",
+                    "support_level": "HIGH",
+                }
+            ],
+        },
+    )
+    second = client.post(
+        f"/api/v1/reports/{report['id']}/claims",
+        json={
+            "provider": "test-provider",
+            "model": "test-model",
+            "evidence_id": "evidence-b",
+            "claims": [
+                {
+                    "field_name": "casualty_count",
+                    "value": 5,
+                    "fact_state": "ASSERTED",
+                    "support_level": "MEDIUM",
+                }
+            ],
+        },
+    )
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    assert second.json()["processing_status"] == "REQUIRES_REVIEW"
+    assert len(second.json()["claims"]) == 2
+    current = db_session.get(Incident, incident["id"])
+    assert current is not None
+    assert current.version == 1
+
+
 def test_explicit_duplicate_merge_preserves_reports_and_marks_redundant_incident(
     client: TestClient,
     db_session: Session,
