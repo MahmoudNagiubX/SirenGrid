@@ -14,8 +14,10 @@ from app.ai import EvidenceClaim, StructuredExtractionStatus
 from app.ai_processing import process_structured_extraction
 from app.claims import append_claims_to_evidence_items
 from app.db import get_db
+from app.fusion import FusionDecision, FusionReport, evaluate_report_association
 from app.incidents import (
     FACT_FIELD_NAMES,
+    _acquire_write_lock,
     patch_incident_facts,
     serialize_incident,
     serialize_report,
@@ -39,6 +41,14 @@ class ClaimResolutionRequest(BaseModel):
     selected_evidence_id: str | None = None
 
 
+class ReportAssociationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target_incident_id: str
+    expected_incident_version: int = Field(ge=1)
+    operator_reference: str = Field(min_length=1, max_length=200)
+
+
 def _report_claims(report: Report) -> list[EvidenceClaim]:
     claims: list[EvidenceClaim] = []
     for item in report.evidence_items_json or []:
@@ -58,6 +68,50 @@ def _incident_claims(db: Session, incident_id: str) -> list[EvidenceClaim]:
     for report in reports:
         claims.extend(_report_claims(report))
     return claims
+
+
+def _utc(value: datetime) -> datetime:
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
+
+
+def _report_fusion_view(report: Report) -> FusionReport:
+    provenance = report.provenance_json or {}
+    location = report.location_json or {}
+    claims = _report_claims(report)
+    return FusionReport(
+        report_id=report.id,
+        category=provenance.get("canonical_category"),
+        latitude=location.get("lat"),
+        longitude=location.get("lon"),
+        coordinates_trusted=provenance.get("coordinates_trusted", False),
+        received_at=_utc(report.received_at),
+        location_phrase=report.location_text,
+        source_reference=report.source_reference,
+        facts={claim.field_name: claim.value for claim in claims if claim.value is not None},
+        has_committed_operational_state=False,
+    )
+
+
+def _incident_fusion_view(incident: Incident) -> FusionReport:
+    status_value = incident.status.value if hasattr(incident.status, "value") else str(incident.status)
+    facts = {
+        "casualty_count": incident.casualty_count,
+        "trapped_person": incident.trapped_person,
+        "road_blockage": incident.road_blockage,
+    }
+    return FusionReport(
+        report_id=incident.id,
+        category=incident.incident_type,
+        latitude=incident.latitude,
+        longitude=incident.longitude,
+        coordinates_trusted=True,
+        received_at=_utc(incident.created_at),
+        location_phrase=incident.location_text,
+        source_reference=(incident.provenance_json or {}).get("source_reference"),
+        facts={key: value for key, value in facts.items() if value is not None},
+        has_committed_operational_state=bool(incident.current_plan_id)
+        or status_value not in {"ACTIVE_UNCONFIRMED", "RECEIVED", "INTERPRETING"},
+    )
 
 
 def _timeline_event(
@@ -274,6 +328,76 @@ def process_report(
     return {
         "status": result.status.value,
         "result": result.model_dump(mode="json"),
+        "report": serialize_report(report),
+    }
+
+
+@router.post("/reports/{report_id}/associate")
+def associate_report(
+    report_id: str,
+    payload: ReportAssociationRequest,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _acquire_write_lock(db)
+    report = db.get(Report, report_id)
+    incident = db.get(Incident, payload.target_incident_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail=f"Report '{report_id}' not found")
+    if incident is None:
+        raise HTTPException(status_code=404, detail=f"Incident '{payload.target_incident_id}' not found")
+    if report.incident_id is not None:
+        raise HTTPException(status_code=409, detail="report is already associated with an incident")
+    if payload.expected_incident_version != incident.version:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Incident version mismatch: expected {payload.expected_incident_version}, "
+                f"but current version is {incident.version}"
+            ),
+        )
+
+    result = evaluate_report_association(
+        _report_fusion_view(report),
+        _incident_fusion_view(incident),
+    )
+    now_utc = datetime.now(timezone.utc)
+    report_provenance = dict(report.provenance_json or {})
+    report_provenance["fusion_evaluation"] = result.model_dump(mode="json")
+    report.provenance_json = report_provenance
+    event = None
+    if result.decision is FusionDecision.AUTO_ASSOCIATE:
+        report.incident_id = incident.id
+        previous_version = incident.version
+        incident.version += 1
+        incident.updated_at = now_utc
+        event = _timeline_event(
+            incident_id=incident.id,
+            event_type="REPORT_ASSOCIATED",
+            details={
+                "report_id": report.id,
+                "association_result": result.decision.value,
+                "previous_incident_version": previous_version,
+                "new_incident_version": incident.version,
+                "operator_reference": payload.operator_reference,
+                "explanation": result.model_dump(mode="json"),
+            },
+            created_at=now_utc,
+        )
+        db.add(event)
+        db.add(incident)
+    db.add(report)
+    db.commit()
+    db.refresh(report)
+    if event:
+        publish_operations_event(
+            event="incident.updated",
+            incident_id=incident.id,
+            payload=serialize_incident(incident),
+        )
+    return {
+        **result.model_dump(mode="json"),
+        "incident_id": incident.id if report.incident_id else None,
+        "incident_version": incident.version,
         "report": serialize_report(report),
     }
 

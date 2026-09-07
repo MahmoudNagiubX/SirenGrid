@@ -178,3 +178,80 @@ def test_operator_resolves_claim_with_one_version_increment_and_history_retained
     retained = db_session.get(Report, "claim-report-1")
     assert retained is not None
     assert retained.evidence_items_json[0]["claims"][0]["value"] == 2
+
+
+def test_related_standalone_report_is_auto_associated_once_with_audit_event(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    created = client.post("/api/v1/intake/manual", json=_incident_payload())
+    incident = created.json()
+    standalone = client.post(
+        "/api/v1/reports",
+        json={
+            "source_type": "control_room_text",
+            "source_reference": "caller-b",
+            "raw_text": "A second report at Tayaran.",
+            "location_text": "Tayaran Street",
+            "location": {"lat": 30.0562, "lon": 31.3453},
+            "provenance": {
+                "source": "caller-b",
+                "canonical_category": "traffic_collision",
+                "coordinates_trusted": True,
+            },
+        },
+    )
+    assert standalone.status_code == 201, standalone.text
+
+    associated = client.post(
+        f"/api/v1/reports/{standalone.json()['id']}/associate",
+        json={
+            "target_incident_id": incident["id"],
+            "expected_incident_version": 1,
+            "operator_reference": "fusion-operator",
+        },
+    )
+
+    assert associated.status_code == 200, associated.text
+    assert associated.json()["decision"] == "AUTO_ASSOCIATE"
+    assert associated.json()["incident_version"] == 2
+    persisted = db_session.get(Report, standalone.json()["id"])
+    assert persisted is not None
+    assert persisted.incident_id == incident["id"]
+    events = db_session.query(TimelineEvent).filter_by(incident_id=incident["id"]).all()
+    assert any(event.event_type == "REPORT_ASSOCIATED" for event in events)
+
+
+def test_fusion_review_does_not_mutate_incident_or_force_merge(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    created = client.post("/api/v1/intake/manual", json=_incident_payload())
+    incident = created.json()
+    standalone = client.post(
+        "/api/v1/reports",
+        json={
+            "source_type": "control_room_text",
+            "source_reference": "caller-c",
+            "raw_text": "A report with no trusted location.",
+            "location_text": "Somewhere in Nasr City",
+            "provenance": {"canonical_category": "traffic_collision"},
+        },
+    )
+    assert standalone.status_code == 201
+
+    reviewed = client.post(
+        f"/api/v1/reports/{standalone.json()['id']}/associate",
+        json={
+            "target_incident_id": incident["id"],
+            "expected_incident_version": 1,
+            "operator_reference": "fusion-operator",
+        },
+    )
+
+    assert reviewed.status_code == 200, reviewed.text
+    assert reviewed.json()["decision"] == "REQUIRES_REVIEW"
+    current = db_session.get(Incident, incident["id"])
+    assert current is not None
+    assert current.version == 1
+    assert db_session.get(Report, standalone.json()["id"]).incident_id is None
