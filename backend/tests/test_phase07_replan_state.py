@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import uuid
 
+import networkx as nx
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 from fastapi.testclient import TestClient
@@ -12,7 +13,12 @@ from app.main import app
 from app.models import Incident, ReplanEvaluation, ResponsePlan
 from app.replanning import merge_pending_trigger
 from app.candidate_generation import CandidateResource, _is_hard_eligible
+from app.candidate_generation import CandidateCombination, CandidateResponder
+from app.candidate_evaluation import evaluate_candidate_combination
+from app.coverage import CoverageZone
+from app.routing import compute_traffic_aware_route
 from app.response_requirements import ResponseRequirement
+from app.response_requirements import RequirementSource, ResolvedResponseRequirements
 from app.schemas import (
     ConfidenceLevel,
     Coordinate,
@@ -180,3 +186,261 @@ def test_trigger_endpoint_coalesces_without_incrementing_incident_version(
     assert saved_incident.version == 4
     assert saved_incident.current_plan_id == "approved-plan"
     assert len(evaluations) == 1
+
+
+def test_explicit_flush_records_no_material_change_without_new_plan(
+    isolated_engine: Engine,
+    db_session: Session,
+) -> None:
+    init_db(isolated_engine)
+    incident = Incident(
+        id=str(uuid.uuid4()),
+        version=4,
+        incident_type="traffic_collision",
+        severity=Severity.HIGH,
+        confidence_level=ConfidenceLevel.HIGH,
+        status=IncidentStatus.RESPONSE_ACTIVE,
+        latitude=30.05,
+        longitude=31.34,
+        current_plan_id="approved-plan",
+    )
+    plan = ResponsePlan(
+        id="approved-plan",
+        incident_id=incident.id,
+        incident_version=4,
+        plan_version=1,
+        status=ResponsePlanStatus.APPROVED,
+        resource_ids_json=[],
+        routes_json=[],
+        metrics_json={},
+        score_breakdown_json={},
+    )
+    db_session.add_all([incident, plan])
+    db_session.commit()
+    client = TestClient(app)
+
+    trigger = client.post(
+        f"/api/v1/incidents/{incident.id}/replan/triggers",
+        json={
+            "expected_incident_version": 4,
+            "trigger_reasons": ["TRAFFIC_CHANGED"],
+            "input_references": {
+                "old_eta_seconds": 400,
+                "new_eta_seconds": 401,
+                "route_edge_overlap_ratio": 1.0,
+            },
+        },
+    )
+    flushed = client.post(
+        f"/api/v1/incidents/{incident.id}/replan/evaluate",
+        json={"expected_incident_version": 4},
+    )
+
+    assert trigger.status_code == 200
+    assert flushed.status_code == 200
+    body = flushed.json()
+    assert body["status"] == "NO_MATERIAL_CHANGE"
+    assert body["material"] is False
+    assert body["plans"] == []
+    assert body["incident_version"] == 4
+    assert body["pending_plan_id"] is None
+
+
+def test_pending_replacement_approval_switches_active_plan_pointer_once(
+    isolated_engine: Engine,
+    db_session: Session,
+) -> None:
+    init_db(isolated_engine)
+    incident = Incident(
+        id=str(uuid.uuid4()),
+        version=6,
+        incident_type="traffic_collision",
+        severity=Severity.HIGH,
+        confidence_level=ConfidenceLevel.HIGH,
+        status=IncidentStatus.RESPONSE_ACTIVE,
+        latitude=30.05,
+        longitude=31.34,
+        current_plan_id="approved-plan",
+        pending_replan_plan_id="replacement-plan",
+    )
+    active = ResponsePlan(
+        id="approved-plan",
+        incident_id=incident.id,
+        incident_version=5,
+        plan_version=1,
+        status=ResponsePlanStatus.APPROVED,
+        resource_ids_json=[],
+        routes_json=[],
+        metrics_json={},
+        score_breakdown_json={},
+    )
+    replacement = ResponsePlan(
+        id="replacement-plan",
+        incident_id=incident.id,
+        incident_version=6,
+        plan_version=2,
+        status=ResponsePlanStatus.RECOMMENDED,
+        resource_ids_json=[],
+        routes_json=[],
+        metrics_json={"replan": {"active_plan_id": active.id}},
+        score_breakdown_json={},
+    )
+    db_session.add_all([incident, active, replacement])
+    db_session.commit()
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/plans/replacement-plan/approve",
+        json={
+            "expected_incident_version": 6,
+            "expected_plan_version": 2,
+            "operator_reference": "operator-1",
+        },
+    )
+
+    assert response.status_code == 200
+    db_session.expire_all()
+    saved_incident = db_session.get(Incident, incident.id)
+    saved_active = db_session.get(ResponsePlan, active.id)
+    saved_replacement = db_session.get(ResponsePlan, replacement.id)
+    assert saved_incident is not None
+    assert saved_active is not None
+    assert saved_replacement is not None
+    assert saved_incident.version == 7
+    assert saved_incident.current_plan_id == replacement.id
+    assert saved_incident.pending_replan_plan_id is None
+    assert saved_active.status == ResponsePlanStatus.SUPERSEDED
+    assert saved_replacement.status == ResponsePlanStatus.APPROVED
+
+
+def test_material_flush_persists_pending_replacement_without_repointing_active_plan(
+    isolated_engine: Engine,
+    db_session: Session,
+    monkeypatch,
+) -> None:
+    init_db(isolated_engine)
+    incident = Incident(
+        id=str(uuid.uuid4()),
+        version=4,
+        incident_type="traffic_collision",
+        severity=Severity.LOW,
+        confidence_level=ConfidenceLevel.HIGH,
+        status=IncidentStatus.RESPONSE_ACTIVE,
+        latitude=30.0,
+        longitude=31.302,
+        current_plan_id="approved-plan",
+        required_resources_json=[{"resource_type": "AMBULANCE", "count": 1}],
+    )
+    active = ResponsePlan(
+        id="approved-plan",
+        incident_id=incident.id,
+        incident_version=3,
+        plan_version=1,
+        status=ResponsePlanStatus.APPROVED,
+        resource_ids_json=[],
+        routes_json=[],
+        metrics_json={},
+        score_breakdown_json={},
+    )
+    db_session.add_all([incident, active])
+    db_session.commit()
+
+    graph = nx.MultiDiGraph()
+    graph.add_node("resource", x=31.3, y=30.0)
+    graph.add_node("incident", x=31.302, y=30.0)
+    graph.add_edge(
+        "resource",
+        "incident",
+        key="0",
+        length=200.0,
+        travel_time=20.0,
+        base_travel_time_s=20.0,
+    )
+    requirement = ResponseRequirement(ResourceType.AMBULANCE, 1)
+    resource = CandidateResource(
+        resource_id="resource-a",
+        resource_type=ResourceType.AMBULANCE,
+        capability_tags=(),
+        status=ResourceStatus.AVAILABLE,
+        assigned_incident_id=None,
+        coordinate=Coordinate(lat=30.0, lon=31.3),
+        data_reality=DataReality.SIMULATED,
+        source="phase03_simulated_resource",
+    )
+    route = compute_traffic_aware_route(
+        graph,
+        resource.coordinate,
+        Coordinate(lat=30.0, lon=31.302),
+        None,
+    )
+    candidate = evaluate_candidate_combination(
+        graph=graph,
+        zones=(CoverageZone("zone-1", Coordinate(lat=30.0, lon=31.302), 100.0),),
+        resources=(resource,),
+        requirements=(requirement,),
+        combination=CandidateCombination(
+            (CandidateResponder(requirement, resource, route),)
+        ),
+        traffic_snapshot=None,
+        modeled_at=datetime(2026, 9, 8, tzinfo=timezone.utc),
+    )
+    resolution = ResolvedResponseRequirements(
+        requirements=(requirement,),
+        source=RequirementSource.STRUCTURED_SOURCE,
+        matrix_version=None,
+        prototype_policy_label=None,
+    )
+    monkeypatch.setattr(
+        "app.replanning.evaluate_phase04_candidate_set",
+        lambda *args, **kwargs: (resolution, (candidate,), {}, kwargs["now_utc"]),
+    )
+    client = TestClient(app)
+    trigger = client.post(
+        f"/api/v1/incidents/{incident.id}/replan/triggers",
+        json={
+            "expected_incident_version": 4,
+            "trigger_reasons": ["TRAFFIC_CHANGED"],
+            "input_references": {
+                "old_eta_seconds": 100,
+                "new_eta_seconds": 160,
+                "route_edge_overlap_ratio": 1.0,
+            },
+        },
+    )
+    flushed = client.post(
+        f"/api/v1/incidents/{incident.id}/replan/evaluate",
+        json={"expected_incident_version": 4},
+    )
+
+    assert trigger.status_code == 200
+    assert flushed.status_code == 200, flushed.text
+    body = flushed.json()
+    assert body["status"] == "REPLACEMENT_RECOMMENDED"
+    assert body["material"] is True
+    assert len(body["plans"]) == 1
+    assert body["plans"][0]["status"] == "RECOMMENDED"
+
+    db_session.expire_all()
+    saved_incident = db_session.get(Incident, incident.id)
+    saved_plan = db_session.get(ResponsePlan, body["plans"][0]["id"])
+    assert saved_incident is not None
+    assert saved_plan is not None
+    assert saved_incident.version == 5
+    assert saved_incident.current_plan_id == active.id
+    assert saved_incident.pending_replan_plan_id == saved_plan.id
+    assert saved_plan.metrics_json["replan"]["old_approved_plan_id"] == active.id
+
+    repeat = client.post(
+        f"/api/v1/incidents/{incident.id}/replan/triggers",
+        json={
+            "expected_incident_version": 5,
+            "trigger_reasons": ["TRAFFIC_CHANGED"],
+            "input_references": {
+                "old_eta_seconds": 100,
+                "new_eta_seconds": 160,
+                "route_edge_overlap_ratio": 1.0,
+            },
+        },
+    )
+    assert repeat.status_code == 200
+    assert repeat.json()["idempotent"] is True

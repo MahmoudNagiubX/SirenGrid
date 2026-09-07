@@ -130,10 +130,13 @@ def build_replan_input_fingerprint(
     payload = {
         "policy_version": REPLAN_MATERIALITY_POLICY_VERSION,
         "active_plan_id": active_plan_id,
-        "incident_version": incident_version,
         "trigger_facts": trigger_facts,
         "input_references": input_references,
     }
+    # Incident version is validated separately. It changes when a replacement
+    # is persisted, but does not change the underlying evaluated world state;
+    # excluding it preserves idempotency for an identical repeat.
+    _ = incident_version
     encoded = json.dumps(
         _canonicalize(payload),
         ensure_ascii=False,

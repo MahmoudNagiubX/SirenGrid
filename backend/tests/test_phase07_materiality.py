@@ -8,6 +8,7 @@ from app.materiality import (
 from app.incidents import serialize_incident
 from app.models import Incident
 from app.schemas import ConfidenceLevel, IncidentStatus, Severity
+from app.replanning import materiality_for_trigger
 
 
 def test_eta_materiality_uses_inclusive_absolute_and_percentage_boundaries() -> None:
@@ -102,7 +103,7 @@ def test_replan_fingerprint_is_order_independent_and_policy_bound() -> None:
     )
     second = build_replan_input_fingerprint(
         active_plan_id="plan-a",
-        incident_version=4,
+        incident_version=5,
         trigger_facts={"reason": "RESOURCE_UNAVAILABLE", "resource_ids": ["r-1", "r-2"]},
         input_references={"resource_version": 3, "traffic_snapshot_id": "traffic-1"},
     )
@@ -130,3 +131,17 @@ def test_incident_exposes_pending_replan_without_repointing_active_plan() -> Non
 
     assert serialized["current_plan_id"] == "approved-plan"
     assert serialized["pending_replan_plan_id"] == "replacement-plan"
+
+
+def test_trigger_reason_facts_are_mapped_to_confirmed_materiality() -> None:
+    result = materiality_for_trigger(
+        reasons=["TRAFFIC_CHANGED"],
+        references={
+            "old_eta_seconds": 400,
+            "new_eta_seconds": 460,
+            "route_edge_overlap_ratio": 0.95,
+        },
+    )
+
+    assert result.material is True
+    assert "ETA_DETERIORATED_ABSOLUTE" in result.reasons

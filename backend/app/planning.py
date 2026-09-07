@@ -843,7 +843,8 @@ def approve_response_plan(
             detail=f"Response plan status is '{status_val}', expected '{ResponsePlanStatus.RECOMMENDED.value}'",
         )
 
-    if incident.status != IncidentStatus.AWAITING_APPROVAL:
+    pending_replacement = incident.pending_replan_plan_id == plan.id
+    if not pending_replacement and incident.status != IncidentStatus.AWAITING_APPROVAL:
         inc_status_val = (
             incident.status.value
             if hasattr(incident.status, "value")
@@ -854,7 +855,13 @@ def approve_response_plan(
             detail=f"Incident status is '{inc_status_val}', expected '{IncidentStatus.AWAITING_APPROVAL.value}'",
         )
 
-    if incident.current_plan_id != plan.id:
+    if pending_replacement:
+        if incident.current_plan_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Incident has no active approved plan for replacement approval",
+            )
+    elif incident.current_plan_id != plan.id:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
@@ -897,6 +904,12 @@ def approve_response_plan(
             detail="Response plan contains duplicate resource IDs",
         )
 
+    previous_plan = (
+        db.get(ResponsePlan, incident.current_plan_id)
+        if pending_replacement and incident.current_plan_id
+        else None
+    )
+    previous_resource_ids = set(previous_plan.resource_ids_json or []) if previous_plan else set()
     resources: list[EmergencyResource] = []
     for res_id in selected_resource_ids:
         res = db.get(EmergencyResource, res_id)
@@ -905,6 +918,30 @@ def approve_response_plan(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"Selected resource '{res_id}' not found in registry",
             )
+        if pending_replacement and res_id in previous_resource_ids:
+            if res.assigned_incident_id != incident.id:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        f"Active replacement resource '{res_id}' is not assigned to "
+                        f"incident '{incident.id}'"
+                    ),
+                )
+            if res.status in (
+                ResourceStatus.ON_SCENE,
+                ResourceStatus.TRANSPORTING,
+            ):
+                # Retaining an already committed responder is safe; changing or
+                # substituting it is rejected below when its assignment changes.
+                resources.append(res)
+                continue
+            if res.status not in (ResourceStatus.ASSIGNED, ResourceStatus.RESERVED, ResourceStatus.EN_ROUTE):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Active resource '{res_id}' has invalid replacement state",
+                )
+            resources.append(res)
+            continue
         if res.status != ResourceStatus.AVAILABLE:
             res_status_val = (
                 res.status.value
@@ -922,16 +959,104 @@ def approve_response_plan(
             )
         resources.append(res)
 
+    if pending_replacement and previous_plan is not None:
+        for previous_resource_id in sorted(previous_resource_ids - set(selected_resource_ids)):
+            previous_resource = db.get(EmergencyResource, previous_resource_id)
+            if previous_resource is None:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Previously assigned resource '{previous_resource_id}' not found",
+                )
+            if previous_resource.assigned_incident_id != incident.id:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        f"Previously assigned resource '{previous_resource_id}' is no longer "
+                        "owned by this incident"
+                    ),
+                )
+            if previous_resource.status in (
+                ResourceStatus.EN_ROUTE,
+                ResourceStatus.ON_SCENE,
+                ResourceStatus.TRANSPORTING,
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        f"Cannot replace active responder '{previous_resource_id}' "
+                        f"in state '{previous_resource.status.value}'"
+                    ),
+                )
+
     now_utc = datetime.now(timezone.utc)
 
     # Atomic single-transaction mutations
     plan.status = ResponsePlanStatus.APPROVED
 
-    incident.status = IncidentStatus.RESPONSE_ACTIVE
+    if pending_replacement and previous_plan is not None:
+        previous_plan.status = ResponsePlanStatus.SUPERSEDED
+    if pending_replacement:
+        incident.current_plan_id = plan.id
+        incident.pending_replan_plan_id = None
+    else:
+        incident.status = IncidentStatus.RESPONSE_ACTIVE
     incident.version = incident.version + 1
     incident.updated_at = now_utc
 
+    released_resources: list[EmergencyResource] = []
+    if pending_replacement and previous_plan is not None:
+        for previous_resource_id in sorted(previous_resource_ids - set(selected_resource_ids)):
+            previous_resource = db.get(EmergencyResource, previous_resource_id)
+            assert previous_resource is not None
+            previous_resource.status = ResourceStatus.AVAILABLE
+            previous_resource.assigned_incident_id = None
+            previous_resource.version += 1
+            previous_resource.last_updated = now_utc
+            previous_provenance = dict(previous_resource.provenance_json or {})
+            previous_provenance.pop("movement", None)
+            previous_provenance.pop("route_progress", None)
+            previous_resource.provenance_json = {
+                **previous_provenance,
+                "data_reality": DataReality.SIMULATED.value,
+                "freshness_status": "FRESH",
+                "last_updated": now_utc.isoformat(),
+                "source_reference": payload.operator_reference,
+            }
+            released_resources.append(previous_resource)
+
+    selected_resource_set = set(selected_resource_ids)
     for res in resources:
+        if pending_replacement and res.id in previous_resource_ids:
+            if res.status == ResourceStatus.EN_ROUTE:
+                new_route = next(
+                    (
+                        route
+                        for route in (plan.routes_json or [])
+                        if isinstance(route, dict) and route.get("resource_id") == res.id
+                    ),
+                    None,
+                )
+                geometry = new_route.get("geometry") if isinstance(new_route, dict) else None
+                movement = (res.provenance_json or {}).get("movement")
+                res.version += 1
+                res.last_updated = now_utc
+                res.provenance_json = {
+                    **dict(res.provenance_json or {}),
+                    "data_reality": DataReality.SIMULATED.value,
+                    "freshness_status": "FRESH",
+                    "last_updated": now_utc.isoformat(),
+                    "movement": {
+                        "incident_id": incident.id,
+                        "plan_id": plan.id,
+                        "route_id": f"{plan.id}:{res.id}",
+                        "route_progress": 0.0,
+                        "operator_reference": payload.operator_reference,
+                        "last_updated": now_utc.isoformat(),
+                        "previous_route": movement,
+                        "route_geometry": geometry,
+                    },
+                }
+            continue
         res.status = ResourceStatus.ASSIGNED
         res.assigned_incident_id = incident.id
         res.version = res.version + 1
@@ -969,9 +1094,11 @@ def approve_response_plan(
         details_json={
             "plan_id": plan.id,
             "incident_id": incident.id,
-            "resource_ids": [r.id for r in resources],
-            "resource_count": len(resources),
+            "resource_ids": [r.id for r in resources if r.id in selected_resource_set],
+            "resource_count": len(selected_resource_ids),
             "operator_reference": payload.operator_reference,
+            "released_resource_ids": [resource.id for resource in released_resources],
+            "replacement": pending_replacement,
         },
         created_at=now_utc,
     )
@@ -987,7 +1114,7 @@ def approve_response_plan(
 
     db.refresh(plan)
     db.refresh(incident)
-    for res in resources:
+    for res in [*resources, *released_resources]:
         db.refresh(res)
     db.refresh(approval)
 
@@ -1006,7 +1133,7 @@ def approve_response_plan(
             "status": inc_status_str,
             "version": incident.version,
         },
-        "resources": [serialize_resource(res) for res in resources],
+        "resources": [serialize_resource(res) for res in [*resources, *released_resources]],
         "approval": {
             "id": approval.id,
             "plan_id": approval.plan_id,

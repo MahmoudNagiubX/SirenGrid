@@ -11,14 +11,89 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.candidate_persistence import persist_replacement_candidate_set
 from app.db import get_db
 from app.incidents import _acquire_write_lock, serialize_incident
-from app.materiality import build_replan_input_fingerprint
+from app.materiality import (
+    ReplanMaterialityResult,
+    build_replan_input_fingerprint,
+    evaluate_replan_materiality,
+)
 from app.models import Incident, ReplanEvaluation, ResponsePlan, TimelineEvent
-from app.schemas import ReplanEvaluationRead, ReplanTriggerRequest, ResponsePlanStatus
+from app.planning import evaluate_phase04_candidate_set, serialize_plan
+from app.schemas import (
+    ReplanEvaluationRead,
+    ReplanEvaluateRequest,
+    ReplanEvaluationResponse,
+    ReplanTriggerRequest,
+    ResponsePlanStatus,
+)
 from app.websocket import publish_operations_event
 
 router = APIRouter(tags=["replanning"])
+
+KNOWN_REPLAN_TRIGGER_REASONS = {
+    "TRAFFIC_CHANGED",
+    "ROAD_CLOSED",
+    "ACTIVE_ROUTE_CLOSURE",
+    "ROUTE_UNREACHABLE",
+    "ACTIVE_ROUTE_UNREACHABLE",
+    "RESOURCE_UNAVAILABLE",
+    "RESOURCE_ASSIGNMENT_CONFLICT",
+    "INCIDENT_FACT_CHANGED",
+    "HOSPITAL_STATE_CHANGED",
+    "SECOND_INCIDENT_ACTIVATED",
+    "OPERATOR_CONSTRAINT_CHANGED",
+    "COVERAGE_CHANGED",
+}
+
+
+def materiality_for_trigger(
+    *,
+    reasons: list[str],
+    references: dict[str, Any],
+) -> ReplanMaterialityResult:
+    """Map explicit trigger facts into the shared materiality policy."""
+    unknown_reasons = sorted(set(reasons) - KNOWN_REPLAN_TRIGGER_REASONS)
+    if unknown_reasons:
+        raise ValueError(f"Unknown replan trigger reason(s): {unknown_reasons}")
+    reason_set = set(reasons)
+    return evaluate_replan_materiality(
+        old_eta_seconds=references.get("old_eta_seconds"),
+        new_eta_seconds=references.get("new_eta_seconds"),
+        route_edge_overlap_ratio=references.get("route_edge_overlap_ratio"),
+        route_geometry_overlap_ratio=references.get("route_geometry_overlap_ratio"),
+        active_route_closure=bool(
+            references.get("active_route_closure")
+            or {"ROAD_CLOSED", "ACTIVE_ROUTE_CLOSURE"} & reason_set
+        ),
+        route_unreachable=bool(
+            references.get("route_unreachable")
+            or {"ROUTE_UNREACHABLE", "ACTIVE_ROUTE_UNREACHABLE"} & reason_set
+        ),
+        required_resource_unavailable=bool(
+            references.get("required_resource_unavailable")
+            or "RESOURCE_UNAVAILABLE" in reason_set
+        ),
+        resource_assignment_conflict=bool(
+            references.get("resource_assignment_conflict")
+            or "RESOURCE_ASSIGNMENT_CONFLICT" in reason_set
+        ),
+        requirements_changed=bool(
+            references.get("requirements_changed")
+            or {"INCIDENT_FACT_CHANGED", "OPERATOR_CONSTRAINT_CHANGED"} & reason_set
+        ),
+        hospital_not_accepting=bool(references.get("hospital_not_accepting")),
+        hospital_unreachable=bool(references.get("hospital_unreachable")),
+        contention_resource_unavailable=bool(
+            references.get("contention_resource_unavailable")
+            or "SECOND_INCIDENT_ACTIVATED" in reason_set
+            and references.get("contention_resource_ids")
+        ),
+        newly_joint_undercovered=bool(references.get("newly_joint_undercovered")),
+        joint_coverage_drop=references.get("joint_coverage_drop"),
+        unknown_state=bool(references.get("unknown_state")),
+    )
 
 
 def merge_pending_trigger(
@@ -72,6 +147,7 @@ def serialize_replan_evaluation(
             evaluation.evaluated_at.isoformat() if evaluation.evaluated_at else None
         ),
         "incident_version": incident_version,
+        "idempotent": False,
     }
 
 
@@ -101,10 +177,64 @@ def _pending_for_active_plan(
         .where(
             ReplanEvaluation.incident_id == incident_id,
             ReplanEvaluation.active_plan_id == active_plan_id,
-            ReplanEvaluation.status == "PENDING",
+            ReplanEvaluation.status.in_(("PENDING", "RECOMMENDED")),
         )
         .order_by(ReplanEvaluation.first_triggered_at.desc())
     )
+
+
+def _all_plans_for_candidate_set(
+    db: Session,
+    *,
+    incident_id: str,
+    candidate_set_id: str | None,
+) -> list[dict[str, Any]]:
+    if not candidate_set_id:
+        return []
+    plans: list[ResponsePlan] = []
+    for plan in db.scalars(
+        select(ResponsePlan).where(ResponsePlan.incident_id == incident_id)
+    ).all():
+        metrics = plan.metrics_json or {}
+        phase04 = metrics.get("phase04") if isinstance(metrics, dict) else None
+        replan = metrics.get("replan") if isinstance(metrics, dict) else None
+        if (
+            isinstance(phase04, dict)
+            and phase04.get("candidate_set_id") == candidate_set_id
+            and isinstance(replan, dict)
+        ):
+            plans.append(plan)
+    return [serialize_plan(plan) for plan in sorted(plans, key=lambda item: item.plan_version)]
+
+
+def _evaluation_response(
+    *,
+    incident: Incident,
+    active_plan: ResponsePlan,
+    evaluation: ReplanEvaluation | None,
+    status_value: str,
+    material: bool,
+    idempotent: bool,
+    plans: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    return {
+        "incident_id": incident.id,
+        "incident_version": incident.version,
+        "active_plan_id": active_plan.id,
+        "pending_plan_id": incident.pending_replan_plan_id,
+        "status": status_value,
+        "material": material,
+        "idempotent": idempotent,
+        "trigger_reasons": evaluation.trigger_reasons_json if evaluation else [],
+        "input_fingerprint": evaluation.input_fingerprint if evaluation else None,
+        "explanation": evaluation.explanation_json if evaluation else {},
+        "evaluation": (
+            serialize_replan_evaluation(evaluation, incident_version=incident.version)
+            if evaluation
+            else None
+        ),
+        "plans": plans or [],
+    }
 
 
 def record_replan_trigger(
@@ -171,6 +301,7 @@ def record_replan_trigger(
         evaluation.debounce_until = now_utc + timedelta(
             seconds=settings.REPLAN_DEBOUNCE_SECONDS
         )
+        evaluation.status = "PENDING"
         idempotent = False
     else:
         evaluation = ReplanEvaluation(
@@ -209,6 +340,171 @@ def record_replan_trigger(
     return evaluation, idempotent
 
 
+def evaluate_pending_replan(
+    db: Session,
+    *,
+    incident_id: str,
+    expected_incident_version: int,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Flush the current pending trigger and optionally persist a replacement set."""
+    _acquire_write_lock(db)
+    incident = db.get(Incident, incident_id)
+    if incident is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Incident '{incident_id}' not found",
+        )
+    active_plan = _get_active_approved_plan(db, incident)
+    if expected_incident_version != incident.version:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Stale incident version: expected {expected_incident_version}, "
+                f"current {incident.version}"
+            ),
+        )
+    evaluation = _pending_for_active_plan(
+        db,
+        incident_id=incident.id,
+        active_plan_id=active_plan.id,
+    )
+    if evaluation is None:
+        return _evaluation_response(
+            incident=incident,
+            active_plan=active_plan,
+            evaluation=None,
+            status_value="NO_PENDING_TRIGGER",
+            material=False,
+            idempotent=True,
+        )
+
+    if evaluation.status == "RECOMMENDED":
+        pending_plan = (
+            db.get(ResponsePlan, evaluation.pending_plan_id)
+            if evaluation.pending_plan_id
+            else None
+        )
+        pending_metrics = pending_plan.metrics_json if pending_plan else {}
+        pending_phase04 = (
+            pending_metrics.get("phase04")
+            if isinstance(pending_metrics, dict)
+            else None
+        )
+        return _evaluation_response(
+            incident=incident,
+            active_plan=active_plan,
+            evaluation=evaluation,
+            status_value="IDEMPOTENT_NO_OP",
+            material=True,
+            idempotent=True,
+            plans=_all_plans_for_candidate_set(
+                db,
+                incident_id=incident.id,
+                candidate_set_id=(
+                    pending_phase04.get("candidate_set_id")
+                    if isinstance(pending_phase04, dict)
+                    else None
+                ),
+            ),
+        )
+
+    try:
+        materiality = materiality_for_trigger(
+            reasons=evaluation.trigger_reasons_json or [],
+            references=evaluation.input_references_json or {},
+        )
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+
+    timestamp = now or datetime.now(timezone.utc)
+    explanation = {
+        "materiality_policy_version": "SIRENGRID_REPLAN_MATERIALITY_V1",
+        "trigger_reasons": evaluation.trigger_reasons_json or [],
+        "input_references": evaluation.input_references_json or {},
+        "input_fingerprint": evaluation.input_fingerprint,
+        "old_approved_plan_id": active_plan.id,
+        "old_approved_plan_version": active_plan.plan_version,
+        "evaluation_timestamp": timestamp.isoformat(),
+        "material": materiality.material,
+        "materiality_reasons": list(materiality.reasons),
+    }
+    if not materiality.material:
+        evaluation.status = "NO_MATERIAL_CHANGE"
+        evaluation.evaluated_at = timestamp
+        evaluation.explanation_json = explanation
+        db.commit()
+        db.refresh(incident)
+        db.refresh(evaluation)
+        return _evaluation_response(
+            incident=incident,
+            active_plan=active_plan,
+            evaluation=evaluation,
+            status_value="NO_MATERIAL_CHANGE",
+            material=False,
+            idempotent=False,
+        )
+
+    try:
+        resolution, ranked, reposition_proposals, modeled_at = (
+            evaluate_phase04_candidate_set(
+                db,
+                incident,
+                now_utc=timestamp,
+                planning_incident_id=incident.id,
+            )
+        )
+        persisted = persist_replacement_candidate_set(
+            db,
+            incident,
+            active_plan,
+            ranked,
+            evaluation=evaluation,
+            reposition_proposals=reposition_proposals,
+            now_utc=modeled_at,
+            requirements_metadata={
+                "source": resolution.source.value,
+                "matrix_version": resolution.matrix_version,
+                "prototype_policy_label": resolution.prototype_policy_label,
+            },
+            replan_metadata=explanation,
+        )
+    except (OSError, RuntimeError, ValueError) as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Replacement plan evaluation failed: {exc}",
+        ) from exc
+    db.refresh(evaluation)
+    db.refresh(incident)
+    candidate_set_id = (
+        (persisted[0].metrics_json or {}).get("phase04", {}).get("candidate_set_id")
+    )
+    result = _evaluation_response(
+        incident=incident,
+        active_plan=active_plan,
+        evaluation=evaluation,
+        status_value="REPLACEMENT_RECOMMENDED",
+        material=True,
+        idempotent=False,
+        plans=_all_plans_for_candidate_set(
+            db,
+            incident_id=incident.id,
+            candidate_set_id=candidate_set_id,
+        ),
+    )
+    publish_operations_event(
+        event="replan.generated",
+        incident_id=incident.id,
+        payload={"replan": result, "incident": serialize_incident(incident)},
+    )
+    return result
+
+
 @router.post(
     "/incidents/{incident_id}/replan/triggers",
     response_model=ReplanEvaluationRead,
@@ -238,6 +534,22 @@ def create_replan_trigger(
         payload={"replan": result, "incident": serialize_incident(incident)},
     )
     return result
+
+
+@router.post(
+    "/incidents/{incident_id}/replan/evaluate",
+    response_model=ReplanEvaluationResponse,
+)
+def flush_replan(
+    incident_id: str,
+    payload: ReplanEvaluateRequest,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    return evaluate_pending_replan(
+        db,
+        incident_id=incident_id,
+        expected_incident_version=payload.expected_incident_version,
+    )
 
 
 @router.get(

@@ -505,6 +505,12 @@ class ReplanTriggerRequest(BaseModel):
     input_references: dict[str, Any] = Field(default_factory=dict)
 
 
+class ReplanEvaluateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_incident_version: int = Field(ge=1)
+
+
 class ReplanEvaluationRead(BaseModel):
     id: str
     incident_id: str
@@ -520,6 +526,22 @@ class ReplanEvaluationRead(BaseModel):
     debounce_until: str | None = None
     evaluated_at: str | None = None
     incident_version: int
+    idempotent: bool = False
+
+
+class ReplanEvaluationResponse(BaseModel):
+    incident_id: str
+    incident_version: int
+    active_plan_id: str
+    pending_plan_id: str | None = None
+    status: str
+    material: bool
+    idempotent: bool = False
+    trigger_reasons: list[str] = Field(default_factory=list)
+    input_fingerprint: str | None = None
+    explanation: dict[str, Any] = Field(default_factory=dict)
+    evaluation: ReplanEvaluationRead | None = None
+    plans: list[ResponsePlanRead] = Field(default_factory=list)
 
 
 class PlanIncidentSummary(BaseModel):

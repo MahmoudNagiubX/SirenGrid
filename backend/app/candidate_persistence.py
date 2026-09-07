@@ -17,10 +17,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.candidate_evaluation import EvaluatedCandidate
-from app.models import Incident, ResponsePlan, TimelineEvent
+from app.models import Incident, ReplanEvaluation, ResponsePlan, TimelineEvent
 from app.schemas import IncidentStatus, ResponsePlanStatus
 
-__all__ = ["persist_candidate_set"]
+__all__ = ["persist_candidate_set", "persist_replacement_candidate_set"]
 
 
 def _json_safe(value: Any) -> Any:
@@ -257,4 +257,116 @@ def persist_candidate_set(
     for plan in persisted:
         db.refresh(plan)
     db.refresh(incident)
+    return tuple(persisted)
+
+
+def persist_replacement_candidate_set(
+    db: Session,
+    incident: Incident,
+    active_plan: ResponsePlan,
+    ranked_candidates: Iterable[EvaluatedCandidate],
+    *,
+    evaluation: ReplanEvaluation,
+    reposition_proposals: Mapping[tuple[str, ...], Any] | None = None,
+    requirements_metadata: Mapping[str, Any] | None = None,
+    replan_metadata: Mapping[str, Any] | None = None,
+    now_utc: datetime | None = None,
+) -> tuple[ResponsePlan, ...]:
+    """Persist one hypothetical replacement set without moving active truth."""
+    if incident.current_plan_id != active_plan.id:
+        raise ValueError("Active plan changed during replacement evaluation")
+    if active_plan.status != ResponsePlanStatus.APPROVED:
+        raise ValueError("Replacement evaluation requires an APPROVED active plan")
+    candidates = tuple(ranked_candidates)
+    if not candidates:
+        raise ValueError("At least one evaluated replacement candidate is required")
+    timestamp = now_utc or datetime.now(timezone.utc)
+    set_id = str(uuid.uuid4())
+    existing_plans = db.scalars(
+        select(ResponsePlan).where(ResponsePlan.incident_id == incident.id)
+    ).all()
+    if incident.pending_replan_plan_id:
+        for existing in existing_plans:
+            metrics = existing.metrics_json or {}
+            replan = metrics.get("replan") if isinstance(metrics, dict) else None
+            if (
+                isinstance(replan, dict)
+                and replan.get("active_plan_id") == active_plan.id
+                and existing.status
+                in (ResponsePlanStatus.RECOMMENDED, ResponsePlanStatus.ALTERNATIVE)
+            ):
+                existing.status = ResponsePlanStatus.SUPERSEDED
+    next_plan_version = max((plan.plan_version for plan in existing_plans), default=0) + 1
+    resulting_incident_version = incident.version + 1
+    persisted: list[ResponsePlan] = []
+    candidate_count = len(candidates)
+    for rank, candidate in enumerate(candidates):
+        phase04 = _phase04_metrics(
+            candidate,
+            candidate_set_id=set_id,
+            candidate_rank=rank,
+            candidate_count=candidate_count,
+            reposition_proposal=(
+                reposition_proposals.get(candidate.combination.resource_ids)
+                if reposition_proposals
+                else None
+            ),
+            requirements_metadata=requirements_metadata,
+        )
+        metrics = _top_level_metrics(
+            candidate,
+            candidate_set_id=set_id,
+            candidate_rank=rank,
+            candidate_count=candidate_count,
+            phase04=phase04,
+        )
+        metrics["replan"] = _json_safe(
+            {**(replan_metadata or {}), "active_plan_id": active_plan.id}
+        )
+        plan = ResponsePlan(
+            id=str(uuid.uuid4()),
+            incident_id=incident.id,
+            incident_version=resulting_incident_version,
+            plan_version=next_plan_version + rank,
+            status=(
+                ResponsePlanStatus.RECOMMENDED
+                if rank == 0
+                else ResponsePlanStatus.ALTERNATIVE
+            ),
+            resource_ids_json=list(candidate.combination.resource_ids),
+            routes_json=_route_record(candidate),
+            metrics_json=metrics,
+            score_breakdown_json=_json_safe(candidate.score),
+            created_at=timestamp,
+        )
+        db.add(plan)
+        persisted.append(plan)
+
+    incident.version = resulting_incident_version
+    incident.pending_replan_plan_id = persisted[0].id
+    incident.updated_at = timestamp
+    evaluation.status = "RECOMMENDED"
+    evaluation.pending_plan_id = persisted[0].id
+    evaluation.evaluated_at = timestamp
+    evaluation.explanation_json = _json_safe(replan_metadata or {})
+    db.add(
+        TimelineEvent(
+            id=str(uuid.uuid4()),
+            incident_id=incident.id,
+            event_type="REPLAN_GENERATED",
+            details_json={
+                **_json_safe(replan_metadata or {}),
+                "pending_plan_id": persisted[0].id,
+                "pending_candidate_plan_ids": [plan.id for plan in persisted],
+                "resulting_incident_version": resulting_incident_version,
+                "active_plan_id": active_plan.id,
+            },
+            created_at=timestamp,
+        )
+    )
+    db.commit()
+    for plan in persisted:
+        db.refresh(plan)
+    db.refresh(incident)
+    db.refresh(evaluation)
     return tuple(persisted)
