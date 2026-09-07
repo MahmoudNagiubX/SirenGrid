@@ -114,6 +114,7 @@ class TrafficSnapshot(BaseModel):
     snapshot_id: str
     version: int = Field(gt=0)
     graph_fingerprint: str
+    sample_points_fingerprint: str
     provider_state: TrafficProviderState
     refresh_attempted_at: datetime
     retrieved_at: datetime | None = None

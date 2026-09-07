@@ -28,6 +28,7 @@ class CorridorSamplePoint(BaseModel):
 
     sample_id: str = Field(min_length=1)
     corridor_name: str = Field(min_length=1)
+    osm_name: str | None = None
     lat: float = Field(ge=-90, le=90)
     lon: float = Field(ge=-180, le=180)
 

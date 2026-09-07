@@ -24,6 +24,7 @@ def make_snapshot(
         snapshot_id="traffic-test-1",
         version=1,
         graph_fingerprint="graph-sha256",
+        sample_points_fingerprint="sample-sha256",
         provider_state=TrafficProviderState.AVAILABLE,
         refresh_attempted_at=refresh_attempted_at
         or retrieved_at
