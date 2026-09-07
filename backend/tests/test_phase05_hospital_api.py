@@ -280,6 +280,50 @@ def test_destination_replacement_before_prealert_rebinds_option_set_and_incremen
     assert current_incident.version == 6
 
 
+def test_prealert_failure_is_terminal_without_claiming_sent(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    incident, _, _ = _create_approved_transport_plan(db_session)
+    options = _generate_options(client, incident, monkeypatch)
+    hospital_id = options["options"][0]["hospital"]["id"]
+    selected = client.post(
+        f"/api/v1/incidents/{incident.id}/hospital-destination/select",
+        json={
+            "expected_incident_version": 4,
+            "expected_plan_version": 1,
+            "expected_option_set_version": 1,
+            "hospital_id": hospital_id,
+            "operator_reference": "operator-05",
+        },
+    )
+    assert selected.status_code == 200
+    failed = client.post(
+        f"/api/v1/incidents/{incident.id}/hospital-prealert",
+        json={
+            "expected_incident_version": 5,
+            "expected_plan_version": 1,
+            "operator_reference": "operator-05",
+            "simulate_failure": True,
+        },
+    )
+    assert failed.status_code == 200, failed.text
+    assert failed.json()["status"] == "FAILED"
+    assert failed.json()["sent_at"] is None
+    assert failed.json()["acknowledged_at"] is None
+    repeated = client.post(
+        f"/api/v1/incidents/{incident.id}/hospital-prealert",
+        json={
+            "expected_incident_version": 5,
+            "expected_plan_version": 1,
+            "operator_reference": "operator-05",
+        },
+    )
+    assert repeated.status_code == 200
+    assert repeated.json()["status"] == "FAILED"
+
+
 def test_hospital_simulation_state_uses_unknown_defaults_and_versioned_updates(
     client: TestClient,
 ) -> None:

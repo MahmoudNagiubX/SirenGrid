@@ -20,11 +20,13 @@ from app.schemas import (
     CorridorSignalState,
     DataReality,
 )
+from app.traffic_signal_gateway import TrafficSignalGateway
 from app.websocket import publish_operations_event
 
 __all__ = ["router"]
 
 router = APIRouter(tags=["corridor"])
+traffic_signal_gateway = TrafficSignalGateway()
 
 
 def _acquire_write_lock(db: Session) -> None:
@@ -72,28 +74,6 @@ def _serialize_corridor(row: CorridorState) -> dict[str, Any]:
         provenance=row.provenance_json or {},
         updated_at=row.updated_at.isoformat(),
     ).model_dump(mode="json")
-
-
-_ALLOWED_TRANSITIONS: dict[str, set[str]] = {
-    CorridorSignalState.NORMAL.value: {
-        CorridorSignalState.REQUESTED.value,
-        CorridorSignalState.FAILED.value,
-    },
-    CorridorSignalState.REQUESTED.value: {
-        CorridorSignalState.PREPARING.value,
-        CorridorSignalState.FAILED.value,
-    },
-    CorridorSignalState.PREPARING.value: {
-        CorridorSignalState.PRIORITY_ACTIVE.value,
-        CorridorSignalState.FAILED.value,
-    },
-    CorridorSignalState.PRIORITY_ACTIVE.value: {
-        CorridorSignalState.PASSED.value,
-        CorridorSignalState.FAILED.value,
-    },
-    CorridorSignalState.PASSED.value: set(),
-    CorridorSignalState.FAILED.value: set(),
-}
 
 
 @router.post("/incidents/{incident_id}/corridor", response_model=CorridorRead)
@@ -195,9 +175,11 @@ def update_corridor_priority(
     ).first()
     if row is None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Generate the approved-route corridor first")
-    target_state = payload.state.value
-    if target_state != row.state and target_state not in _ALLOWED_TRANSITIONS.get(row.state, set()):
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Illegal corridor priority transition {row.state} -> {target_state}")
+    try:
+        gateway_result = traffic_signal_gateway.transition(row.state, payload.state)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    target_state = gateway_result.state.value
     now = datetime.now(timezone.utc)
     row.state = target_state
     row.version += 1

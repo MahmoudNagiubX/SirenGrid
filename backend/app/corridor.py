@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from pyproj import Transformer
-from shapely.geometry import LineString, Point, mapping, shape
+from shapely.geometry import LineString, Point
 from shapely.ops import transform
 
 from app.config import settings
@@ -16,7 +16,6 @@ __all__ = ["CorridorSignal", "extract_corridor_signals"]
 
 
 _TO_METERS = Transformer.from_crs("EPSG:4326", "EPSG:32636", always_xy=True).transform
-_TO_WGS84 = Transformer.from_crs("EPSG:32636", "EPSG:4326", always_xy=True).transform
 
 
 @dataclass(frozen=True)
@@ -143,8 +142,3 @@ def corridor_provenance() -> dict[str, Any]:
         "signal_buffer_m": settings.CORRIDOR_SIGNAL_BUFFER_METERS,
         "priority_reality": "SIMULATED",
     }
-
-
-def serialize_route_geometry(route_geometry: dict[str, Any]) -> dict[str, Any]:
-    """Return a JSON-safe copy without changing the approved geometry."""
-    return mapping(shape(route_geometry))

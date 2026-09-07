@@ -14,11 +14,28 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.models import DriverAlert, EmergencyResource, Incident, ResponsePlan, TimelineEvent
 
-__all__ = ["refresh_driver_alert", "current_driver_alert", "build_forward_alert_geometry"]
+__all__ = [
+    "DriverAlertGateway",
+    "refresh_driver_alert",
+    "current_driver_alert",
+    "build_forward_alert_geometry",
+]
 
 
 _TO_METERS = Transformer.from_crs("EPSG:4326", "EPSG:32636", always_xy=True).transform
 _TO_WGS84 = Transformer.from_crs("EPSG:32636", "EPSG:4326", always_xy=True).transform
+
+
+class DriverAlertGateway:
+    """Simulation boundary for geographic alert delivery."""
+
+    data_reality = "SIMULATED"
+
+    def delivery_state(self, *, geometry: dict[str, Any] | None) -> str:
+        return "SIMULATED_DELIVERED" if geometry is not None else "SIMULATED_EXPIRED"
+
+
+driver_alert_gateway = DriverAlertGateway()
 
 
 def _route_for_resource(plan: ResponsePlan, resource_id: str) -> tuple[dict[str, Any], str]:
@@ -140,6 +157,7 @@ def refresh_driver_alert(
             "buffer_m": settings.DRIVER_ALERT_BUFFER_METERS,
             "expiry_seconds": settings.DRIVER_ALERT_EXPIRY_SECONDS,
             "geometry_reality": "REAL_DERIVED",
+            "delivery_state": driver_alert_gateway.delivery_state(geometry=alert_geometry),
         },
     )
     db.add(alert)

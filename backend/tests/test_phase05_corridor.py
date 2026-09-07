@@ -13,6 +13,7 @@ from app.corridor import extract_corridor_signals
 from app.db import init_db
 from app.main import app
 from app.schemas import CorridorSignalState
+from app.traffic_signal_gateway import TrafficSignalGateway
 from test_phase05_hospital_api import _create_approved_transport_plan
 
 
@@ -49,6 +50,13 @@ def test_corridor_extraction_uses_real_osm_signals_and_approved_timing() -> None
     assert all(item.provenance["matching_tolerance_m"] == 50 for item in signals)
     assert all(item.request_time for item in signals)
     assert signals[0].request_time != now.isoformat()
+
+
+def test_traffic_signal_gateway_exposes_only_simulated_forward_states() -> None:
+    gateway = TrafficSignalGateway()
+    assert gateway.transition("NORMAL", CorridorSignalState.REQUESTED).data_reality == "SIMULATED"
+    with pytest.raises(ValueError, match="Illegal corridor priority transition"):
+        gateway.transition("NORMAL", CorridorSignalState.PASSED)
 
 
 def test_corridor_api_preserves_route_eta_and_priority_is_simulated(

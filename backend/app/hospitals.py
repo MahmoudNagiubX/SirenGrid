@@ -22,14 +22,8 @@ __all__ = [
 ]
 
 HOSPITAL_SCORE_POLICY_VERSION = "SIRENGRID_PROTOTYPE_HOSPITAL_SCORE_V1"
-HOSPITAL_ETA_NORMALIZER_SECONDS = 900
-HOSPITAL_SCORE_WEIGHTS = {
-    "eta": 0.55,
-    "capability": 0.20,
-    "load": 0.20,
-    "freshness": 0.05,
-    "capacity": 0.00,
-}
+HOSPITAL_ETA_NORMALIZER_SECONDS = settings.HOSPITAL_ETA_NORMALIZER_SECONDS
+HOSPITAL_SCORE_WEIGHTS = settings.HOSPITAL_SCORE_WEIGHTS
 
 
 class HospitalStaticRecord(BaseModel):
@@ -54,6 +48,7 @@ class HospitalOperationalSnapshot(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     hospital_id: str
+    version: int = 0
     accepting_state: str = "UNKNOWN"
     simulated_load_ratio: float | None = Field(default=None, ge=0.0, le=1.0)
     simulated_free_capacity: int | None = Field(default=None, ge=0)

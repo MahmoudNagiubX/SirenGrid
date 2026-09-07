@@ -14,7 +14,7 @@ class SimulatedPreAlertResult:
     """Deterministic result of the Phase 05 simulated hospital boundary."""
 
     status: HospitalPreAlertStatus
-    sent_at: datetime
+    sent_at: datetime | None
     acknowledged_at: datetime | None
     failed_at: datetime | None
     failure_reason: str | None
@@ -37,7 +37,7 @@ class SimulatedHospitalGateway:
         if simulate_failure:
             return SimulatedPreAlertResult(
                 status=HospitalPreAlertStatus.FAILED,
-                sent_at=requested_at,
+                sent_at=None,
                 acknowledged_at=None,
                 failed_at=requested_at,
                 failure_reason="SIMULATED_GATEWAY_FAILURE",

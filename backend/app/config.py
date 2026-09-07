@@ -50,6 +50,11 @@ class Settings(BaseModel):
     prototype_score_weight_hospital: Literal[0.0] = 0.0
     reposition_coverage_drop_trigger: Literal[0.05] = 0.05
     hospital_eta_normalizer_seconds: Literal[900] = 900
+    hospital_score_weight_eta: Literal[0.55] = 0.55
+    hospital_score_weight_capability: Literal[0.20] = 0.20
+    hospital_score_weight_load: Literal[0.20] = 0.20
+    hospital_score_weight_freshness: Literal[0.05] = 0.05
+    hospital_score_weight_capacity: Literal[0.0] = 0.0
     corridor_signal_buffer_meters: Literal[50] = 50
     signal_priority_safety_lead_time_seconds: Literal[30] = 30
     driver_alert_lookahead_meters: Literal[500] = 500
@@ -116,6 +121,16 @@ class Settings(BaseModel):
     @property
     def HOSPITAL_ETA_NORMALIZER_SECONDS(self) -> int:
         return self.hospital_eta_normalizer_seconds
+
+    @property
+    def HOSPITAL_SCORE_WEIGHTS(self) -> dict[str, float]:
+        return {
+            "eta": self.hospital_score_weight_eta,
+            "capability": self.hospital_score_weight_capability,
+            "load": self.hospital_score_weight_load,
+            "freshness": self.hospital_score_weight_freshness,
+            "capacity": self.hospital_score_weight_capacity,
+        }
 
     @property
     def CORRIDOR_SIGNAL_BUFFER_METERS(self) -> int:

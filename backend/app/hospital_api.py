@@ -80,6 +80,7 @@ def _snapshot(db: Session, hospital_id: str) -> HospitalOperationalSnapshot:
         return HospitalOperationalSnapshot.unknown(hospital_id)
     return HospitalOperationalSnapshot(
         hospital_id=row.hospital_id,
+        version=row.version,
         accepting_state=row.accepting_state,
         simulated_load_ratio=row.simulated_load_ratio,
         simulated_free_capacity=row.simulated_free_capacity,
@@ -101,6 +102,7 @@ def _serialize_hospital(
         name=hospital.name,
         latitude=hospital.latitude,
         longitude=hospital.longitude,
+        operational_version=state.version,
         static_capabilities=list(hospital.static_capabilities),
         static_capacity=hospital.static_capacity,
         accepting_state=state.accepting_state,
@@ -195,12 +197,17 @@ def _resource_origin(db: Session, plan: ResponsePlan) -> tuple[str, dict[str, fl
 
 def _traffic_snapshot(graph: Any) -> Any:
     now = datetime.now(timezone.utc)
-    return traffic_runtime.capture_snapshot(
-        graph,
-        now=now,
-        wall_clock=lambda: datetime.now(timezone.utc),
-        monotonic=time.monotonic,
-    )
+    try:
+        return traffic_runtime.capture_snapshot(
+            graph,
+            now=now,
+            wall_clock=lambda: datetime.now(timezone.utc),
+            monotonic=time.monotonic,
+        )
+    except (OSError, RuntimeError, ValueError):
+        # Phase 02 requires provider failures/malformed freshness to remain
+        # observable through the route fallback, never to block base routing.
+        return None
 
 
 def _option_response(option_set: HospitalOptionSet, incident: Incident) -> dict[str, Any]:
@@ -361,7 +368,10 @@ def generate_hospital_options(
             "provenance": {
                 "source": "SIRENGRID_HOSPITAL_OPTION_ENGINE",
                 "data_reality": "REAL_DERIVED",
-                "freshness_status": "FRESH",
+                "freshness_status": (
+                    candidate.route.get("traffic_freshness_status")
+                    or (snapshot.freshness_status.value if snapshot is not None else "UNKNOWN")
+                ),
                 "source_reference": candidate.route.get("traffic_snapshot_id") or "OSM_BASE_TRAVEL_TIME",
                 "transport_origin_resource_id": resource_id,
             },
@@ -378,7 +388,9 @@ def generate_hospital_options(
         provenance_json={
             "source": "OSM/Overpass + SirenGrid routing",
             "data_reality": "REAL_DERIVED",
-            "freshness_status": "FRESH",
+            "freshness_status": (
+                snapshot.freshness_status.value if snapshot is not None else "UNKNOWN"
+            ),
             "source_reference": "nasr_city_emergency_facilities.geojson",
             "traffic_snapshot_id": snapshot.snapshot_id if snapshot else None,
         },
@@ -623,13 +635,14 @@ def request_hospital_prealert(
         simulate_failure=payload.simulate_failure,
     )
     alert.sent_at = gateway_result.sent_at
-    alert.status = HospitalPreAlertStatus.SENT.value
-    db.add(TimelineEvent(
-        id=str(uuid.uuid4()), incident_id=incident.id,
-        event_type="HOSPITAL_PREALERT_SENT",
-        details_json={"prealert_id": alert.id, "data_reality": DataReality.SIMULATED.value},
-        created_at=now,
-    ))
+    if gateway_result.status is not HospitalPreAlertStatus.FAILED:
+        alert.status = HospitalPreAlertStatus.SENT.value
+        db.add(TimelineEvent(
+            id=str(uuid.uuid4()), incident_id=incident.id,
+            event_type="HOSPITAL_PREALERT_SENT",
+            details_json={"prealert_id": alert.id, "data_reality": DataReality.SIMULATED.value},
+            created_at=now,
+        ))
     alert.status = gateway_result.status.value
     alert.acknowledged_at = gateway_result.acknowledged_at
     alert.failed_at = gateway_result.failed_at

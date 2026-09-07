@@ -40,17 +40,21 @@ REQUESTED → SENT → ACKNOWLEDGED or FAILED flow without automatic retry.
 
 ## Corridor flow
 
-The corridor uses only the approved active responder route. OSM signal points
-within 50 m are projected to the route and ordered by route distance. Signal
-priority uses the approved 30-second prototype lead time and explicit
-simulated states. It does not alter routing or ETA.
+The corridor uses only the approved active responder route. When an approved
+plan contains multiple responder routes, the corridor action requires the
+operator to identify the assigned resource route; the service never silently
+chooses a different route. OSM signal points within 50 m are projected to the
+route and ordered by route distance. Signal priority uses the approved
+30-second prototype lead time and explicit `TrafficSignalGateway` simulated
+states. It does not alter routing or ETA.
 
 ## Driver-alert flow
 
 Explicit simulated route progress drives a 500 m forward route segment buffered
 by 30 m. Each explicit refresh/movement command replaces the prior region and
-sets a 120-second simulated expiry. Route end expires the region. No ticker,
-private patient data, or real delivery integration is introduced.
+sets a 120-second simulated expiry through `DriverAlertGateway`. Route end
+expires the region. No ticker, private patient data, or real delivery
+integration is introduced.
 
 ## API shape
 

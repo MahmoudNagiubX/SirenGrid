@@ -1260,6 +1260,7 @@ class HospitalRead(BaseModel):
     longitude: float
     static_capabilities: list[str] = Field(default_factory=list)
     static_capacity: int | None = None
+    operational_version: int = Field(ge=0)
     accepting_state: HospitalAcceptingState
     simulated_load_ratio: float | None = None
     simulated_free_capacity: int | None = None
