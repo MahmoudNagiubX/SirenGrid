@@ -48,6 +48,7 @@ class Settings(BaseModel):
     prototype_score_weight_reserve: Literal[0.20] = 0.20
     prototype_score_weight_reposition: Literal[0.05] = 0.05
     prototype_score_weight_hospital: Literal[0.0] = 0.0
+    reposition_coverage_drop_trigger: Literal[0.05] = 0.05
     nasr_city_data_dir: Path = Field(default_factory=lambda: DEFAULT_DATA_DIR)
     tomtom_api_key: str | None = Field(default=None, exclude=True)
     tomtom_refresh_interval_seconds: Literal[60] = 60
@@ -101,6 +102,10 @@ class Settings(BaseModel):
             "reposition": self.prototype_score_weight_reposition,
             "hospital": self.prototype_score_weight_hospital,
         }
+
+    @property
+    def REPOSITION_COVERAGE_DROP_TRIGGER(self) -> float:
+        return self.reposition_coverage_drop_trigger
 
     @property
     def NASR_CITY_DATA_DIR(self) -> Path:
@@ -187,6 +192,9 @@ def get_settings() -> Settings:
         ),
         prototype_score_weight_hospital=float(
             os.getenv("PROTOTYPE_SCORE_WEIGHT_HOSPITAL", "0.0")
+        ),
+        reposition_coverage_drop_trigger=float(
+            os.getenv("REPOSITION_COVERAGE_DROP_TRIGGER", "0.05")
         ),
         nasr_city_data_dir=nasr_city_data_dir,
         tomtom_api_key=os.getenv("TOMTOM_API_KEY") or None,
