@@ -60,6 +60,7 @@ __all__ = [
     "HospitalDestinationRead",
     "HospitalPreAlertRequest",
     "HospitalPreAlertRead",
+    "CorridorGenerateRequest",
     "CorridorSignalRead",
     "CorridorRead",
     "CorridorPriorityRequest",
@@ -1372,6 +1373,10 @@ class CorridorRead(BaseModel):
     data_reality: DataReality
     provenance: dict[str, Any] = Field(default_factory=dict)
     updated_at: str
+
+
+class CorridorGenerateRequest(BaseModel):
+    resource_id: str = Field(min_length=1)
 
 
 class CorridorPriorityRequest(BaseModel):
