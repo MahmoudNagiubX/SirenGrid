@@ -44,7 +44,15 @@
     }
   },
   "vision": {
-    "provider": "NOT_YET_BENCHMARKED",
+    "provider": "qwen",
+    "model": "qwen/qwen3.8-27b",
+    "fixture": "data/evaluation/phase00/img1.jpg",
+    "evaluation_mode": "five bounded safety assertions over one authorized synthetic fixture; one provider request",
+    "benchmark_status": "BENCHMARK_APPROVED",
+    "schema_valid_count": 5,
+    "case_count": 5,
+    "critical_unsupported_facts": 0,
+    "identity_claims": 0,
     "enabled": false,
     "default_enabled": false,
     "required_gate": {
