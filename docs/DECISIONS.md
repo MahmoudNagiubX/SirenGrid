@@ -341,3 +341,100 @@ This preserves separate service-cohort truth while making the plan-level coverag
 
 ### Impact
 Phase 04 stores and exposes per-cohort and joint coverage facts. Plan-level coverage delta, affected zones, unreachable count, ranking coverage penalty, and reposition triggers use the explicit joint aggregate. Joint coverage remains a prototype model, not an emergency-response guarantee, SLA, simultaneous-arrival claim, or proof of capacity for future incidents.
+
+## PD-018 — Phase 05 Hospital Registry Source
+
+**Date:** 2026-09-07
+**Status:** Approved
+**Owner:** Project owner
+
+### Decision
+Use the existing OSM/Overpass hospital asset as the Phase 05 real static hospital registry. Do not require MOHP data to begin Phase 05. Unavailable static capacity, specialty, service-availability, and emergency-capability fields remain unknown/null. Do not fuzzy-merge similar names; use stable source identity and only deterministic exact duplicate-source deduplication.
+
+### Impact
+Hospital location/identity is real public/derived OSM data. Simulated operational state is separate and never presented as static public fact.
+
+## PD-019 — Phase 05 Transport and Hospital Capability Requirements
+
+**Date:** 2026-09-07
+**Status:** Approved
+**Owner:** Project owner
+
+### Decision
+Represent `transport_required` as `true`, `false`, or `unknown`, and represent only explicitly known required hospital capability tags. Sources are operator-confirmed or explicit structured/source facts. Do not infer transport or hospital medical requirements from severity, casualty count, ambulance assignment, incident type, general knowledge, or LLM output. Unknown transport requires operator confirmation; false transport requires no hospital recommendation; true transport with no capability requirement may proceed without capability filtering.
+
+## PD-020 — Phase 05 Simulated Hospital Operational State
+
+**Date:** 2026-09-07
+**Status:** Approved
+**Owner:** Project owner
+
+### Decision
+Use an explicit `SimulatedHospitalGateway` for accepting state, simulated load/free capacity, incoming cases, and timestamps. Defaults are unknown/null until an explicit deterministic fixture/state is supplied. No random, hash-derived, background-evolving, or fake live values are allowed. All operational values are `SIMULATED`.
+
+## PD-021 — Phase 05 Hospital Ranking Policy
+
+**Date:** 2026-09-07
+**Status:** Approved
+**Owner:** Project owner
+
+### Decision
+Use lower-is-better policy `SIRENGRID_PROTOTYPE_HOSPITAL_SCORE_V1`. Hard-filter explicit not-accepting hospitals, confirmed incompatible capabilities, and unreachable destinations. Unknown capability is not incompatible. Use `HOSPITAL_ETA_NORMALIZER_SECONDS = 900` without clamping. Capability penalty is 0 for no requirement or confirmed presence, 0.5 for unknown required capability; load penalty is clamped known simulated load or 0.5 when unknown; freshness penalty is 0 for explicit current simulated state, 0.5 when unknown, and 1 when explicitly stale. Static capacity weight is 0.00 because no reliable static capacity is currently available.
+
+Weights are ETA 0.55, capability 0.20, load 0.20, freshness 0.05, capacity 0.00. Persist raw values, normalized terms, uncertainty, weights, weighted terms, final score, and policy version. Tie-break by score, route ETA, confirmed capability, known load, known incoming cases, then hospital ID. Incoming cases are not a numeric score term.
+
+## PD-022 — Phase 05 Destination Selection and Versioning
+
+**Date:** 2026-09-07
+**Status:** Approved
+**Owner:** Project owner
+
+### Decision
+Destination selection is a separate operator action after response-plan approval. It requires the current approved plan, `transport_required == TRUE`, membership in the current hospital option set, and expected incident/plan/option versions. SQLite write protection applies; stale state returns HTTP 409. Selection creates exactly one current destination, increments incident version once, appends timeline history, and mutates no responder state.
+
+A selected destination may be replaced only before pre-alert request, through another version-safe command. Replacement supersedes the prior selection, increments incident version once, and invalidates locally prepared unsent payloads. Once pre-alert state is `REQUESTED` or later, replacement returns HTTP 409.
+
+## PD-023 — Phase 05 Simulated Hospital Pre-Alert
+
+**Date:** 2026-09-07
+**Status:** Approved
+**Owner:** Project owner
+
+### Decision
+Use `REQUESTED`, `SENT`, `ACKNOWLEDGED`, and `FAILED` states through `SimulatedHospitalGateway`. The default deterministic flow may synchronously reach `ACKNOWLEDGED`; deterministic failure injection is allowed for tests/demo. Requests are idempotent, have no automatic retry, and failed alerts remain failed. Payloads contain known facts only and all delivery/acknowledgement state is `SIMULATED`.
+
+## PD-024 — Phase 05 Corridor Extraction
+
+**Date:** 2026-09-07
+**Status:** Approved
+**Owner:** Project owner
+
+### Decision
+Derive the corridor only from the approved active responder route. Use OSM signal points within `CORRIDOR_SIGNAL_BUFFER_METERS = 50`, project them onto the route, and order by distance along route. Deduplicate by stable source feature ID, or deterministic coordinate identity when unavailable. Do not invent intersections or use named demo roads, straight lines, alternate routes, or unapproved hospital routes.
+
+## PD-025 — Phase 05 Simulated Signal Priority Timing
+
+**Date:** 2026-09-07
+**Status:** Approved
+**Owner:** Project owner
+
+### Decision
+Use `SIGNAL_PRIORITY_SAFETY_LEAD_TIME_SECONDS = 30` for the simulated request-time calculation. Signal states are `NORMAL`, `REQUESTED`, `PREPARING`, `PRIORITY_ACTIVE`, `PASSED`, and `FAILED`. Priority is simulated only and must not modify OSM base ETA, validated TomTom ETA, or approved route ETA. No signal-delay reduction formula is implemented.
+
+## PD-026 — Phase 05 Driver Alert Region
+
+**Date:** 2026-09-07
+**Status:** Approved
+**Owner:** Project owner
+
+### Decision
+Use explicit simulated route progress with `DRIVER_ALERT_LOOKAHEAD_METERS = 500`, `DRIVER_ALERT_BUFFER_METERS = 30`, and `DRIVER_ALERT_EXPIRY_SECONDS = 120`. Recompute only on explicit movement or refresh commands. Replace/expire the previous region, exclude passed route sections, and expire the active region at route end. Driver-alert payloads contain no patient/private incident facts and delivery is simulated.
+
+## PD-027 — Phase 05 API Contract
+
+**Date:** 2026-09-07
+**Status:** Approved
+**Owner:** Project owner
+
+### Decision
+Use separate domain action/state endpoints plus one aggregate read-only operational view under `/api/v1`. REST is canonical; WebSocket is invalidation/update transport only. The API must support hospital options/details/destination/pre-alert, corridor state/priority, driver-alert state/refresh, and an aggregate incident operational-state view. Exact endpoint schemas are implementation detail within these boundaries.
