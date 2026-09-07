@@ -81,7 +81,7 @@ def materiality_for_trigger(
         ),
         requirements_changed=bool(
             references.get("requirements_changed")
-            or {"INCIDENT_FACT_CHANGED", "OPERATOR_CONSTRAINT_CHANGED"} & reason_set
+            or "OPERATOR_CONSTRAINT_CHANGED" in reason_set
         ),
         hospital_not_accepting=bool(references.get("hospital_not_accepting")),
         hospital_unreachable=bool(references.get("hospital_unreachable")),

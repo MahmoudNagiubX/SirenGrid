@@ -15,6 +15,7 @@ from app.models import (
     DriverAlert,
     EmergencyResource,
     HospitalDestination,
+    HospitalOptionSet,
     Incident,
     ReplanEvaluation,
     ResponsePlan,
@@ -38,6 +39,24 @@ from app.schemas import (
     ResponsePlanStatus,
     Severity,
 )
+
+
+class _Phase07FakeHospitalRoute:
+    def model_dump(self, mode: str = "python") -> dict[str, object]:
+        del mode
+        return {
+            "geometry": {
+                "type": "LineString",
+                "coordinates": [[31.34, 30.05], [31.345, 30.055]],
+            },
+            "distance_m": 1200.0,
+            "eta_seconds": 180.0,
+            "effective_eta": 180.0,
+            "base_eta": 180.0,
+            "routing_source": "OSM_BASE_TRAVEL_TIME",
+            "traffic_snapshot_id": None,
+            "traffic_freshness_status": None,
+        }
 
 
 def test_replan_evaluation_persists_pending_trigger_state(
@@ -626,6 +645,7 @@ def test_required_assigned_resource_outage_records_replan_trigger(
 def test_selected_hospital_not_accepting_records_replan_trigger(
     isolated_engine: Engine,
     db_session: Session,
+    monkeypatch,
 ) -> None:
     init_db(isolated_engine)
     incident = Incident(
@@ -638,6 +658,7 @@ def test_selected_hospital_not_accepting_records_replan_trigger(
         latitude=30.05,
         longitude=31.34,
         current_plan_id="approved-plan",
+        transport_required=True,
     )
     plan = ResponsePlan(
         id="approved-plan",
@@ -645,10 +666,34 @@ def test_selected_hospital_not_accepting_records_replan_trigger(
         incident_version=4,
         plan_version=1,
         status=ResponsePlanStatus.APPROVED,
-        resource_ids_json=[],
-        routes_json=[],
+        resource_ids_json=["resource-a"],
+        routes_json=[
+            {
+                "resource_id": "resource-a",
+                "resource_type": "AMBULANCE",
+                "origin": {"lat": 30.05, "lon": 31.34},
+                "distance_m": 100.0,
+                "eta_seconds": 20.0,
+                "geometry": {
+                    "type": "LineString",
+                    "coordinates": [[31.34, 30.05], [31.345, 30.055]],
+                },
+            }
+        ],
         metrics_json={},
         score_breakdown_json={},
+    )
+    resource = EmergencyResource(
+        id="resource-a",
+        version=1,
+        name="Assigned ambulance",
+        resource_type=ResourceType.AMBULANCE,
+        capability_tags_json=[],
+        status=ResourceStatus.ASSIGNED,
+        latitude=30.05,
+        longitude=31.34,
+        assigned_incident_id=incident.id,
+        provenance_json={"data_reality": DataReality.SIMULATED.value},
     )
     destination = HospitalDestination(
         id="destination-1",
@@ -660,8 +705,14 @@ def test_selected_hospital_not_accepting_records_replan_trigger(
         incident_version=incident.version,
         plan_version=plan.plan_version,
     )
-    db_session.add_all([incident, plan, destination])
+    db_session.add_all([incident, plan, destination, resource])
     db_session.commit()
+    monkeypatch.setattr("app.hospital_api.load_routing_graph", lambda: object())
+    monkeypatch.setattr("app.hospital_api._traffic_snapshot", lambda graph: None)
+    monkeypatch.setattr(
+        "app.hospital_api.compute_traffic_aware_route",
+        lambda *args, **kwargs: _Phase07FakeHospitalRoute(),
+    )
 
     response = TestClient(app).patch(
         "/api/v1/hospitals/osm:('node', 443368255)/simulation-state",
@@ -689,6 +740,18 @@ def test_selected_hospital_not_accepting_records_replan_trigger(
         "hospital_not_accepting": True,
         "accepting_state": "NOT_ACCEPTING",
     }
+    option_set = db_session.scalar(
+        select(HospitalOptionSet).where(
+            HospitalOptionSet.incident_id == incident.id,
+            HospitalOptionSet.plan_id == plan.id,
+        )
+    )
+    assert option_set is not None
+    assert any(
+        item["hospital_id"] == "osm:('node', 443368255)"
+        and item["reason"] == "NOT_ACCEPTING"
+        for item in option_set.excluded_hospitals_json
+    )
 
 
 def test_replacement_approval_releases_out_of_service_resource_without_reactivating_it(

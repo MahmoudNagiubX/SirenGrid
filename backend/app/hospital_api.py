@@ -358,6 +358,12 @@ def patch_hospital_simulation_state(
                     "accepting_state": row.accepting_state,
                 },
             )
+            active_plan = db.get(ResponsePlan, incident.current_plan_id)
+            if active_plan is not None and active_plan.resource_ids_json:
+                # Refresh the option set against the updated simulated state;
+                # this remains an explicit hospital recommendation and does
+                # not select or redirect a destination.
+                generate_hospital_options(incident.id, db)
     return _serialize_hospital(hospital, _snapshot(db, hospital_id))
 
 
