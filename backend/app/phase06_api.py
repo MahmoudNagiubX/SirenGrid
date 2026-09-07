@@ -25,7 +25,13 @@ from app.incidents import (
 )
 from app.media import MediaValidationError, store_media
 from app.models import Incident, Report, TimelineEvent
-from app.schemas import DataReality, FreshnessStatus, IncidentFactsPatchRequest, ReportRead
+from app.schemas import (
+    DataReality,
+    FreshnessStatus,
+    IncidentFactsPatchRequest,
+    IncidentStatus,
+    ReportRead,
+)
 from app.websocket import publish_operations_event
 
 router = APIRouter(tags=["phase06"])
@@ -54,6 +60,15 @@ class ManualTranscriptRequest(BaseModel):
 
     operator_reference: str = Field(min_length=1, max_length=200)
     transcript: str = Field(min_length=1, max_length=20000)
+
+
+class DuplicateMergeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    canonical_incident_id: str
+    expected_incident_version: int = Field(ge=1)
+    expected_canonical_incident_version: int = Field(ge=1)
+    operator_reference: str = Field(min_length=1, max_length=200)
 
 
 def _report_claims(report: Report) -> list[EvidenceClaim]:
@@ -461,6 +476,83 @@ def add_manual_transcript(
             payload=serialize_timeline_event(event),
         )
     return serialize_report(report)
+
+
+@router.post("/incidents/{incident_id}/duplicate-merge")
+def merge_duplicate_incident(
+    incident_id: str,
+    payload: DuplicateMergeRequest,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _acquire_write_lock(db)
+    redundant = db.get(Incident, incident_id)
+    canonical = db.get(Incident, payload.canonical_incident_id)
+    if redundant is None or canonical is None:
+        raise HTTPException(status_code=404, detail="incident not found")
+    if redundant.id == canonical.id:
+        raise HTTPException(status_code=409, detail="an incident cannot merge into itself")
+    if payload.expected_incident_version != redundant.version:
+        raise HTTPException(status_code=409, detail="redundant incident version mismatch")
+    if payload.expected_canonical_incident_version != canonical.version:
+        raise HTTPException(status_code=409, detail="canonical incident version mismatch")
+    if redundant.current_plan_id or _incident_fusion_view(redundant).has_committed_operational_state:
+        raise HTTPException(
+            status_code=409,
+            detail="REQUIRES_REVIEW: redundant incident has committed operational state",
+        )
+
+    now_utc = datetime.now(timezone.utc)
+    reports = db.query(Report).filter(Report.incident_id == redundant.id).all()
+    for report in reports:
+        report.incident_id = canonical.id
+        db.add(report)
+
+    redundant.status = IncidentStatus.DUPLICATE_MERGED
+    redundant.version += 1
+    redundant.updated_at = now_utc
+    redundant_provenance = dict(redundant.provenance_json or {})
+    redundant_provenance["canonical_incident_id"] = canonical.id
+    redundant_provenance["fusion_status"] = "DUPLICATE_MERGED"
+    redundant.provenance_json = redundant_provenance
+
+    canonical.version += 1
+    canonical.updated_at = now_utc
+    redundant_event = _timeline_event(
+        incident_id=redundant.id,
+        event_type="DUPLICATE_MERGED",
+        details={
+            "canonical_incident_id": canonical.id,
+            "operator_reference": payload.operator_reference,
+            "new_incident_version": redundant.version,
+            "reports_attached": [report.id for report in reports],
+        },
+        created_at=now_utc,
+    )
+    canonical_event = _timeline_event(
+        incident_id=canonical.id,
+        event_type="DUPLICATE_INCIDENT_MERGED",
+        details={
+            "redundant_incident_id": redundant.id,
+            "operator_reference": payload.operator_reference,
+            "new_incident_version": canonical.version,
+            "reports_attached": [report.id for report in reports],
+        },
+        created_at=now_utc,
+    )
+    db.add_all([redundant, canonical, redundant_event, canonical_event])
+    db.commit()
+    db.refresh(redundant)
+    db.refresh(canonical)
+    publish_operations_event(
+        event="incident.updated",
+        incident_id=canonical.id,
+        payload=serialize_incident(canonical),
+    )
+    return {
+        "canonical_incident": serialize_incident(canonical),
+        "redundant_incident": serialize_incident(redundant),
+        "reports_attached": [report.id for report in reports],
+    }
 
 
 @router.get("/reports/{report_id}/claims")

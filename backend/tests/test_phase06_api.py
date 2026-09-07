@@ -289,3 +289,73 @@ def test_manual_transcript_fallback_appends_transcript_without_overwriting_media
     persisted = db_session.get(Report, report_id)
     assert persisted is not None
     assert len(persisted.evidence_items_json) == 2
+
+
+def test_explicit_duplicate_merge_preserves_reports_and_marks_redundant_incident(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    canonical = client.post("/api/v1/intake/manual", json=_incident_payload()).json()
+    redundant = client.post(
+        "/api/v1/intake/manual",
+        json={**_incident_payload(), "location_text": "Tayaran Street report B"},
+    ).json()
+    source_report = client.post(
+        "/api/v1/incidents/{}/reports".format(redundant["id"]),
+        json={
+            "source_type": "operator_manual_entry",
+            "source_reference": "redundant-report",
+            "raw_text": "Report attached to redundant incident.",
+        },
+    )
+    assert source_report.status_code == 201
+
+    merged = client.post(
+        f"/api/v1/incidents/{redundant['id']}/duplicate-merge",
+        json={
+            "canonical_incident_id": canonical["id"],
+            "expected_incident_version": 1,
+            "expected_canonical_incident_version": 1,
+            "operator_reference": "duplicate-reviewer",
+        },
+    )
+
+    assert merged.status_code == 200, merged.text
+    assert merged.json()["redundant_incident"]["status"] == "DUPLICATE_MERGED"
+    assert merged.json()["redundant_incident"]["version"] == 2
+    assert merged.json()["canonical_incident"]["version"] == 2
+    retained = db_session.get(Report, source_report.json()["id"])
+    assert retained is not None
+    assert retained.incident_id == canonical["id"]
+    redundant_events = db_session.query(TimelineEvent).filter_by(incident_id=redundant["id"]).all()
+    canonical_events = db_session.query(TimelineEvent).filter_by(incident_id=canonical["id"]).all()
+    assert any(event.event_type == "DUPLICATE_MERGED" for event in redundant_events)
+    assert any(event.event_type == "DUPLICATE_INCIDENT_MERGED" for event in canonical_events)
+
+
+def test_duplicate_merge_refuses_redundant_incident_with_committed_state(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    canonical = client.post("/api/v1/intake/manual", json=_incident_payload()).json()
+    redundant = client.post("/api/v1/intake/manual", json=_incident_payload()).json()
+    db_redundant = db_session.get(Incident, redundant["id"])
+    assert db_redundant is not None
+    db_redundant.current_plan_id = "committed-plan"
+    db_session.commit()
+
+    response = client.post(
+        f"/api/v1/incidents/{redundant['id']}/duplicate-merge",
+        json={
+            "canonical_incident_id": canonical["id"],
+            "expected_incident_version": 1,
+            "expected_canonical_incident_version": 1,
+            "operator_reference": "duplicate-reviewer",
+        },
+    )
+
+    assert response.status_code == 409
+    unchanged = db_session.get(Incident, redundant["id"])
+    assert unchanged is not None
+    assert unchanged.status == IncidentStatus.ACTIVE_UNCONFIRMED
+    assert unchanged.version == 1
