@@ -1,4 +1,5 @@
 import json
+import hashlib
 from pathlib import Path
 
 import networkx as nx
@@ -12,6 +13,8 @@ REQUIRED_FILES = [
     "nasr_city_grid_500m.geojson",
     "nasr_city_graph.graphml",
     "nasr_city_emergency_facilities.geojson",
+    "nasr_city_traffic_signals.geojson",
+    "nasr_city_traffic_sample_points.geojson",
     "provenance.json",
 ]
 
@@ -19,16 +22,9 @@ REQUIRED_GEOJSON_LAYERS = [
     "nasr_city_boundary.geojson",
     "nasr_city_grid_500m.geojson",
     "nasr_city_emergency_facilities.geojson",
+    "nasr_city_traffic_signals.geojson",
+    "nasr_city_traffic_sample_points.geojson",
 ]
-
-EXPECTED_PROVENANCE = {
-    "source_repo": "MahmoudNagiubX/Egypt-Smart-City-Digital-Twin",
-    "source_commit": "93ca9e90e2fc52c914dd5ccbe42bdc84ce745d3d",
-    "data_reality": "REAL_DERIVED",
-    "freshness_status": "STATIC",
-    "purpose": "Phase 01 Nasr City geospatial bootstrap",
-    "refresh_policy": "bootstrap only; refresh current OSM/Geofabrik/Overpass in Phase 02",
-}
 
 
 def test_required_geospatial_files_exist_and_non_empty():
@@ -58,7 +54,7 @@ def test_geojson_layers_valid_non_empty_feature_collections(geojson_filename: st
     assert len(features) > 0, f"{geojson_filename} features list is empty"
 
 
-def test_provenance_metadata_matches():
+def test_phase_02_provenance_metadata_and_hashes_match():
     provenance_path = NASR_CITY_ASSETS_DIR / "provenance.json"
     assert provenance_path.is_file(), "provenance.json does not exist"
 
@@ -66,10 +62,35 @@ def test_provenance_metadata_matches():
         provenance = json.load(f)
 
     assert isinstance(provenance, dict), "provenance.json root must be a JSON object"
-    for key, expected_value in EXPECTED_PROVENANCE.items():
-        assert key in provenance, f"Missing key '{key}' in provenance.json"
-        assert provenance[key] == expected_value, (
-            f"Provenance mismatch for '{key}': expected '{expected_value}', got '{provenance[key]}'"
+    assert provenance["acquisition_mode"] == "DIRECT_OSMNX_OVERPASS_OWNER_APPROVED"
+    assert provenance["approved_fallback"] == "Geofabrik Egypt OSM extract"
+    assert provenance["fallback_used"] is False
+    assert provenance["failed_refresh_policy"] == "PRESERVE_LAST_VALIDATED_REAL_GRAPH"
+    assert provenance["turn_restriction_support"] == "NOT_PROCESSED_OR_VALIDATED"
+    assert provenance["traffic_signal_operational_state"] == "NOT_AVAILABLE_FROM_OSM"
+
+    artifacts = provenance["artifacts"]
+    assert set(artifacts) == {
+        "nasr_city_graph.graphml",
+        "nasr_city_emergency_facilities.geojson",
+        "nasr_city_traffic_signals.geojson",
+        "nasr_city_traffic_sample_points.geojson",
+    }
+    for filename, metadata in artifacts.items():
+        path = NASR_CITY_ASSETS_DIR / filename
+        assert metadata["data_reality"] == "REAL_DERIVED"
+        assert metadata["freshness_status"] == "STATIC"
+        assert metadata["acquisition_freshness_status"] == "FRESH"
+        assert metadata["record_count"] > 0
+        assert metadata["sha256"] == hashlib.sha256(path.read_bytes()).hexdigest()
+
+    retained = provenance["retained_artifacts"]
+    for filename in ("nasr_city_boundary.geojson", "nasr_city_grid_500m.geojson"):
+        assert retained[filename]["source_repo"] == (
+            "MahmoudNagiubX/Egypt-Smart-City-Digital-Twin"
+        )
+        assert retained[filename]["source_commit"] == (
+            "93ca9e90e2fc52c914dd5ccbe42bdc84ce745d3d"
         )
 
 
@@ -81,3 +102,31 @@ def test_graphml_parsable_by_networkx():
     assert isinstance(graph, (nx.Graph, nx.MultiGraph, nx.DiGraph, nx.MultiDiGraph))
     assert graph.number_of_nodes() > 0, "Parsed graph has 0 nodes"
     assert graph.number_of_edges() > 0, "Parsed graph has 0 edges"
+    assert graph.is_directed()
+    assert graph.is_multigraph()
+    assert graph.graph["turn_restriction_support"] == "NOT_PROCESSED_OR_VALIDATED"
+    for _u, _v, data in graph.edges(data=True):
+        assert "oneway" in data
+        assert float(data["travel_time"]) > 0
+        assert float(data["base_travel_time_s"]) > 0
+
+
+def test_corridor_samples_preserve_utf8_and_bind_to_named_graph_edges():
+    graph = nx.read_graphml(NASR_CITY_ASSETS_DIR / "nasr_city_graph.graphml")
+    payload = json.loads(
+        (NASR_CITY_ASSETS_DIR / "nasr_city_traffic_sample_points.geojson").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert [feature["properties"]["corridor_name"] for feature in payload["features"]] == [
+        "Rabaa",
+        "Tayaran",
+        "Abbas El Akkad",
+        "Makram Ebeid",
+        "El Nasr Road",
+    ]
+    graph_names = {str(data.get("name", "")) for *_, data in graph.edges(data=True)}
+    for feature in payload["features"]:
+        name = feature["properties"]["osm_name"]
+        assert name in graph_names
+        assert "Ø" not in name and "Ù" not in name

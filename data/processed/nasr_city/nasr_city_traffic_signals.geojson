@@ -1,0 +1,341 @@
+{
+  "features": [
+    {
+      "geometry": {
+        "coordinates": [
+          31.3691875,
+          30.0570313
+        ],
+        "type": "Point"
+      },
+      "id": "('node', 3676648807)",
+      "properties": {
+        "bus": null,
+        "data_reality": "REAL_PUBLIC",
+        "freshness_status": "STATIC",
+        "gtfs:stop_id": null,
+        "highway": "traffic_signals",
+        "infrastructure_type": "traffic_signal",
+        "name": null,
+        "operational_state": "NOT_AVAILABLE_FROM_OSM",
+        "public_transport": null,
+        "traffic_signals": "signal",
+        "traffic_signals:direction": null
+      },
+      "type": "Feature"
+    },
+    {
+      "geometry": {
+        "coordinates": [
+          31.3692484,
+          30.0572041
+        ],
+        "type": "Point"
+      },
+      "id": "('node', 3946830192)",
+      "properties": {
+        "bus": null,
+        "data_reality": "REAL_PUBLIC",
+        "freshness_status": "STATIC",
+        "gtfs:stop_id": null,
+        "highway": "traffic_signals",
+        "infrastructure_type": "traffic_signal",
+        "name": null,
+        "operational_state": "NOT_AVAILABLE_FROM_OSM",
+        "public_transport": null,
+        "traffic_signals": "signal",
+        "traffic_signals:direction": null
+      },
+      "type": "Feature"
+    },
+    {
+      "geometry": {
+        "coordinates": [
+          31.338185,
+          30.0692157
+        ],
+        "type": "Point"
+      },
+      "id": "('node', 7216280328)",
+      "properties": {
+        "bus": null,
+        "data_reality": "REAL_PUBLIC",
+        "freshness_status": "STATIC",
+        "gtfs:stop_id": null,
+        "highway": "traffic_signals",
+        "infrastructure_type": "traffic_signal",
+        "name": null,
+        "operational_state": "NOT_AVAILABLE_FROM_OSM",
+        "public_transport": null,
+        "traffic_signals": "signal",
+        "traffic_signals:direction": null
+      },
+      "type": "Feature"
+    },
+    {
+      "geometry": {
+        "coordinates": [
+          31.3413851,
+          30.0097842
+        ],
+        "type": "Point"
+      },
+      "id": "('node', 12409037431)",
+      "properties": {
+        "bus": null,
+        "data_reality": "REAL_PUBLIC",
+        "freshness_status": "STATIC",
+        "gtfs:stop_id": null,
+        "highway": "traffic_signals",
+        "infrastructure_type": "traffic_signal",
+        "name": null,
+        "operational_state": "NOT_AVAILABLE_FROM_OSM",
+        "public_transport": null,
+        "traffic_signals": "signal",
+        "traffic_signals:direction": null
+      },
+      "type": "Feature"
+    },
+    {
+      "geometry": {
+        "coordinates": [
+          31.3562846,
+          30.0471105
+        ],
+        "type": "Point"
+      },
+      "id": "('node', 13194568539)",
+      "properties": {
+        "bus": null,
+        "data_reality": "REAL_PUBLIC",
+        "freshness_status": "STATIC",
+        "gtfs:stop_id": null,
+        "highway": "traffic_signals",
+        "infrastructure_type": "traffic_signal",
+        "name": null,
+        "operational_state": "NOT_AVAILABLE_FROM_OSM",
+        "public_transport": null,
+        "traffic_signals": "signal",
+        "traffic_signals:direction": null
+      },
+      "type": "Feature"
+    },
+    {
+      "geometry": {
+        "coordinates": [
+          31.3564647,
+          30.0469542
+        ],
+        "type": "Point"
+      },
+      "id": "('node', 13194568540)",
+      "properties": {
+        "bus": null,
+        "data_reality": "REAL_PUBLIC",
+        "freshness_status": "STATIC",
+        "gtfs:stop_id": null,
+        "highway": "traffic_signals",
+        "infrastructure_type": "traffic_signal",
+        "name": null,
+        "operational_state": "NOT_AVAILABLE_FROM_OSM",
+        "public_transport": null,
+        "traffic_signals": "signal",
+        "traffic_signals:direction": null
+      },
+      "type": "Feature"
+    },
+    {
+      "geometry": {
+        "coordinates": [
+          31.3579717,
+          30.0650418
+        ],
+        "type": "Point"
+      },
+      "id": "('node', 13194568541)",
+      "properties": {
+        "bus": null,
+        "data_reality": "REAL_PUBLIC",
+        "freshness_status": "STATIC",
+        "gtfs:stop_id": null,
+        "highway": "traffic_signals",
+        "infrastructure_type": "traffic_signal",
+        "name": null,
+        "operational_state": "NOT_AVAILABLE_FROM_OSM",
+        "public_transport": null,
+        "traffic_signals": "signal",
+        "traffic_signals:direction": null
+      },
+      "type": "Feature"
+    },
+    {
+      "geometry": {
+        "coordinates": [
+          31.3577579,
+          30.0651176
+        ],
+        "type": "Point"
+      },
+      "id": "('node', 13194568542)",
+      "properties": {
+        "bus": null,
+        "data_reality": "REAL_PUBLIC",
+        "freshness_status": "STATIC",
+        "gtfs:stop_id": null,
+        "highway": "traffic_signals",
+        "infrastructure_type": "traffic_signal",
+        "name": null,
+        "operational_state": "NOT_AVAILABLE_FROM_OSM",
+        "public_transport": null,
+        "traffic_signals": "signal",
+        "traffic_signals:direction": null
+      },
+      "type": "Feature"
+    },
+    {
+      "geometry": {
+        "coordinates": [
+          31.3448268,
+          30.0633473
+        ],
+        "type": "Point"
+      },
+      "id": "('node', 13194568543)",
+      "properties": {
+        "bus": null,
+        "data_reality": "REAL_PUBLIC",
+        "freshness_status": "STATIC",
+        "gtfs:stop_id": null,
+        "highway": "traffic_signals",
+        "infrastructure_type": "traffic_signal",
+        "name": null,
+        "operational_state": "NOT_AVAILABLE_FROM_OSM",
+        "public_transport": null,
+        "traffic_signals": "signal",
+        "traffic_signals:direction": null
+      },
+      "type": "Feature"
+    },
+    {
+      "geometry": {
+        "coordinates": [
+          31.3450565,
+          30.063311
+        ],
+        "type": "Point"
+      },
+      "id": "('node', 13194568544)",
+      "properties": {
+        "bus": null,
+        "data_reality": "REAL_PUBLIC",
+        "freshness_status": "STATIC",
+        "gtfs:stop_id": null,
+        "highway": "traffic_signals",
+        "infrastructure_type": "traffic_signal",
+        "name": null,
+        "operational_state": "NOT_AVAILABLE_FROM_OSM",
+        "public_transport": null,
+        "traffic_signals": "signal",
+        "traffic_signals:direction": null
+      },
+      "type": "Feature"
+    },
+    {
+      "geometry": {
+        "coordinates": [
+          31.3395103,
+          30.0775347
+        ],
+        "type": "Point"
+      },
+      "id": "('node', 13194568545)",
+      "properties": {
+        "bus": "yes",
+        "data_reality": "REAL_PUBLIC",
+        "freshness_status": "STATIC",
+        "gtfs:stop_id": "1452",
+        "highway": "traffic_signals",
+        "infrastructure_type": "traffic_signal",
+        "name": null,
+        "operational_state": "NOT_AVAILABLE_FROM_OSM",
+        "public_transport": "stop_position",
+        "traffic_signals": "signal",
+        "traffic_signals:direction": null
+      },
+      "type": "Feature"
+    },
+    {
+      "geometry": {
+        "coordinates": [
+          31.3396986,
+          30.0774217
+        ],
+        "type": "Point"
+      },
+      "id": "('node', 13194568546)",
+      "properties": {
+        "bus": "yes",
+        "data_reality": "REAL_PUBLIC",
+        "freshness_status": "STATIC",
+        "gtfs:stop_id": "1453",
+        "highway": "traffic_signals",
+        "infrastructure_type": "traffic_signal",
+        "name": null,
+        "operational_state": "NOT_AVAILABLE_FROM_OSM",
+        "public_transport": "stop_position",
+        "traffic_signals": "signal",
+        "traffic_signals:direction": null
+      },
+      "type": "Feature"
+    },
+    {
+      "geometry": {
+        "coordinates": [
+          31.3905821,
+          30.0503374
+        ],
+        "type": "Point"
+      },
+      "id": "('node', 14132458553)",
+      "properties": {
+        "bus": null,
+        "data_reality": "REAL_PUBLIC",
+        "freshness_status": "STATIC",
+        "gtfs:stop_id": null,
+        "highway": "traffic_signals",
+        "infrastructure_type": "traffic_signal",
+        "name": "اشاره شارع الميثاق",
+        "operational_state": "NOT_AVAILABLE_FROM_OSM",
+        "public_transport": null,
+        "traffic_signals": "signal",
+        "traffic_signals:direction": "forward"
+      },
+      "type": "Feature"
+    },
+    {
+      "geometry": {
+        "coordinates": [
+          31.3905872,
+          30.0501881
+        ],
+        "type": "Point"
+      },
+      "id": "('node', 14132518711)",
+      "properties": {
+        "bus": null,
+        "data_reality": "REAL_PUBLIC",
+        "freshness_status": "STATIC",
+        "gtfs:stop_id": null,
+        "highway": "traffic_signals",
+        "infrastructure_type": "traffic_signal",
+        "name": "الاشاره الوحيده في شلرع الميثاق",
+        "operational_state": "NOT_AVAILABLE_FROM_OSM",
+        "public_transport": null,
+        "traffic_signals": "signal",
+        "traffic_signals:direction": "forward"
+      },
+      "type": "Feature"
+    }
+  ],
+  "type": "FeatureCollection"
+}

@@ -1,0 +1,120 @@
+{
+  "features": [
+    {
+      "geometry": {
+        "coordinates": [
+          31.336704200427747,
+          30.0693494181155
+        ],
+        "type": "Point"
+      },
+      "properties": {
+        "coordinate_derivation": "MIDPOINT_OF_NAMED_OSM_GRAPH_EDGE",
+        "corridor_name": "Rabaa",
+        "data_reality": "REAL_DERIVED",
+        "freshness_status": "STATIC",
+        "osm_name": "شارع رابعة العدوية الاستثمارى",
+        "sample_id": "nasr-corridor-1",
+        "source_edge": [
+          "317515083",
+          "457838711",
+          "0"
+        ]
+      },
+      "type": "Feature"
+    },
+    {
+      "geometry": {
+        "coordinates": [
+          31.327146650000003,
+          30.052799800000003
+        ],
+        "type": "Point"
+      },
+      "properties": {
+        "coordinate_derivation": "MIDPOINT_OF_NAMED_OSM_GRAPH_EDGE",
+        "corridor_name": "Tayaran",
+        "data_reality": "REAL_DERIVED",
+        "freshness_status": "STATIC",
+        "osm_name": "شارع الطيران",
+        "sample_id": "nasr-corridor-2",
+        "source_edge": [
+          "10712130991",
+          "10712131044",
+          "0"
+        ]
+      },
+      "type": "Feature"
+    },
+    {
+      "geometry": {
+        "coordinates": [
+          31.337437267506683,
+          30.062145671309096
+        ],
+        "type": "Point"
+      },
+      "properties": {
+        "coordinate_derivation": "MIDPOINT_OF_NAMED_OSM_GRAPH_EDGE",
+        "corridor_name": "Abbas El Akkad",
+        "data_reality": "REAL_DERIVED",
+        "freshness_status": "STATIC",
+        "osm_name": "شارع عباس العقاد",
+        "sample_id": "nasr-corridor-3",
+        "source_edge": [
+          "2349727141",
+          "313958668",
+          "0"
+        ]
+      },
+      "type": "Feature"
+    },
+    {
+      "geometry": {
+        "coordinates": [
+          31.343925291481728,
+          30.069176334801163
+        ],
+        "type": "Point"
+      },
+      "properties": {
+        "coordinate_derivation": "MIDPOINT_OF_NAMED_OSM_GRAPH_EDGE",
+        "corridor_name": "Makram Ebeid",
+        "data_reality": "REAL_DERIVED",
+        "freshness_status": "STATIC",
+        "osm_name": "شارع مكرم عبيد",
+        "sample_id": "nasr-corridor-4",
+        "source_edge": [
+          "10143103170",
+          "5503407036",
+          "0"
+        ]
+      },
+      "type": "Feature"
+    },
+    {
+      "geometry": {
+        "coordinates": [
+          31.344113450000002,
+          30.06936795
+        ],
+        "type": "Point"
+      },
+      "properties": {
+        "coordinate_derivation": "MIDPOINT_OF_NAMED_OSM_GRAPH_EDGE",
+        "corridor_name": "El Nasr Road",
+        "data_reality": "REAL_DERIVED",
+        "freshness_status": "STATIC",
+        "osm_name": "طريق النصر",
+        "sample_id": "nasr-corridor-5",
+        "source_edge": [
+          "10143103170",
+          "415861878",
+          "0"
+        ]
+      },
+      "type": "Feature"
+    }
+  ],
+  "type": "FeatureCollection"
+}

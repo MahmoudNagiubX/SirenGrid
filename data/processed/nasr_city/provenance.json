@@ -1,8 +1,71 @@
 {
-  "source_repo": "MahmoudNagiubX/Egypt-Smart-City-Digital-Twin",
-  "source_commit": "93ca9e90e2fc52c914dd5ccbe42bdc84ce745d3d",
-  "data_reality": "REAL_DERIVED",
-  "freshness_status": "STATIC",
-  "purpose": "Phase 01 Nasr City geospatial bootstrap",
-  "refresh_policy": "bootstrap only; refresh current OSM/Geofabrik/Overpass in Phase 02"
+  "acquisition_mode": "DIRECT_OSMNX_OVERPASS_OWNER_APPROVED",
+  "approved_fallback": "Geofabrik Egypt OSM extract",
+  "approved_fallback_reference": "https://download.geofabrik.de/africa/egypt.html",
+  "artifacts": {
+    "nasr_city_emergency_facilities.geojson": {
+      "acquisition_freshness_status": "FRESH",
+      "data_reality": "REAL_DERIVED",
+      "freshness_status": "STATIC",
+      "record_count": 41,
+      "retrieved_at": "2026-09-07T01:09:08.959165+00:00",
+      "sha256": "5b0439c14e1920ee822602c98449e88d0e5b4c0b7562d9cd2c680934b40203b4",
+      "source": "OpenStreetMap via OSMnx/Overpass",
+      "source_reference": "https://overpass-api.de/api/interpreter?query=emergency_facilities"
+    },
+    "nasr_city_graph.graphml": {
+      "acquisition_freshness_status": "FRESH",
+      "data_reality": "REAL_DERIVED",
+      "freshness_status": "STATIC",
+      "record_count": 17439,
+      "retrieved_at": "2026-09-07T01:09:08.959165+00:00",
+      "sha256": "080e9b87039278681d086abf92e778797e7108ea215f4037706501185c43d88d",
+      "source": "OpenStreetMap via OSMnx/Overpass",
+      "source_reference": "https://overpass-api.de/api/interpreter?query=graph_from_polygon&network_type=drive"
+    },
+    "nasr_city_traffic_sample_points.geojson": {
+      "acquisition_freshness_status": "FRESH",
+      "data_reality": "REAL_DERIVED",
+      "freshness_status": "STATIC",
+      "record_count": 5,
+      "retrieved_at": "2026-09-07T01:09:08.959165+00:00",
+      "sha256": "4027ebbe96d0a86b7082c43174758010b05e293114cc6f5ddeb9a103e59cd4af",
+      "source": "SirenGrid derivation from refreshed named OSM graph edges",
+      "source_reference": "nasr_city_graph.graphml"
+    },
+    "nasr_city_traffic_signals.geojson": {
+      "acquisition_freshness_status": "FRESH",
+      "data_reality": "REAL_DERIVED",
+      "freshness_status": "STATIC",
+      "record_count": 14,
+      "retrieved_at": "2026-09-07T01:09:08.959165+00:00",
+      "sha256": "a83d9c3c6d73868009a3542fe9e58a69d527c8e97e412b3b15538e0792bb145c",
+      "source": "OpenStreetMap via OSMnx/Overpass",
+      "source_reference": "https://overpass-api.de/api/interpreter?query=traffic_signals"
+    }
+  },
+  "failed_refresh_policy": "PRESERVE_LAST_VALIDATED_REAL_GRAPH",
+  "fallback_used": false,
+  "phase": "PHASE_02_GEOSPATIAL_TRAFFIC_RUNTIME",
+  "retained_artifacts": {
+    "nasr_city_boundary.geojson": {
+      "data_reality": "REAL_DERIVED",
+      "freshness_status": "STATIC",
+      "source": "MahmoudNagiubX/Egypt-Smart-City-Digital-Twin",
+      "source_commit": "93ca9e90e2fc52c914dd5ccbe42bdc84ce745d3d",
+      "source_reference": "nasr_city_boundary.geojson",
+      "source_repo": "MahmoudNagiubX/Egypt-Smart-City-Digital-Twin"
+    },
+    "nasr_city_grid_500m.geojson": {
+      "data_reality": "REAL_DERIVED",
+      "freshness_status": "STATIC",
+      "source": "MahmoudNagiubX/Egypt-Smart-City-Digital-Twin",
+      "source_commit": "93ca9e90e2fc52c914dd5ccbe42bdc84ce745d3d",
+      "source_reference": "nasr_city_grid_500m.geojson",
+      "source_repo": "MahmoudNagiubX/Egypt-Smart-City-Digital-Twin"
+    }
+  },
+  "retrieved_at": "2026-09-07T01:09:08.959165+00:00",
+  "traffic_signal_operational_state": "NOT_AVAILABLE_FROM_OSM",
+  "turn_restriction_support": "NOT_PROCESSED_OR_VALIDATED"
 }

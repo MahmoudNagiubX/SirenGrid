@@ -81,6 +81,9 @@ def test_map_roads_success():
     assert isinstance(provenance, dict)
     assert provenance.get("data_reality") == "REAL_DERIVED"
     assert provenance.get("freshness_status") == "STATIC"
+    assert provenance.get("source") == "OpenStreetMap via OSMnx/Overpass"
+    assert provenance.get("acquisition_mode") == "DIRECT_OSMNX_OVERPASS_OWNER_APPROVED"
+    assert provenance.get("turn_restriction_support") == "NOT_PROCESSED_OR_VALIDATED"
 
     _assert_no_live_traffic_labels(data)
 
@@ -102,6 +105,7 @@ def test_map_zones_success():
     assert isinstance(provenance, dict)
     assert provenance.get("data_reality") == "REAL_DERIVED"
     assert provenance.get("freshness_status") == "STATIC"
+    assert provenance.get("source_repo") == "MahmoudNagiubX/Egypt-Smart-City-Digital-Twin"
 
     _assert_no_live_traffic_labels(data)
 
@@ -133,6 +137,7 @@ def test_map_hospitals_filtered_success():
     assert isinstance(provenance, dict)
     assert provenance.get("data_reality") == "REAL_DERIVED"
     assert provenance.get("freshness_status") == "STATIC"
+    assert provenance.get("source") == "OpenStreetMap via OSMnx/Overpass"
 
     _assert_no_live_traffic_labels(data)
 

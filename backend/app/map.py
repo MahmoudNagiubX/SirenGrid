@@ -55,6 +55,26 @@ def _load_provenance() -> dict[str, Any]:
     return data
 
 
+def _layer_provenance(filename: str) -> dict[str, Any]:
+    manifest = _load_provenance()
+    refreshed = manifest.get("artifacts", {})
+    retained = manifest.get("retained_artifacts", {})
+    record = refreshed.get(filename) or retained.get(filename)
+    if record is None:
+        # Phase 01 provenance files predate per-artifact records.
+        return manifest
+    result = dict(record)
+    for key in (
+        "acquisition_mode",
+        "approved_fallback",
+        "fallback_used",
+        "turn_restriction_support",
+    ):
+        if key in manifest:
+            result[key] = manifest[key]
+    return result
+
+
 def _load_geojson(filename: str) -> dict[str, Any]:
     asset_path = settings.NASR_CITY_DATA_DIR / filename
     if not asset_path.is_file():
@@ -161,7 +181,7 @@ def _convert_graph_to_roads_geojson(graph: nx.Graph) -> dict[str, Any]:
 
 @router.get("/map/boundary", response_model=MapLayerResponse)
 def get_map_boundary() -> MapLayerResponse:
-    provenance = _load_provenance()
+    provenance = _layer_provenance("nasr_city_boundary.geojson")
     geojson = _load_geojson("nasr_city_boundary.geojson")
     return MapLayerResponse(
         layer="boundary",
@@ -172,7 +192,7 @@ def get_map_boundary() -> MapLayerResponse:
 
 @router.get("/map/roads", response_model=MapLayerResponse)
 def get_map_roads() -> MapLayerResponse:
-    provenance = _load_provenance()
+    provenance = _layer_provenance("nasr_city_graph.graphml")
     graph_path = settings.NASR_CITY_DATA_DIR / "nasr_city_graph.graphml"
     if not graph_path.is_file():
         raise HTTPException(
@@ -214,7 +234,7 @@ def get_map_roads() -> MapLayerResponse:
 
 @router.get("/map/zones", response_model=MapLayerResponse)
 def get_map_zones() -> MapLayerResponse:
-    provenance = _load_provenance()
+    provenance = _layer_provenance("nasr_city_grid_500m.geojson")
     geojson = _load_geojson("nasr_city_grid_500m.geojson")
     return MapLayerResponse(
         layer="zones",
@@ -225,7 +245,7 @@ def get_map_zones() -> MapLayerResponse:
 
 @router.get("/map/hospitals", response_model=MapLayerResponse)
 def get_map_hospitals() -> MapLayerResponse:
-    provenance = _load_provenance()
+    provenance = _layer_provenance("nasr_city_emergency_facilities.geojson")
     raw = _load_geojson("nasr_city_emergency_facilities.geojson")
     raw_features = raw.get("features", [])
     hospital_features = [
