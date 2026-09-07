@@ -83,11 +83,22 @@ class CandidateGenerationResult:
 def _is_hard_eligible(
     resource: CandidateResource,
     requirement: ResponseRequirement,
+    *,
+    incident_id: str | None = None,
 ) -> bool:
+    same_incident_active = (
+        incident_id is not None
+        and resource.assigned_incident_id == incident_id
+        and resource.status in (ResourceStatus.ASSIGNED, ResourceStatus.EN_ROUTE)
+    )
     return (
-        resource.status is ResourceStatus.AVAILABLE
-        and resource.assigned_incident_id is None
-        and resource.resource_type is requirement.resource_type
+        (
+            resource.status is ResourceStatus.AVAILABLE
+            and resource.assigned_incident_id is None
+        )
+        or same_incident_active
+    ) and (
+        resource.resource_type is requirement.resource_type
         and requirement.known_capabilities_satisfy(resource.capability_tags)
     )
 
@@ -113,6 +124,7 @@ def generate_candidate_combinations(
     resources: Iterable[CandidateResource],
     requirements: Iterable[ResponseRequirement],
     traffic_snapshot: TrafficSnapshot | None,
+    incident_id: str | None = None,
 ) -> CandidateGenerationResult:
     """Return bounded feasible combinations without mutating resources or graph.
 
@@ -131,7 +143,7 @@ def generate_candidate_combinations(
     for requirement in requirements_tuple:
         routeable: list[CandidateResponder] = []
         for resource in sorted(resources_tuple, key=lambda item: item.resource_id):
-            if not _is_hard_eligible(resource, requirement):
+            if not _is_hard_eligible(resource, requirement, incident_id=incident_id):
                 continue
             route = route_cache.get(resource.resource_id)
             if resource.resource_id not in route_cache:

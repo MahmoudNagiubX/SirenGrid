@@ -11,9 +11,15 @@ from app.db import init_db
 from app.main import app
 from app.models import Incident, ReplanEvaluation, ResponsePlan
 from app.replanning import merge_pending_trigger
+from app.candidate_generation import CandidateResource, _is_hard_eligible
+from app.response_requirements import ResponseRequirement
 from app.schemas import (
     ConfidenceLevel,
+    Coordinate,
+    DataReality,
     IncidentStatus,
+    ResourceStatus,
+    ResourceType,
     ResponsePlanStatus,
     Severity,
 )
@@ -72,6 +78,36 @@ def test_pending_trigger_coalescing_unions_reasons_and_keeps_latest_references()
         "traffic_snapshot_id": "traffic-2",
         "resource_version": 1,
     }
+
+
+def test_replan_candidate_filter_allows_only_same_incident_active_resources() -> None:
+    requirement = ResponseRequirement(
+        resource_type=ResourceType.AMBULANCE,
+        minimum_count=1,
+    )
+    same_incident = CandidateResource(
+        resource_id="res-same",
+        resource_type=ResourceType.AMBULANCE,
+        capability_tags=(),
+        status=ResourceStatus.EN_ROUTE,
+        assigned_incident_id="incident-1",
+        coordinate=Coordinate(lat=30.05, lon=31.34),
+        data_reality=DataReality.SIMULATED,
+        source="test",
+    )
+    other_incident = CandidateResource(
+        resource_id="res-other",
+        resource_type=ResourceType.AMBULANCE,
+        capability_tags=(),
+        status=ResourceStatus.EN_ROUTE,
+        assigned_incident_id="incident-2",
+        coordinate=Coordinate(lat=30.05, lon=31.34),
+        data_reality=DataReality.SIMULATED,
+        source="test",
+    )
+
+    assert _is_hard_eligible(same_incident, requirement, incident_id="incident-1")
+    assert not _is_hard_eligible(other_incident, requirement, incident_id="incident-1")
 
 
 def test_trigger_endpoint_coalesces_without_incrementing_incident_version(

@@ -380,6 +380,103 @@ def _phase04_source_requirements(
     return tuple(parsed)
 
 
+def evaluate_phase04_candidate_set(
+    db: Session,
+    incident: Incident,
+    *,
+    now_utc: datetime | None = None,
+    planning_incident_id: str | None = None,
+) -> tuple[Any, tuple[Any, ...], dict[tuple[str, ...], Any], datetime]:
+    """Evaluate one coherent Phase 04 candidate set without persisting it."""
+    source_requirements = _phase04_source_requirements(
+        incident.required_resources_json
+    )
+    resolution = resolve_response_requirements(
+        incident_type=incident.incident_type,
+        severity=incident.severity,
+        source_requirements=source_requirements,
+    )
+    graph = load_routing_graph()
+    zones = load_population_zones(
+        settings.NASR_CITY_DATA_DIR
+        / "nasr_city_zone_population_worldpop_2025.geojson"
+    )
+    timestamp = now_utc or datetime.now(timezone.utc)
+    traffic_snapshot = traffic_runtime.capture_snapshot(
+        graph,
+        now=timestamp,
+        wall_clock=lambda: datetime.now(timezone.utc),
+        monotonic=time.monotonic,
+    )
+    resources = tuple(
+        CandidateResource(
+            resource_id=resource.id,
+            resource_type=resource.resource_type,
+            capability_tags=tuple(resource.capability_tags_json or ()),
+            status=resource.status,
+            assigned_incident_id=resource.assigned_incident_id,
+            coordinate=Coordinate(lat=resource.latitude, lon=resource.longitude),
+            data_reality=DataReality(
+                (resource.provenance_json or {}).get(
+                    "data_reality", DataReality.SIMULATED.value
+                )
+            ),
+            source=(resource.provenance_json or {}).get(
+                "source", "phase03_simulated_resource"
+            ),
+        )
+        for resource in db.scalars(
+            select(EmergencyResource).order_by(EmergencyResource.id.asc())
+        ).all()
+    )
+    generated = generate_candidate_combinations(
+        graph=graph,
+        incident_coordinate=Coordinate(
+            lat=incident.latitude,
+            lon=incident.longitude,
+        ),
+        resources=resources,
+        requirements=resolution.requirements,
+        traffic_snapshot=traffic_snapshot,
+        incident_id=planning_incident_id,
+    )
+    evaluated = tuple(
+        evaluate_candidate_combination(
+            graph=graph,
+            zones=zones,
+            resources=resources,
+            requirements=resolution.requirements,
+            combination=combination,
+            traffic_snapshot=traffic_snapshot,
+            modeled_at=timestamp,
+        )
+        for combination in generated.combinations
+    )
+    reposition_proposals: dict[tuple[str, ...], Any] = {}
+    rescored_candidates = []
+    for candidate in evaluated:
+        repositioning = simulate_repositioning(
+            graph=graph,
+            zones=zones,
+            resources=resources,
+            requirements=resolution.requirements,
+            candidate=candidate,
+            traffic_snapshot=traffic_snapshot,
+            modeled_at=timestamp,
+        )
+        selected_proposal = select_reposition_proposal(repositioning.proposals)
+        if selected_proposal is not None:
+            reposition_proposals[candidate.combination.resource_ids] = selected_proposal
+            candidate = rescore_evaluated_candidate(
+                candidate,
+                proposed_reposition_eta_seconds=(
+                    selected_proposal.reposition_eta_seconds
+                ),
+            )
+        rescored_candidates.append(candidate)
+    return resolution, rank_evaluated_candidates(rescored_candidates), reposition_proposals, timestamp
+
+
 @router.post(
     "/incidents/{incident_id}/plans/generate-candidates",
     status_code=status.HTTP_201_CREATED,
@@ -406,115 +503,20 @@ def generate_phase04_candidate_plans(
         )
 
     try:
-        source_requirements = _phase04_source_requirements(
-            incident.required_resources_json
+        resolution, ranked, reposition_proposals, now_utc = evaluate_phase04_candidate_set(
+            db,
+            incident,
         )
-        resolution = resolve_response_requirements(
-            incident_type=incident.incident_type,
-            severity=incident.severity,
-            source_requirements=source_requirements,
-        )
-    except (ResponseRequirementsUnavailableError, ValueError) as exc:
+    except ResponseRequirementsUnavailableError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
-
-    try:
-        graph = load_routing_graph()
-        zones = load_population_zones(
-            settings.NASR_CITY_DATA_DIR
-            / "nasr_city_zone_population_worldpop_2025.geojson"
-        )
-    except (OSError, ValueError) as exc:
+    except (OSError, RuntimeError) as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Phase 04 planning assets unavailable: {exc}",
         ) from exc
-
-    now_utc = datetime.now(timezone.utc)
-    try:
-        traffic_snapshot = traffic_runtime.capture_snapshot(
-            graph,
-            now=now_utc,
-            wall_clock=lambda: datetime.now(timezone.utc),
-            monotonic=time.monotonic,
-        )
-    except (OSError, ValueError, RuntimeError) as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Traffic snapshot capture failed: {exc}",
-        ) from exc
-
-    resources = tuple(
-        CandidateResource(
-            resource_id=resource.id,
-            resource_type=resource.resource_type,
-            capability_tags=tuple(resource.capability_tags_json or ()),
-            status=resource.status,
-            assigned_incident_id=resource.assigned_incident_id,
-            coordinate=Coordinate(lat=resource.latitude, lon=resource.longitude),
-            data_reality=DataReality(
-                (resource.provenance_json or {}).get(
-                    "data_reality", DataReality.SIMULATED.value
-                )
-            ),
-            source=(resource.provenance_json or {}).get(
-                "source", "phase03_simulated_resource"
-            ),
-        )
-        for resource in db.scalars(
-            select(EmergencyResource).order_by(EmergencyResource.id.asc())
-        ).all()
-    )
-    try:
-        generated = generate_candidate_combinations(
-            graph=graph,
-            incident_coordinate=Coordinate(
-                lat=incident.latitude,
-                lon=incident.longitude,
-            ),
-            resources=resources,
-            requirements=resolution.requirements,
-            traffic_snapshot=traffic_snapshot,
-        )
-        evaluated = tuple(
-            evaluate_candidate_combination(
-                graph=graph,
-                zones=zones,
-                resources=resources,
-                requirements=resolution.requirements,
-                combination=combination,
-                traffic_snapshot=traffic_snapshot,
-                modeled_at=now_utc,
-            )
-            for combination in generated.combinations
-        )
-        reposition_proposals: dict[tuple[str, ...], Any] = {}
-        rescored_candidates = []
-        for candidate in evaluated:
-            repositioning = simulate_repositioning(
-                graph=graph,
-                zones=zones,
-                resources=resources,
-                requirements=resolution.requirements,
-                candidate=candidate,
-                traffic_snapshot=traffic_snapshot,
-                modeled_at=now_utc,
-            )
-            selected_proposal = select_reposition_proposal(repositioning.proposals)
-            if selected_proposal is not None:
-                reposition_proposals[candidate.combination.resource_ids] = (
-                    selected_proposal
-                )
-                candidate = rescore_evaluated_candidate(
-                    candidate,
-                    proposed_reposition_eta_seconds=(
-                        selected_proposal.reposition_eta_seconds
-                    ),
-                )
-            rescored_candidates.append(candidate)
-        ranked = rank_evaluated_candidates(rescored_candidates)
     except (NoFeasibleCandidateError, ValueError) as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
