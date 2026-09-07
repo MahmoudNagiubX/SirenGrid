@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import concurrent.futures
 from datetime import datetime, timezone
+import threading
 import uuid
 
 import networkx as nx
@@ -191,6 +193,26 @@ def persistence_incident(db: Session) -> Incident:
     return incident
 
 
+def configure_candidate_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(planning, "load_routing_graph", persistence_graph)
+    monkeypatch.setattr(
+        planning,
+        "load_population_zones",
+        lambda _path: (
+            CoverageZone(
+                zone_id="zone",
+                centroid=Coordinate(lat=30.0, lon=31.302),
+                population=100.0,
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        planning.traffic_runtime,
+        "capture_snapshot",
+        lambda *_args, **_kwargs: None,
+    )
+
+
 def test_persist_candidate_set_retains_ranked_phase04_facts_and_single_current_recommendation(
     db_session: Session,
 ) -> None:
@@ -285,6 +307,158 @@ def test_phase04_candidate_generation_endpoint_persists_comparison_set(
     )
     assert all("reposition_proposal" not in plan["metrics"]["phase04"] for plan in body)
     assert all(plan["score_breakdown"]["reposition_penalty"] == 0.0 for plan in body)
+
+
+def test_concurrent_candidate_generations_have_one_winner(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    incident = persistence_incident(db_session)
+    configure_candidate_endpoint(monkeypatch)
+    barrier = threading.Barrier(2)
+    generate = planning.generate_candidate_combinations
+
+    def synchronized_generate(**kwargs: object):
+        barrier.wait(timeout=5.0)
+        return generate(**kwargs)
+
+    monkeypatch.setattr(planning, "generate_candidate_combinations", synchronized_generate)
+
+    def request_generation() -> tuple[int, dict[str, object] | list[object]]:
+        with TestClient(app) as client:
+            response = client.post(
+                f"/api/v1/incidents/{incident.id}/plans/generate-candidates"
+            )
+            return response.status_code, response.json()
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(lambda _: request_generation(), range(2)))
+
+    assert sorted(code for code, _ in results) == [201, 409]
+    assert "stale planning state" in next(
+        body["detail"]
+        for code, body in results
+        if code == 409 and isinstance(body, dict)
+    ).lower()
+    db_session.expire_all()
+    persisted_incident = db_session.get(Incident, incident.id)
+    assert persisted_incident is not None
+    assert persisted_incident.version == 2
+    plans = db_session.scalars(
+        select(ResponsePlan).where(ResponsePlan.incident_id == incident.id)
+    ).all()
+    active = [
+        plan
+        for plan in plans
+        if plan.status in (ResponsePlanStatus.RECOMMENDED, ResponsePlanStatus.ALTERNATIVE)
+    ]
+    assert len(active) == 2
+    assert sum(plan.status == ResponsePlanStatus.RECOMMENDED for plan in plans) == 1
+    assert len({plan.metrics_json["phase04"]["candidate_set_id"] for plan in active}) == 1
+    assert len(db_session.scalars(
+        select(TimelineEvent).where(
+            TimelineEvent.incident_id == incident.id,
+            TimelineEvent.event_type == "PLAN_GENERATED",
+        )
+    ).all()) == 1
+
+
+def test_incident_correction_rejects_stale_candidate_generation(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    incident = persistence_incident(db_session)
+    configure_candidate_endpoint(monkeypatch)
+    captured = threading.Event()
+    resume = threading.Event()
+    generate = planning.generate_candidate_combinations
+
+    def blocked_generate(**kwargs: object):
+        captured.set()
+        assert resume.wait(timeout=5.0)
+        return generate(**kwargs)
+
+    monkeypatch.setattr(planning, "generate_candidate_combinations", blocked_generate)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(
+            lambda: TestClient(app).post(
+                f"/api/v1/incidents/{incident.id}/plans/generate-candidates"
+            )
+        )
+        assert captured.wait(timeout=5.0)
+        with TestClient(app) as client:
+            correction = client.patch(
+                f"/api/v1/incidents/{incident.id}/facts",
+                json={
+                    "expected_incident_version": 1,
+                    "operator_reference": "fix-003-concurrency-test",
+                    "location": {"lat": 30.001, "lon": 31.303},
+                },
+            )
+        resume.set()
+        generation = future.result(timeout=10.0)
+
+    assert correction.status_code == 200, correction.text
+    assert generation.status_code == 409, generation.text
+    db_session.expire_all()
+    persisted_incident = db_session.get(Incident, incident.id)
+    assert persisted_incident is not None
+    assert persisted_incident.version == 2
+    assert (persisted_incident.latitude, persisted_incident.longitude) == (30.001, 31.303)
+    assert persisted_incident.current_plan_id is None
+    assert db_session.scalars(
+        select(ResponsePlan).where(ResponsePlan.incident_id == incident.id)
+    ).all() == []
+
+
+def test_resource_mutation_rejects_stale_candidate_generation(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    incident = persistence_incident(db_session)
+    configure_candidate_endpoint(monkeypatch)
+    captured = threading.Event()
+    resume = threading.Event()
+    generate = planning.generate_candidate_combinations
+
+    def blocked_generate(**kwargs: object):
+        captured.set()
+        assert resume.wait(timeout=5.0)
+        return generate(**kwargs)
+
+    monkeypatch.setattr(planning, "generate_candidate_combinations", blocked_generate)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(
+            lambda: TestClient(app).post(
+                f"/api/v1/incidents/{incident.id}/plans/generate-candidates"
+            )
+        )
+        assert captured.wait(timeout=5.0)
+        with TestClient(app) as client:
+            mutation = client.patch(
+                "/api/v1/resources/resource-a/state",
+                json={
+                    "expected_resource_version": 1,
+                    "status": "OUT_OF_SERVICE",
+                    "operator_reference": "fix-003-concurrency-test",
+                },
+            )
+        resume.set()
+        generation = future.result(timeout=10.0)
+
+    assert mutation.status_code == 200, mutation.text
+    assert generation.status_code == 409, generation.text
+    db_session.expire_all()
+    resource = db_session.get(EmergencyResource, "resource-a")
+    persisted_incident = db_session.get(Incident, incident.id)
+    assert resource is not None
+    assert resource.version == 2
+    assert resource.status == ResourceStatus.OUT_OF_SERVICE
+    assert persisted_incident is not None
+    assert persisted_incident.current_plan_id is None
+    assert db_session.scalars(
+        select(ResponsePlan).where(ResponsePlan.incident_id == incident.id)
+    ).all() == []
 
 
 def test_phase04_candidate_generation_executes_reposition_before_ranking_and_persistence(
