@@ -4,7 +4,7 @@
 **Scope:** Phase 04 only
 **Product authority:** `docs/MASTER_PLAN.md` v1.2
 **Architecture authority:** `docs/TECHNICAL_ARCHITECTURE_PLAN.md` v1.1
-**Decision record:** PD-016
+**Decision record:** PD-016, PD-017
 
 ## Boundary
 
@@ -36,6 +36,8 @@ Each cohort is `resource_type` plus sorted required capability tags. For every e
 
 All valid modeled zones remain in the denominator. An unreachable zone is undercovered and explicit. If any exist, `worst_zone_eta` is null; the snapshot exposes `worst_finite_zone_eta`, `unreachable_zone_count`, and IDs. The snapshot retains source/provenance, input reality, modeled-at timestamp, graph/traffic references, target, population totals, coverage metrics, and zone explanations.
 
+For a multi-cohort incident, individual cohort snapshots remain separately available and a `JOINT_ALL_REQUIRED_COHORTS_V1` plan-level snapshot is derived over the same zones and denominator. A zone is joint-covered only if every required cohort covers it. Its finite joint ETA is the maximum cohort ETA; any unreachable cohort makes joint ETA null and is recorded as a failing cohort. Joint population-weighted coverage counts zone population once. Joint coverage delta, affected zones, unreachable facts, scoring coverage penalty, and later reposition triggers use this aggregate; a single cohort's joint snapshot is identical to its cohort snapshot.
+
 ## Hypothetical dispatch and planning
 
 Candidate evaluation first computes the baseline from currently AVAILABLE eligible resources. It removes only candidate-dispatched resources from a copied analytical availability set, then recomputes post-dispatch coverage. It never mutates resource state.
@@ -46,7 +48,7 @@ Eligible candidates must have assignable state, required type/capability, an unc
 
 ## Metrics, ranking, and repositioning
 
-Each candidate persists assignments, route facts, baseline/post-dispatch coverage, coverage delta, undercovered/unreachable zones, reserve state, score terms, score policy version, and optional hypothetical reposition facts. Hospital fields remain null/empty in Phase 04.
+Each candidate persists assignments, route facts, baseline/post-dispatch per-cohort snapshots, baseline/post-dispatch joint snapshots, joint coverage delta, undercovered/unreachable zones with failing cohorts, reserve state, score terms, score policy version, and optional hypothetical reposition facts. Hospital fields remain null/empty in Phase 04.
 
 The lower-is-better score and exact normalized terms are recorded in PD-016. The score is reproducible from stored raw terms, configured weights, and weighted terms. No LLM contributes to planning or scoring.
 

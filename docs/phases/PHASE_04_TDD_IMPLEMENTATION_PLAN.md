@@ -48,9 +48,9 @@ Every behavioral increment begins with a focused failing test, followed by the m
 
 ## Task 6 — Candidate metrics, scoring, and ranking
 
-**Task:** Evaluate candidate coverage, compute stored score terms, and select a deterministic recommendation.
+**Task:** Derive validated `JOINT_ALL_REQUIRED_COHORTS_V1` coverage from retained per-cohort snapshots, evaluate candidate coverage, compute stored score terms, and select a deterministic recommendation.
 
-**Acceptance tests:** exact score reproduction; no ETA normalization clamp; all score weights/terms/policy version present; approved tie order; hospital term neutral; candidate evaluation has zero operational mutation.
+**Acceptance tests:** joint all-cohort coverage uses one population denominator, finite bottleneck ETA, explicit failing cohorts, and null worst ETA for joint-unreachable zones; exact score reproduction; no ETA normalization clamp; all score weights/terms/policy version present; approved tie order; hospital term neutral; candidate evaluation has zero operational mutation.
 
 ## Task 7 — Hypothetical repositioning
 

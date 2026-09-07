@@ -322,3 +322,22 @@ Phase 04 adds deterministic file-backed population preprocessing, coverage/plann
 
 ### Notes
 `rasterio` is approved as the narrowly scoped GeoTIFF dependency when required. A WorldPop release upgrade, changed target, changed matrix, changed candidate cap, changed score policy, or changed reposition policy requires a new approved decision.
+
+## PD-017 — Phase 04 Joint Required-Cohort Coverage
+
+**Date:** 2026-09-07
+**Status:** Approved
+**Owner:** Project owner
+
+### Decision
+Retain individual coverage snapshots for every required resource cohort and derive one plan-level `JOINT_ALL_REQUIRED_COHORTS_V1` snapshot. A modeled zone is jointly covered only when every required cohort covers it. When all cohort ETAs are finite, joint ETA is their maximum; if any cohort is unreachable, joint ETA is null, the zone is not covered, and the failing cohort IDs remain explicit.
+
+Joint population-weighted coverage counts each zone's population once: the population of jointly covered zones divided by the common modeled-zone population total. Joint baseline, post-dispatch, and later reposition comparisons use the identical required cohort set and denominator. Any joint-unreachable zone makes joint `worst_zone_eta` null; finite worst ETA, unreachable count, IDs, and failing cohorts remain observable.
+
+The existing coverage score penalty is `1 - post_dispatch_joint_population_weighted_coverage`. Per-cohort percentages are not averaged, summed, or dynamically reweighted. A single-cohort incident has joint coverage equal to that cohort. Later reposition candidates for a newly joint-undercovered zone must be eligible for a failing required cohort.
+
+### Reason
+This preserves separate service-cohort truth while making the plan-level coverage score reproducible without population double counting or a false claim that an incident area is covered when one required service cannot meet the prototype target.
+
+### Impact
+Phase 04 stores and exposes per-cohort and joint coverage facts. Plan-level coverage delta, affected zones, unreachable count, ranking coverage penalty, and reposition triggers use the explicit joint aggregate. Joint coverage remains a prototype model, not an emergency-response guarantee, SLA, simultaneous-arrival claim, or proof of capacity for future incidents.
