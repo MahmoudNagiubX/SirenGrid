@@ -444,3 +444,94 @@ def test_dispatch_impact_is_hypothetical_and_exposes_deterministic_coverage_delt
     assert impact.baseline.traffic_snapshot_version == impact.post_dispatch.traffic_snapshot_version
     assert resources == original_resources
     assert list(graph.edges(data=True, keys=True)) == original_graph
+
+
+def test_joint_coverage_requires_every_cohort_and_keeps_population_single_counted() -> None:
+    graph = nx.MultiDiGraph()
+    graph.add_node("ambulance", x=31.3000, y=30.0000)
+    graph.add_node("fire", x=31.3200, y=30.0000)
+    graph.add_node("zone-one", x=31.3100, y=30.0000)
+    graph.add_node("zone-two", x=31.3300, y=30.0000)
+    for source, destination, travel_time in (
+        ("ambulance", "zone-one", 500.0),
+        ("ambulance", "zone-two", 600.0),
+        ("fire", "zone-one", 700.0),
+    ):
+        graph.add_edge(
+            source,
+            destination,
+            key="0",
+            length=1000.0,
+            travel_time=travel_time,
+            base_travel_time_s=travel_time,
+        )
+    modeled_at = datetime(2026, 9, 7, tzinfo=timezone.utc)
+    modeled_zones = [
+        coverage.CoverageZone(
+            zone_id="zone-one",
+            centroid=Coordinate(lat=30.0, lon=31.31),
+            population=100.0,
+        ),
+        coverage.CoverageZone(
+            zone_id="zone-two",
+            centroid=Coordinate(lat=30.0, lon=31.33),
+            population=50.0,
+        ),
+    ]
+    resources = [
+        coverage.CoverageResource(
+            resource_id="amb-1",
+            resource_type=ResourceType.AMBULANCE,
+            capability_tags=(),
+            status=ResourceStatus.AVAILABLE,
+            coordinate=Coordinate(lat=30.0, lon=31.3),
+            data_reality=DataReality.SIMULATED,
+            source="phase03_simulated_resource",
+        ),
+        coverage.CoverageResource(
+            resource_id="fire-1",
+            resource_type=ResourceType.FIRE_RESCUE,
+            capability_tags=(),
+            status=ResourceStatus.AVAILABLE,
+            coordinate=Coordinate(lat=30.0, lon=31.32),
+            data_reality=DataReality.SIMULATED,
+            source="phase03_simulated_resource",
+        ),
+    ]
+    ambulance_snapshot = coverage.compute_coverage_snapshot(
+        graph=graph,
+        zones=modeled_zones,
+        resources=resources,
+        cohort=coverage.CoverageCohort(ResourceType.AMBULANCE),
+        traffic_snapshot=None,
+        modeled_at=modeled_at,
+    )
+    fire_snapshot = coverage.compute_coverage_snapshot(
+        graph=graph,
+        zones=modeled_zones,
+        resources=resources,
+        cohort=coverage.CoverageCohort(ResourceType.FIRE_RESCUE),
+        traffic_snapshot=None,
+        modeled_at=modeled_at,
+    )
+
+    joint = coverage.derive_joint_coverage_snapshot(
+        (ambulance_snapshot, fire_snapshot)
+    )
+
+    by_zone = {zone.zone_id: zone for zone in joint.zones}
+    assert joint.aggregation_policy == "JOINT_ALL_REQUIRED_COHORTS_V1"
+    assert joint.total_modeled_population == 150.0
+    assert joint.population_weighted_coverage == 0.0
+    assert by_zone["zone-one"].eta_seconds == 700.0
+    assert by_zone["zone-one"].covered is False
+    assert by_zone["zone-one"].failing_cohort_ids == ("FIRE_RESCUE",)
+    assert by_zone["zone-two"].eta_seconds is None
+    assert by_zone["zone-two"].failing_cohort_ids == ("FIRE_RESCUE",)
+    assert joint.worst_zone_eta is None
+    assert joint.worst_finite_zone_eta == 700.0
+    assert joint.unreachable_zone_ids == ("zone-two",)
+
+    single = coverage.derive_joint_coverage_snapshot((ambulance_snapshot,))
+    assert single.population_weighted_coverage == ambulance_snapshot.population_weighted_coverage
+    assert single.zones[0].eta_seconds == ambulance_snapshot.zones[0].eta_seconds

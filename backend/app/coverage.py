@@ -34,6 +34,7 @@ PROTOTYPE_TARGET_RESPONSE_TIME_SECONDS = (
     settings.PROTOTYPE_TARGET_RESPONSE_TIME_SECONDS
 )
 WORLDPOP_SOURCE_REFERENCE = "https://hub.worldpop.org/geodata/summary?id=56914"
+JOINT_COVERAGE_AGGREGATION_POLICY = "JOINT_ALL_REQUIRED_COHORTS_V1"
 
 
 @dataclass(frozen=True)
@@ -63,6 +64,7 @@ class CoverageResource:
     coordinate: Coordinate
     data_reality: DataReality
     source: str
+    assigned_incident_id: str | None = None
 
     def __post_init__(self) -> None:
         if not self.resource_id.strip():
@@ -127,6 +129,44 @@ class CoverageSnapshot:
     traffic_source_reference: str | None
     traffic_fallback_reason: str | None
     traffic_adjusted_zone_count: int
+
+
+@dataclass(frozen=True)
+class JointZoneCoverage:
+    """One zone's all-required-cohort coverage result."""
+
+    zone_id: str
+    population: float
+    eta_seconds: float | None
+    covered: bool
+    failing_cohort_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class JointCoverageSnapshot:
+    """Plan-level coverage derived from retained required-cohort snapshots."""
+
+    aggregation_policy: str
+    cohort_snapshots: tuple[CoverageSnapshot, ...]
+    modeled_at: datetime
+    source: str
+    data_reality: DataReality
+    population_data_reality: DataReality
+    population_source_reference: str | None
+    graph_fingerprint: str
+    prototype_target_response_time_seconds: int
+    zones: tuple[JointZoneCoverage, ...]
+    total_modeled_population: float
+    covered_population: float
+    population_weighted_coverage: float
+    worst_zone_eta: float | None
+    worst_finite_zone_eta: float | None
+    undercovered_zone_count: int
+    unreachable_zone_count: int
+    unreachable_zone_ids: tuple[str, ...]
+    traffic_snapshot_id: str | None
+    traffic_snapshot_version: int | None
+    traffic_freshness_status: FreshnessStatus | None
 
 
 @dataclass(frozen=True)
@@ -199,6 +239,7 @@ def _validate_zones(zones: Iterable[CoverageZone]) -> tuple[CoverageZone, ...]:
 def _matches_cohort(resource: CoverageResource, cohort: CoverageCohort) -> bool:
     return (
         resource.status is ResourceStatus.AVAILABLE
+        and resource.assigned_incident_id is None
         and resource.resource_type is cohort.resource_type
         and set(cohort.required_capability_tags).issubset(set(resource.capability_tags))
     )
@@ -486,6 +527,104 @@ def simulate_dispatch_impact(
         affected_zone_ids=affected_zone_ids,
         newly_undercovered_zone_ids=newly_undercovered_zone_ids,
         remaining_reserve_resource_ids=post_dispatch.eligible_resource_ids,
+    )
+
+
+def derive_joint_coverage_snapshot(
+    cohort_snapshots: Iterable[CoverageSnapshot],
+) -> JointCoverageSnapshot:
+    """Derive all-required-cohort coverage using one shared zone population total."""
+    snapshots = tuple(
+        sorted(cohort_snapshots, key=lambda snapshot: snapshot.cohort.cohort_id)
+    )
+    if not snapshots:
+        raise ValueError("At least one required cohort snapshot is required")
+    cohort_ids = [snapshot.cohort.cohort_id for snapshot in snapshots]
+    if len(cohort_ids) != len(set(cohort_ids)):
+        raise ValueError("Joint coverage requires unique cohort snapshots")
+    reference = snapshots[0]
+    reference_zone_ids = tuple(zone.zone_id for zone in reference.zones)
+    for snapshot in snapshots[1:]:
+        if tuple(zone.zone_id for zone in snapshot.zones) != reference_zone_ids:
+            raise ValueError("Joint coverage snapshots must use identical modeled zones")
+        if snapshot.modeled_at != reference.modeled_at:
+            raise ValueError("Joint coverage snapshots must share one modeled_at timestamp")
+        if snapshot.graph_fingerprint != reference.graph_fingerprint:
+            raise ValueError("Joint coverage snapshots must share one graph fingerprint")
+        if (
+            snapshot.prototype_target_response_time_seconds
+            != reference.prototype_target_response_time_seconds
+        ):
+            raise ValueError("Joint coverage snapshots must share one coverage target")
+        if snapshot.population_data_reality != reference.population_data_reality:
+            raise ValueError("Joint coverage snapshots must share population reality")
+        if snapshot.population_source_reference != reference.population_source_reference:
+            raise ValueError("Joint coverage snapshots must share population provenance")
+        if snapshot.traffic_snapshot_id != reference.traffic_snapshot_id:
+            raise ValueError("Joint coverage snapshots must share one traffic snapshot")
+        if snapshot.traffic_snapshot_version != reference.traffic_snapshot_version:
+            raise ValueError("Joint coverage snapshots must share one traffic version")
+        if snapshot.traffic_freshness_status != reference.traffic_freshness_status:
+            raise ValueError("Joint coverage snapshots must share traffic freshness")
+
+    joint_zones: list[JointZoneCoverage] = []
+    for index, zone_id in enumerate(reference_zone_ids):
+        cohort_zones = [(snapshot, snapshot.zones[index]) for snapshot in snapshots]
+        population = cohort_zones[0][1].population
+        if any(
+            not math.isclose(zone.population, population, rel_tol=0.0, abs_tol=1e-9)
+            for _snapshot, zone in cohort_zones[1:]
+        ):
+            raise ValueError("Joint coverage snapshots must share zone population values")
+        failing_cohort_ids = tuple(
+            snapshot.cohort.cohort_id
+            for snapshot, zone in cohort_zones
+            if not zone.covered
+        )
+        eta_values = [zone.eta_seconds for _snapshot, zone in cohort_zones]
+        eta_seconds = None if any(eta is None for eta in eta_values) else max(eta_values)
+        joint_zones.append(
+            JointZoneCoverage(
+                zone_id=zone_id,
+                population=population,
+                eta_seconds=eta_seconds,
+                covered=not failing_cohort_ids,
+                failing_cohort_ids=failing_cohort_ids,
+            )
+        )
+
+    total_population = sum(zone.population for zone in joint_zones)
+    covered_population = sum(zone.population for zone in joint_zones if zone.covered)
+    finite_etas = [zone.eta_seconds for zone in joint_zones if zone.eta_seconds is not None]
+    unreachable_zone_ids = tuple(
+        zone.zone_id for zone in joint_zones if zone.eta_seconds is None
+    )
+    return JointCoverageSnapshot(
+        aggregation_policy=JOINT_COVERAGE_AGGREGATION_POLICY,
+        cohort_snapshots=snapshots,
+        modeled_at=reference.modeled_at,
+        source="SirenGrid joint required-cohort coverage calculation",
+        data_reality=DataReality.REAL_DERIVED,
+        population_data_reality=reference.population_data_reality,
+        population_source_reference=reference.population_source_reference,
+        graph_fingerprint=reference.graph_fingerprint,
+        prototype_target_response_time_seconds=(
+            reference.prototype_target_response_time_seconds
+        ),
+        zones=tuple(joint_zones),
+        total_modeled_population=total_population,
+        covered_population=covered_population,
+        population_weighted_coverage=(
+            covered_population / total_population if total_population > 0 else 0.0
+        ),
+        worst_zone_eta=None if unreachable_zone_ids else max(finite_etas, default=None),
+        worst_finite_zone_eta=max(finite_etas, default=None),
+        undercovered_zone_count=sum(1 for zone in joint_zones if not zone.covered),
+        unreachable_zone_count=len(unreachable_zone_ids),
+        unreachable_zone_ids=unreachable_zone_ids,
+        traffic_snapshot_id=reference.traffic_snapshot_id,
+        traffic_snapshot_version=reference.traffic_snapshot_version,
+        traffic_freshness_status=reference.traffic_freshness_status,
     )
 
 

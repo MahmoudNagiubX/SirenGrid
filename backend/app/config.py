@@ -43,6 +43,11 @@ class Settings(BaseModel):
     prototype_target_response_time_seconds: Literal[600] = 600
     max_candidate_responders_per_cohort: Literal[5] = 5
     max_feasible_candidate_combinations: Literal[50] = 50
+    prototype_score_weight_eta: Literal[0.35] = 0.35
+    prototype_score_weight_coverage: Literal[0.40] = 0.40
+    prototype_score_weight_reserve: Literal[0.20] = 0.20
+    prototype_score_weight_reposition: Literal[0.05] = 0.05
+    prototype_score_weight_hospital: Literal[0.0] = 0.0
     nasr_city_data_dir: Path = Field(default_factory=lambda: DEFAULT_DATA_DIR)
     tomtom_api_key: str | None = Field(default=None, exclude=True)
     tomtom_refresh_interval_seconds: Literal[60] = 60
@@ -86,6 +91,16 @@ class Settings(BaseModel):
     @property
     def MAX_FEASIBLE_CANDIDATE_COMBINATIONS(self) -> int:
         return self.max_feasible_candidate_combinations
+
+    @property
+    def PROTOTYPE_SCORE_WEIGHTS(self) -> dict[str, float]:
+        return {
+            "eta": self.prototype_score_weight_eta,
+            "coverage": self.prototype_score_weight_coverage,
+            "reserve": self.prototype_score_weight_reserve,
+            "reposition": self.prototype_score_weight_reposition,
+            "hospital": self.prototype_score_weight_hospital,
+        }
 
     @property
     def NASR_CITY_DATA_DIR(self) -> Path:
@@ -157,6 +172,21 @@ def get_settings() -> Settings:
         ),
         max_feasible_candidate_combinations=int(
             os.getenv("MAX_FEASIBLE_CANDIDATE_COMBINATIONS", "50")
+        ),
+        prototype_score_weight_eta=float(
+            os.getenv("PROTOTYPE_SCORE_WEIGHT_ETA", "0.35")
+        ),
+        prototype_score_weight_coverage=float(
+            os.getenv("PROTOTYPE_SCORE_WEIGHT_COVERAGE", "0.40")
+        ),
+        prototype_score_weight_reserve=float(
+            os.getenv("PROTOTYPE_SCORE_WEIGHT_RESERVE", "0.20")
+        ),
+        prototype_score_weight_reposition=float(
+            os.getenv("PROTOTYPE_SCORE_WEIGHT_REPOSITION", "0.05")
+        ),
+        prototype_score_weight_hospital=float(
+            os.getenv("PROTOTYPE_SCORE_WEIGHT_HOSPITAL", "0.0")
         ),
         nasr_city_data_dir=nasr_city_data_dir,
         tomtom_api_key=os.getenv("TOMTOM_API_KEY") or None,
