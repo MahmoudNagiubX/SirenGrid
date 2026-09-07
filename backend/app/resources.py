@@ -438,6 +438,7 @@ def patch_resource_state(
             ResourceStatus.EN_ROUTE,
             ResourceStatus.ON_SCENE,
             ResourceStatus.TRANSPORTING,
+            ResourceStatus.OUT_OF_SERVICE,
         }
         if target_status not in valid_assigned_statuses:
             raise HTTPException(
@@ -493,6 +494,23 @@ def patch_resource_state(
         raise
 
     db.refresh(resource)
+    if incident is not None and target_status == ResourceStatus.OUT_OF_SERVICE:
+        # Import locally to keep the resource/planning module dependency graph
+        # acyclic while recording the post-commit domain trigger.
+        from app.replanning import record_replan_trigger
+
+        record_replan_trigger(
+            db,
+            incident_id=incident.id,
+            expected_incident_version=incident.version,
+            trigger_reasons=["RESOURCE_UNAVAILABLE"],
+            input_references={
+                "resource_id": resource.id,
+                "resource_version": resource.version,
+                "resource_status": resource.status.value,
+            },
+            now=now_utc,
+        )
     result = serialize_resource(resource)
     publish_operations_event(
         event="resource.updated",

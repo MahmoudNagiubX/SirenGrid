@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from app.db import init_db
 from app.main import app
-from app.models import Incident, ReplanEvaluation, ResponsePlan
+from app.models import EmergencyResource, Incident, ReplanEvaluation, ResponsePlan
 from app.replanning import merge_pending_trigger
 from app.candidate_generation import CandidateResource, _is_hard_eligible
 from app.candidate_generation import CandidateCombination, CandidateResponder
@@ -486,3 +486,70 @@ def test_phase04_generation_cannot_overwrite_an_active_approved_plan(
     assert saved is not None
     assert saved.current_plan_id == plan.id
     assert saved.pending_replan_plan_id is None
+
+
+def test_required_assigned_resource_outage_records_replan_trigger(
+    isolated_engine: Engine,
+    db_session: Session,
+) -> None:
+    init_db(isolated_engine)
+    incident = Incident(
+        id=str(uuid.uuid4()),
+        version=4,
+        incident_type="traffic_collision",
+        severity=Severity.LOW,
+        confidence_level=ConfidenceLevel.HIGH,
+        status=IncidentStatus.RESPONSE_ACTIVE,
+        latitude=30.05,
+        longitude=31.34,
+        current_plan_id="approved-plan",
+    )
+    plan = ResponsePlan(
+        id="approved-plan",
+        incident_id=incident.id,
+        incident_version=4,
+        plan_version=1,
+        status=ResponsePlanStatus.APPROVED,
+        resource_ids_json=["resource-a"],
+        routes_json=[],
+        metrics_json={},
+        score_breakdown_json={},
+    )
+    resource = EmergencyResource(
+        id="resource-a",
+        version=1,
+        name="Resource A",
+        resource_type=ResourceType.AMBULANCE,
+        capability_tags_json=[],
+        status=ResourceStatus.ASSIGNED,
+        latitude=30.05,
+        longitude=31.34,
+        assigned_incident_id=incident.id,
+        provenance_json={"data_reality": DataReality.SIMULATED.value},
+    )
+    db_session.add_all([incident, plan, resource])
+    db_session.commit()
+
+    response = TestClient(app).patch(
+        "/api/v1/resources/resource-a/state",
+        json={
+            "expected_resource_version": 1,
+            "incident_id": incident.id,
+            "status": "OUT_OF_SERVICE",
+            "operator_reference": "operator-1",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    db_session.expire_all()
+    saved_resource = db_session.get(EmergencyResource, resource.id)
+    pending = db_session.scalar(
+        select(ReplanEvaluation).where(
+            ReplanEvaluation.incident_id == incident.id,
+            ReplanEvaluation.status == "PENDING",
+        )
+    )
+    assert saved_resource is not None
+    assert saved_resource.status == ResourceStatus.OUT_OF_SERVICE
+    assert pending is not None
+    assert pending.trigger_reasons_json == ["RESOURCE_UNAVAILABLE"]
