@@ -49,6 +49,13 @@ class ReportAssociationRequest(BaseModel):
     operator_reference: str = Field(min_length=1, max_length=200)
 
 
+class ManualTranscriptRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    operator_reference: str = Field(min_length=1, max_length=200)
+    transcript: str = Field(min_length=1, max_length=20000)
+
+
 def _report_claims(report: Report) -> list[EvidenceClaim]:
     claims: list[EvidenceClaim] = []
     for item in report.evidence_items_json or []:
@@ -400,6 +407,60 @@ def associate_report(
         "incident_version": incident.version,
         "report": serialize_report(report),
     }
+
+
+@router.post("/reports/{report_id}/manual-transcript")
+def add_manual_transcript(
+    report_id: str,
+    payload: ManualTranscriptRequest,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    report = db.get(Report, report_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail=f"Report '{report_id}' not found")
+    now_utc = datetime.now(timezone.utc)
+    evidence_items = list(report.evidence_items_json or [])
+    evidence_items.append(
+        {
+            "type": "MANUAL_TRANSCRIPT",
+            "uri_or_reference": report.source_reference,
+            "extracted_facts": {"transcript": payload.transcript},
+            "provenance": {
+                "source": "operator_manual_transcript",
+                "operator_reference": payload.operator_reference,
+                "data_reality": DataReality.SIMULATED.value,
+                "freshness_status": FreshnessStatus.FRESH.value,
+                "created_at": now_utc.isoformat(),
+            },
+            "confidence_support": None,
+            "created_at": now_utc.isoformat(),
+        }
+    )
+    report.evidence_items_json = evidence_items
+    report.processing_status = "MANUAL_TRANSCRIPT_PROVIDED"
+    event = None
+    if report.incident_id:
+        event = _timeline_event(
+            incident_id=report.incident_id,
+            event_type="TRANSCRIPT_ADDED",
+            details={
+                "report_id": report.id,
+                "operator_reference": payload.operator_reference,
+                "data_reality": DataReality.SIMULATED.value,
+            },
+            created_at=now_utc,
+        )
+        db.add(event)
+    db.add(report)
+    db.commit()
+    db.refresh(report)
+    if event:
+        publish_operations_event(
+            event="timeline.appended",
+            incident_id=report.incident_id,
+            payload=serialize_timeline_event(event),
+        )
+    return serialize_report(report)
 
 
 @router.get("/reports/{report_id}/claims")

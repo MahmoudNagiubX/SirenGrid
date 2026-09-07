@@ -255,3 +255,37 @@ def test_fusion_review_does_not_mutate_incident_or_force_merge(
     assert current is not None
     assert current.version == 1
     assert db_session.get(Report, standalone.json()["id"]).incident_id is None
+
+
+def test_manual_transcript_fallback_appends_transcript_without_overwriting_media(
+    client: TestClient,
+    db_session: Session,
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "phase06_media_dir", tmp_path)
+    uploaded = client.post(
+        "/api/v1/reports/intake/audio",
+        files={"file": ("caller.wav", b"RIFF synthetic", "audio/wav")},
+        data={"source_reference": "call-manual"},
+    )
+    report_id = uploaded.json()["id"]
+
+    transcript = client.post(
+        f"/api/v1/reports/{report_id}/manual-transcript",
+        json={
+            "operator_reference": "transcript-operator",
+            "transcript": "Caller reports a collision near Tayaran; casualty count unknown.",
+        },
+    )
+
+    assert transcript.status_code == 200, transcript.text
+    data = transcript.json()
+    assert data["processing_status"] == "MANUAL_TRANSCRIPT_PROVIDED"
+    assert data["raw_text"] == ""
+    assert data["evidence_items"][0]["type"] == "AUDIO"
+    assert data["evidence_items"][1]["type"] == "MANUAL_TRANSCRIPT"
+    assert data["evidence_items"][1]["extracted_facts"]["transcript"].startswith("Caller")
+    persisted = db_session.get(Report, report_id)
+    assert persisted is not None
+    assert len(persisted.evidence_items_json) == 2
