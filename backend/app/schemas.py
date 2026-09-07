@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from datetime import datetime
 from enum import Enum
 from typing import Any
@@ -44,6 +45,7 @@ __all__ = [
     "ResourceAssignRequest",
     "ResourceStatePatchRequest",
     "ResourceReleaseRequest",
+    "ResourceMovementRequest",
     "OperationsEventEnvelope",
 ]
 
@@ -330,6 +332,7 @@ class ResourceRead(BaseModel):
     provenance: dict[str, Any] = Field(default_factory=dict)
     provenance_json: dict[str, Any] = Field(default_factory=dict)
     is_planner_eligible: bool
+    route_progress: float | None = None
 
 
 class ResponsePlanRead(BaseModel):
@@ -1124,6 +1127,54 @@ class ResourceReleaseRequest(BaseModel):
         if not v or not str(v).strip():
             raise ValueError("operator_reference must be a non-empty string")
         return str(v).strip()
+
+
+class ResourceMovementRequest(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "incident_id": "inc-7c9b2f14-9a3c-4b6e-8210-95e2df894a11",
+                "expected_resource_version": 1,
+                "route_progress": 0.5,
+                "operator_reference": "dispatcher-op-01",
+            }
+        }
+    )
+
+    incident_id: str
+    expected_resource_version: int = Field(ge=1)
+    route_progress: float = Field(ge=0.0, le=1.0)
+    operator_reference: str
+
+    @field_validator("incident_id", mode="before")
+    @classmethod
+    def validate_incident_id(cls, v: Any) -> Any:
+        if not v or not str(v).strip():
+            raise ValueError("incident_id must be a non-empty string")
+        return str(v).strip()
+
+    @field_validator("operator_reference", mode="before")
+    @classmethod
+    def validate_operator_reference(cls, v: Any) -> Any:
+        if not v or not str(v).strip():
+            raise ValueError("operator_reference must be a non-empty string")
+        return str(v).strip()
+
+    @field_validator("route_progress")
+    @classmethod
+    def validate_route_progress(cls, v: float) -> float:
+        if math.isnan(v) or math.isinf(v):
+            raise ValueError("route_progress must be a finite number between 0.0 and 1.0")
+        if v < 0.0 or v > 1.0:
+            raise ValueError("route_progress must be between 0.0 and 1.0")
+        return v
+
+    @field_validator("route_progress", mode="before")
+    @classmethod
+    def reject_boolean_route_progress(cls, v: Any) -> Any:
+        if isinstance(v, bool):
+            raise ValueError("route_progress must be a number between 0.0 and 1.0")
+        return v
 
 
 class OperationsEventEnvelope(BaseModel):
