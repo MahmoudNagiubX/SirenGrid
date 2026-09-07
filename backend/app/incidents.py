@@ -84,6 +84,8 @@ def serialize_incident(incident: Incident) -> dict[str, Any]:
         "casualty_range": incident.casualty_range,
         "trapped_person": incident.trapped_person,
         "road_blockage": incident.road_blockage,
+        "transport_required": incident.transport_required,
+        "required_hospital_capabilities": incident.required_hospital_capabilities_json or [],
         "required_resources": incident.required_resources_json or [],
         "required_resources_json": incident.required_resources_json or [],
         "current_plan_id": incident.current_plan_id,
@@ -152,7 +154,12 @@ def serialize_report(report: Report) -> dict[str, Any]:
     }
 
 
-PLANNING_INPUT_FACT_FIELDS: set[str] = {"location", "required_resources"}
+PLANNING_INPUT_FACT_FIELDS: set[str] = {
+    "location",
+    "required_resources",
+    "transport_required",
+    "required_hospital_capabilities",
+}
 FACT_FIELD_NAMES: set[str] = {
     "incident_type",
     "severity",
@@ -163,6 +170,8 @@ FACT_FIELD_NAMES: set[str] = {
     "casualty_range",
     "trapped_person",
     "road_blockage",
+    "transport_required",
+    "required_hospital_capabilities",
     "required_resources",
 }
 
@@ -230,6 +239,8 @@ def create_manual_incident(
         casualty_range=payload.casualty_range,
         trapped_person=payload.trapped_person,
         road_blockage=payload.road_blockage,
+        transport_required=payload.transport_required,
+        required_hospital_capabilities_json=payload.required_hospital_capabilities,
         required_resources_json=required_resources,
         current_plan_id=None,
         created_at=now_utc,
@@ -742,6 +753,20 @@ def patch_incident_facts(
                 changed_fields.append(field)
                 old_values[field] = old_val
                 new_values[field] = new_val
+        elif field == "transport_required":
+            old_val = incident.transport_required
+            new_val = payload.transport_required
+            if new_val != old_val:
+                changed_fields.append(field)
+                old_values[field] = old_val
+                new_values[field] = new_val
+        elif field == "required_hospital_capabilities":
+            old_val = list(incident.required_hospital_capabilities_json or [])
+            new_val = sorted(set(payload.required_hospital_capabilities or []))
+            if new_val != old_val:
+                changed_fields.append(field)
+                old_values[field] = old_val
+                new_values[field] = new_val
         elif field == "required_resources":
             old_val = list(incident.required_resources_json or [])
             new_val = [
@@ -785,6 +810,10 @@ def patch_incident_facts(
             incident.trapped_person = payload.trapped_person
         elif field == "road_blockage":
             incident.road_blockage = payload.road_blockage
+        elif field == "transport_required":
+            incident.transport_required = payload.transport_required
+        elif field == "required_hospital_capabilities":
+            incident.required_hospital_capabilities_json = new_values[field]
         elif field == "required_resources":
             incident.required_resources_json = new_values[field]
 

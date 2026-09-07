@@ -16,6 +16,10 @@ __all__ = [
     "ResourceType",
     "ResourceStatus",
     "ResponsePlanStatus",
+    "HospitalAcceptingState",
+    "HospitalPreAlertStatus",
+    "CorridorSignalState",
+    "DriverAlertStatus",
     "Coordinate",
     "ProvenanceMetadata",
     "ResourceRequirement",
@@ -48,6 +52,20 @@ __all__ = [
     "ResourceReleaseRequest",
     "ResourceMovementRequest",
     "OperationsEventEnvelope",
+    "HospitalRead",
+    "HospitalOperationalStatePatchRequest",
+    "HospitalOptionRead",
+    "HospitalOptionsResponse",
+    "SelectHospitalDestinationRequest",
+    "HospitalDestinationRead",
+    "HospitalPreAlertRequest",
+    "HospitalPreAlertRead",
+    "CorridorSignalRead",
+    "CorridorRead",
+    "CorridorPriorityRequest",
+    "DriverAlertRefreshRequest",
+    "DriverAlertRead",
+    "IncidentOperationalStateRead",
 ]
 
 
@@ -119,6 +137,33 @@ class ResponsePlanStatus(str, Enum):
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
     SUPERSEDED = "SUPERSEDED"
+
+
+class HospitalAcceptingState(str, Enum):
+    ACCEPTING = "ACCEPTING"
+    NOT_ACCEPTING = "NOT_ACCEPTING"
+    UNKNOWN = "UNKNOWN"
+
+
+class HospitalPreAlertStatus(str, Enum):
+    REQUESTED = "REQUESTED"
+    SENT = "SENT"
+    ACKNOWLEDGED = "ACKNOWLEDGED"
+    FAILED = "FAILED"
+
+
+class CorridorSignalState(str, Enum):
+    NORMAL = "NORMAL"
+    REQUESTED = "REQUESTED"
+    PREPARING = "PREPARING"
+    PRIORITY_ACTIVE = "PRIORITY_ACTIVE"
+    PASSED = "PASSED"
+    FAILED = "FAILED"
+
+
+class DriverAlertStatus(str, Enum):
+    ACTIVE = "ACTIVE"
+    EXPIRED = "EXPIRED"
 
 
 class Coordinate(BaseModel):
@@ -200,6 +245,8 @@ class ManualIncidentCreate(BaseModel):
     casualty_range: str | None = None
     trapped_person: bool | None = None
     road_blockage: bool | None = None
+    transport_required: bool | None = None
+    required_hospital_capabilities: list[str] = Field(default_factory=list)
     required_resources: list[ResourceRequirement] = Field(min_length=1)
     operator_reference: str = "demo-operator"
 
@@ -265,6 +312,8 @@ class IncidentRead(BaseModel):
     casualty_range: str | None = None
     trapped_person: bool | None = None
     road_blockage: bool | None = None
+    transport_required: bool | None = None
+    required_hospital_capabilities: list[str] = Field(default_factory=list)
     required_resources: list[ResourceRequirement] = Field(default_factory=list)
     required_resources_json: list[ResourceRequirement] = Field(default_factory=list)
     current_plan_id: str | None = None
@@ -986,6 +1035,8 @@ class IncidentFactsPatchRequest(BaseModel):
     casualty_range: str | None = None
     trapped_person: bool | None = None
     road_blockage: bool | None = None
+    transport_required: bool | None = None
+    required_hospital_capabilities: list[str] | None = None
     required_resources: list[ResourceRequirement] | None = None
 
     @field_validator("incident_type", mode="before")
@@ -1198,3 +1249,164 @@ class OperationsEventEnvelope(BaseModel):
     payload: dict[str, Any]
 
     model_config = ConfigDict(extra="forbid")
+
+
+class HospitalRead(BaseModel):
+    id: str
+    source_id: str
+    name: str | None = None
+    latitude: float
+    longitude: float
+    static_capabilities: list[str] = Field(default_factory=list)
+    static_capacity: int | None = None
+    accepting_state: HospitalAcceptingState
+    simulated_load_ratio: float | None = None
+    simulated_free_capacity: int | None = None
+    incoming_cases: int | None = None
+    operational_freshness_status: FreshnessStatus
+    static_provenance: dict[str, Any] = Field(default_factory=dict)
+    operational_provenance: dict[str, Any] = Field(default_factory=dict)
+
+
+class HospitalOperationalStatePatchRequest(BaseModel):
+    expected_version: int | None = Field(default=None, ge=1)
+    accepting_state: HospitalAcceptingState | None = None
+    simulated_load_ratio: float | None = Field(default=None, ge=0.0, le=1.0)
+    simulated_free_capacity: int | None = Field(default=None, ge=0)
+    incoming_cases: int | None = Field(default=None, ge=0)
+    freshness_status: FreshnessStatus | None = None
+    operator_reference: str = Field(min_length=1)
+
+
+class HospitalOptionRead(BaseModel):
+    option_id: str
+    option_set_id: str
+    option_version: int
+    rank: int
+    hospital: HospitalRead
+    route: dict[str, Any] = Field(default_factory=dict)
+    score: float
+    score_breakdown: dict[str, Any] = Field(default_factory=dict)
+    provenance: dict[str, Any] = Field(default_factory=dict)
+
+
+class HospitalOptionsResponse(BaseModel):
+    incident_id: str
+    plan_id: str
+    incident_version: int
+    plan_version: int
+    option_set_id: str
+    option_set_version: int
+    transport_required: bool
+    required_hospital_capabilities: list[str] = Field(default_factory=list)
+    options: list[HospitalOptionRead] = Field(default_factory=list)
+    excluded_hospitals: list[dict[str, Any]] = Field(default_factory=list)
+    generated_at: str
+    provenance: dict[str, Any] = Field(default_factory=dict)
+
+
+class SelectHospitalDestinationRequest(BaseModel):
+    expected_incident_version: int = Field(ge=1)
+    expected_plan_version: int = Field(ge=1)
+    expected_option_set_version: int = Field(ge=1)
+    hospital_id: str = Field(min_length=1)
+    operator_reference: str = Field(min_length=1)
+
+
+class HospitalDestinationRead(BaseModel):
+    id: str
+    incident_id: str
+    plan_id: str
+    option_set_id: str
+    hospital_id: str
+    status: str
+    incident_version: int
+    plan_version: int
+    selected_at: str
+    provenance: dict[str, Any] = Field(default_factory=dict)
+
+
+class HospitalPreAlertRequest(BaseModel):
+    expected_incident_version: int = Field(ge=1)
+    expected_plan_version: int = Field(ge=1)
+    operator_reference: str = Field(min_length=1)
+    simulate_failure: bool = False
+
+
+class HospitalPreAlertRead(BaseModel):
+    id: str
+    incident_id: str
+    plan_id: str
+    destination_id: str
+    status: HospitalPreAlertStatus
+    payload: dict[str, Any] = Field(default_factory=dict)
+    requested_at: str
+    sent_at: str | None = None
+    acknowledged_at: str | None = None
+    failed_at: str | None = None
+    failure_reason: str | None = None
+    data_reality: DataReality
+    provenance: dict[str, Any] = Field(default_factory=dict)
+
+
+class CorridorSignalRead(BaseModel):
+    signal_id: str
+    latitude: float
+    longitude: float
+    distance_along_route_m: float
+    estimated_arrival_seconds: float
+    request_time: str | None = None
+    state: CorridorSignalState
+    provenance: dict[str, Any] = Field(default_factory=dict)
+
+
+class CorridorRead(BaseModel):
+    id: str
+    incident_id: str
+    plan_id: str
+    route_reference: str
+    route_geometry: dict[str, Any]
+    signals: list[CorridorSignalRead] = Field(default_factory=list)
+    state: CorridorSignalState
+    safety_lead_time_seconds: int
+    data_reality: DataReality
+    provenance: dict[str, Any] = Field(default_factory=dict)
+    updated_at: str
+
+
+class CorridorPriorityRequest(BaseModel):
+    expected_incident_version: int = Field(ge=1)
+    expected_plan_version: int = Field(ge=1)
+    operator_reference: str = Field(min_length=1)
+    state: CorridorSignalState = CorridorSignalState.REQUESTED
+
+
+class DriverAlertRefreshRequest(BaseModel):
+    expected_resource_version: int = Field(ge=1)
+    operator_reference: str = Field(min_length=1)
+
+
+class DriverAlertRead(BaseModel):
+    id: str
+    incident_id: str
+    plan_id: str
+    resource_id: str
+    route_reference: str
+    route_progress: float
+    geometry: dict[str, Any] | None = None
+    created_at: str
+    expires_at: str
+    status: DriverAlertStatus
+    data_reality: DataReality
+    provenance: dict[str, Any] = Field(default_factory=dict)
+
+
+class IncidentOperationalStateRead(BaseModel):
+    incident_id: str
+    incident_version: int
+    plan_id: str | None = None
+    hospital_options: HospitalOptionsResponse | None = None
+    selected_destination: HospitalDestinationRead | None = None
+    hospital_pre_alert: HospitalPreAlertRead | None = None
+    corridor: CorridorRead | None = None
+    driver_alert: DriverAlertRead | None = None

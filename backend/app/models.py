@@ -12,6 +12,7 @@ from sqlalchemy import (
     JSON,
     String,
     Enum as SAEnum,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -19,6 +20,7 @@ from app.db import Base
 from app.schemas import (
     ConfidenceLevel,
     DataReality,
+    HospitalAcceptingState,
     IncidentStatus,
     ResourceStatus,
     ResourceType,
@@ -33,6 +35,12 @@ __all__ = [
     "Approval",
     "TimelineEvent",
     "Report",
+    "HospitalOperationalState",
+    "HospitalOptionSet",
+    "HospitalDestination",
+    "HospitalPreAlert",
+    "CorridorState",
+    "DriverAlert",
 ]
 
 
@@ -93,6 +101,15 @@ class Incident(Base):
         Boolean,
         nullable=True,
         default=None,
+    )
+    transport_required: Mapped[bool | None] = mapped_column(
+        Boolean,
+        nullable=True,
+        default=None,
+    )
+    required_hospital_capabilities_json: Mapped[list[str]] = mapped_column(
+        JSON,
+        default=list,
     )
     required_resources_json: Mapped[list[dict[str, Any]]] = mapped_column(
         JSON,
@@ -302,3 +319,138 @@ class Report(Base):
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
     )
+
+
+class HospitalOperationalState(Base):
+    __tablename__ = "hospital_operational_states"
+
+    hospital_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    accepting_state: Mapped[str] = mapped_column(
+        String,
+        default=HospitalAcceptingState.UNKNOWN.value,
+    )
+    simulated_load_ratio: Mapped[float | None] = mapped_column(Float, nullable=True, default=None)
+    simulated_free_capacity: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
+    incoming_cases: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
+    freshness_status: Mapped[str] = mapped_column(String, default="UNKNOWN")
+    last_updated: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, default=None)
+    source: Mapped[str] = mapped_column(String, default="SIMULATED_HOSPITAL_GATEWAY")
+    data_reality: Mapped[DataReality] = mapped_column(
+        SAEnum(
+            DataReality,
+            native_enum=False,
+            values_callable=lambda obj: [e.value for e in obj],
+        ),
+        default=DataReality.SIMULATED,
+    )
+    provenance_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+
+class HospitalOptionSet(Base):
+    __tablename__ = "hospital_option_sets"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    incident_id: Mapped[str] = mapped_column(String(36))
+    plan_id: Mapped[str] = mapped_column(String(36))
+    incident_version: Mapped[int] = mapped_column(Integer)
+    plan_version: Mapped[int] = mapped_column(Integer)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    options_json: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    excluded_hospitals_json: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    provenance_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class HospitalDestination(Base):
+    __tablename__ = "hospital_destinations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    incident_id: Mapped[str] = mapped_column(String(36))
+    plan_id: Mapped[str] = mapped_column(String(36))
+    option_set_id: Mapped[str] = mapped_column(String(36))
+    hospital_id: Mapped[str] = mapped_column(String(255))
+    status: Mapped[str] = mapped_column(String, default="SELECTED")
+    incident_version: Mapped[int] = mapped_column(Integer)
+    plan_version: Mapped[int] = mapped_column(Integer)
+    selected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    provenance_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+
+class HospitalPreAlert(Base):
+    __tablename__ = "hospital_pre_alerts"
+    __table_args__ = (UniqueConstraint("destination_id", name="uq_hospital_pre_alert_destination"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    incident_id: Mapped[str] = mapped_column(String(36))
+    plan_id: Mapped[str] = mapped_column(String(36))
+    destination_id: Mapped[str] = mapped_column(String(36))
+    status: Mapped[str] = mapped_column(String)
+    payload_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    failed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    failure_reason: Mapped[str | None] = mapped_column(String, nullable=True)
+    data_reality: Mapped[DataReality] = mapped_column(
+        SAEnum(
+            DataReality,
+            native_enum=False,
+            values_callable=lambda obj: [e.value for e in obj],
+        ),
+        default=DataReality.SIMULATED,
+    )
+    provenance_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+
+class CorridorState(Base):
+    __tablename__ = "corridor_states"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    incident_id: Mapped[str] = mapped_column(String(36))
+    plan_id: Mapped[str] = mapped_column(String(36))
+    route_reference: Mapped[str] = mapped_column(String)
+    route_geometry_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    signals_json: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    state: Mapped[str] = mapped_column(String, default="NORMAL")
+    safety_lead_time_seconds: Mapped[int] = mapped_column(Integer)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    data_reality: Mapped[DataReality] = mapped_column(
+        SAEnum(
+            DataReality,
+            native_enum=False,
+            values_callable=lambda obj: [e.value for e in obj],
+        ),
+        default=DataReality.SIMULATED,
+    )
+    provenance_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+
+class DriverAlert(Base):
+    __tablename__ = "driver_alerts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    incident_id: Mapped[str] = mapped_column(String(36))
+    plan_id: Mapped[str] = mapped_column(String(36))
+    resource_id: Mapped[str] = mapped_column(String(36))
+    route_reference: Mapped[str] = mapped_column(String)
+    route_progress: Mapped[float] = mapped_column(Float)
+    geometry_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String, default="ACTIVE")
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    data_reality: Mapped[DataReality] = mapped_column(
+        SAEnum(
+            DataReality,
+            native_enum=False,
+            values_callable=lambda obj: [e.value for e in obj],
+        ),
+        default=DataReality.SIMULATED,
+    )
+    provenance_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)

@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.incidents import router as incidents_router
+from app.hospital_api import router as hospital_router
 from app.map import router as map_router
 from app.planning import router as planning_router
 from app.resources import router as resources_router
@@ -37,6 +38,7 @@ def health_check() -> dict[str, str]:
 
 
 api_router.include_router(incidents_router)
+api_router.include_router(hospital_router)
 api_router.include_router(resources_router)
 api_router.include_router(planning_router)
 api_router.include_router(map_router)

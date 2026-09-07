@@ -49,6 +49,12 @@ class Settings(BaseModel):
     prototype_score_weight_reposition: Literal[0.05] = 0.05
     prototype_score_weight_hospital: Literal[0.0] = 0.0
     reposition_coverage_drop_trigger: Literal[0.05] = 0.05
+    hospital_eta_normalizer_seconds: Literal[900] = 900
+    corridor_signal_buffer_meters: Literal[50] = 50
+    signal_priority_safety_lead_time_seconds: Literal[30] = 30
+    driver_alert_lookahead_meters: Literal[500] = 500
+    driver_alert_buffer_meters: Literal[30] = 30
+    driver_alert_expiry_seconds: Literal[120] = 120
     nasr_city_data_dir: Path = Field(default_factory=lambda: DEFAULT_DATA_DIR)
     tomtom_api_key: str | None = Field(default=None, exclude=True)
     tomtom_refresh_interval_seconds: Literal[60] = 60
@@ -106,6 +112,30 @@ class Settings(BaseModel):
     @property
     def REPOSITION_COVERAGE_DROP_TRIGGER(self) -> float:
         return self.reposition_coverage_drop_trigger
+
+    @property
+    def HOSPITAL_ETA_NORMALIZER_SECONDS(self) -> int:
+        return self.hospital_eta_normalizer_seconds
+
+    @property
+    def CORRIDOR_SIGNAL_BUFFER_METERS(self) -> int:
+        return self.corridor_signal_buffer_meters
+
+    @property
+    def SIGNAL_PRIORITY_SAFETY_LEAD_TIME_SECONDS(self) -> int:
+        return self.signal_priority_safety_lead_time_seconds
+
+    @property
+    def DRIVER_ALERT_LOOKAHEAD_METERS(self) -> int:
+        return self.driver_alert_lookahead_meters
+
+    @property
+    def DRIVER_ALERT_BUFFER_METERS(self) -> int:
+        return self.driver_alert_buffer_meters
+
+    @property
+    def DRIVER_ALERT_EXPIRY_SECONDS(self) -> int:
+        return self.driver_alert_expiry_seconds
 
     @property
     def NASR_CITY_DATA_DIR(self) -> Path:
@@ -195,6 +225,24 @@ def get_settings() -> Settings:
         ),
         reposition_coverage_drop_trigger=float(
             os.getenv("REPOSITION_COVERAGE_DROP_TRIGGER", "0.05")
+        ),
+        hospital_eta_normalizer_seconds=int(
+            os.getenv("HOSPITAL_ETA_NORMALIZER_SECONDS", "900")
+        ),
+        corridor_signal_buffer_meters=int(
+            os.getenv("CORRIDOR_SIGNAL_BUFFER_METERS", "50")
+        ),
+        signal_priority_safety_lead_time_seconds=int(
+            os.getenv("SIGNAL_PRIORITY_SAFETY_LEAD_TIME_SECONDS", "30")
+        ),
+        driver_alert_lookahead_meters=int(
+            os.getenv("DRIVER_ALERT_LOOKAHEAD_METERS", "500")
+        ),
+        driver_alert_buffer_meters=int(
+            os.getenv("DRIVER_ALERT_BUFFER_METERS", "30")
+        ),
+        driver_alert_expiry_seconds=int(
+            os.getenv("DRIVER_ALERT_EXPIRY_SECONDS", "120")
         ),
         nasr_city_data_dir=nasr_city_data_dir,
         tomtom_api_key=os.getenv("TOMTOM_API_KEY") or None,
