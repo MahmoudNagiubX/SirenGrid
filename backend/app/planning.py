@@ -501,6 +501,16 @@ def generate_phase04_candidate_plans(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Cannot generate response plans for incident with status {incident.status.value}",
         )
+    if incident.current_plan_id:
+        active_plan = db.get(ResponsePlan, incident.current_plan_id)
+        if active_plan is not None and active_plan.status == ResponsePlanStatus.APPROVED:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Incident already has an active APPROVED plan; use the Phase 07 "
+                    "replan trigger/evaluation flow"
+                ),
+            )
 
     try:
         resolution, ranked, reposition_proposals, now_utc = evaluate_phase04_candidate_set(

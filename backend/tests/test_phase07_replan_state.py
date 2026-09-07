@@ -444,3 +444,45 @@ def test_material_flush_persists_pending_replacement_without_repointing_active_p
     )
     assert repeat.status_code == 200
     assert repeat.json()["idempotent"] is True
+
+
+def test_phase04_generation_cannot_overwrite_an_active_approved_plan(
+    isolated_engine: Engine,
+    db_session: Session,
+) -> None:
+    init_db(isolated_engine)
+    incident = Incident(
+        id=str(uuid.uuid4()),
+        version=4,
+        incident_type="traffic_collision",
+        severity=Severity.LOW,
+        confidence_level=ConfidenceLevel.HIGH,
+        status=IncidentStatus.RESPONSE_ACTIVE,
+        latitude=30.05,
+        longitude=31.34,
+        current_plan_id="approved-plan",
+        required_resources_json=[{"resource_type": "AMBULANCE", "count": 1}],
+    )
+    plan = ResponsePlan(
+        id="approved-plan",
+        incident_id=incident.id,
+        incident_version=3,
+        plan_version=1,
+        status=ResponsePlanStatus.APPROVED,
+        resource_ids_json=[],
+        routes_json=[],
+        metrics_json={},
+        score_breakdown_json={},
+    )
+    db_session.add_all([incident, plan])
+    db_session.commit()
+    response = TestClient(app).post(
+        f"/api/v1/incidents/{incident.id}/plans/generate-candidates"
+    )
+
+    assert response.status_code == 409
+    db_session.expire_all()
+    saved = db_session.get(Incident, incident.id)
+    assert saved is not None
+    assert saved.current_plan_id == plan.id
+    assert saved.pending_replan_plan_id is None
