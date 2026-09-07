@@ -8,6 +8,7 @@ from app.media import (
     AUDIO_MIME_TYPES,
     IMAGE_MIME_TYPES,
     MediaValidationError,
+    resolve_media_path,
     store_media,
 )
 
@@ -70,3 +71,20 @@ def test_kind_and_mime_must_match(tmp_path: Path) -> None:
             content_type="audio/wav",
             media_dir=tmp_path,
         )
+
+
+def test_media_reference_resolves_only_to_generated_file(tmp_path: Path) -> None:
+    stored = store_media(
+        b"RIFF synthetic",
+        media_kind="audio",
+        content_type="audio/wav",
+        media_dir=tmp_path,
+    )
+
+    assert resolve_media_path(
+        stored.media_reference,
+        mime_type="audio/wav",
+        media_dir=tmp_path,
+    ).read_bytes() == b"RIFF synthetic"
+    with pytest.raises(MediaValidationError, match="invalid media reference"):
+        resolve_media_path("media:C:\\Windows\\secret", mime_type="audio/wav", media_dir=tmp_path)

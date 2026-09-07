@@ -291,6 +291,36 @@ def test_manual_transcript_fallback_appends_transcript_without_overwriting_media
     assert len(persisted.evidence_items_json) == 2
 
 
+def test_explicit_asr_action_appends_transcript_without_mutating_incident(
+    client: TestClient,
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    db_session: Session,
+) -> None:
+    monkeypatch.setattr(settings, "phase06_media_dir", tmp_path)
+    monkeypatch.setattr(
+        "app.phase06_api.configured_groq_transcriber",
+        lambda path, model, timeout: "نسخة تفريغ تجريبية",
+    )
+    created = client.post("/api/v1/intake/manual", json=_incident_payload()).json()
+    uploaded = client.post(
+        "/api/v1/reports/intake/audio",
+        files={"file": ("caller.wav", b"RIFF synthetic", "audio/wav")},
+        data={"source_reference": "call-asr", "incident_id": created["id"]},
+    )
+    assert uploaded.status_code == 201
+
+    transcribed = client.post(f"/api/v1/reports/{uploaded.json()['id']}/transcribe")
+
+    assert transcribed.status_code == 200, transcribed.text
+    assert transcribed.json()["status"] == "SUCCEEDED"
+    assert transcribed.json()["report"]["evidence_items"][-1]["type"] == "ASR_TRANSCRIPT"
+    assert transcribed.json()["report"]["evidence_items"][-1]["provenance"]["model"] == "whisper-large-v3"
+    current = db_session.get(Incident, created["id"])
+    assert current is not None
+    assert current.version == 1
+
+
 def test_explicit_duplicate_merge_preserves_reports_and_marks_redundant_incident(
     client: TestClient,
     db_session: Session,

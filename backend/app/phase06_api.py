@@ -11,7 +11,8 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy.orm import Session
 
 from app.ai import EvidenceClaim, StructuredExtractionStatus
-from app.ai_processing import process_structured_extraction
+from app.ai_processing import ASRResult, ASRStatus, process_structured_extraction, transcribe_with_fallback
+from app.asr import configured_groq_transcriber
 from app.claims import append_claims_to_evidence_items
 from app.db import get_db
 from app.fusion import FusionDecision, FusionReport, evaluate_report_association
@@ -23,7 +24,7 @@ from app.incidents import (
     serialize_report,
     serialize_timeline_event,
 )
-from app.media import MediaValidationError, store_media
+from app.media import MediaValidationError, resolve_media_path, store_media
 from app.models import Incident, Report, TimelineEvent
 from app.schemas import (
     DataReality,
@@ -476,6 +477,89 @@ def add_manual_transcript(
             payload=serialize_timeline_event(event),
         )
     return serialize_report(report)
+
+
+@router.post("/reports/{report_id}/transcribe")
+def transcribe_report(
+    report_id: str,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    report = db.get(Report, report_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail=f"Report '{report_id}' not found")
+    media_item = next(
+        (item for item in report.evidence_items_json or [] if item.get("type") == "AUDIO"),
+        None,
+    )
+    if media_item is None:
+        raise HTTPException(status_code=422, detail="report does not contain audio evidence")
+    provenance = media_item.get("provenance", {})
+    try:
+        audio_path = resolve_media_path(
+            str(media_item.get("uri_or_reference", "")),
+            mime_type=str(provenance.get("mime_type", "")),
+        )
+        result = transcribe_with_fallback(
+            audio_path,
+            transcriber=configured_groq_transcriber,
+        )
+    except MediaValidationError as exc:
+        result = ASRResult(
+            status=ASRStatus.MANUAL_REQUIRED,
+            failures=[{"provider": "local_media", "model": "", "code": str(exc)}],
+            manual_fallback_required=True,
+        )
+
+    now_utc = datetime.now(timezone.utc)
+    report.processing_status = (
+        "ASR_SUCCEEDED" if result.status is ASRStatus.SUCCEEDED else "ASR_MANUAL_REQUIRED"
+    )
+    report_provenance = dict(report.provenance_json or {})
+    report_provenance["asr_processing"] = result.model_dump(mode="json")
+    report.provenance_json = report_provenance
+    if result.transcript is not None:
+        evidence_items = list(report.evidence_items_json or [])
+        evidence_items.append(
+            {
+                "type": "ASR_TRANSCRIPT",
+                "uri_or_reference": media_item.get("uri_or_reference"),
+                "extracted_facts": {"transcript": result.transcript},
+                "provenance": {
+                    "source": "groq_asr",
+                    "provider": result.provider,
+                    "model": result.model,
+                    "data_reality": DataReality.REAL_DERIVED.value,
+                    "freshness_status": FreshnessStatus.FRESH.value,
+                    "created_at": now_utc.isoformat(),
+                },
+                "confidence_support": None,
+                "created_at": now_utc.isoformat(),
+            }
+        )
+        report.evidence_items_json = evidence_items
+    event = None
+    if report.incident_id:
+        event = _timeline_event(
+            incident_id=report.incident_id,
+            event_type="ASR_PROCESSED",
+            details={
+                "report_id": report.id,
+                "status": result.status.value,
+                "manual_fallback_required": result.manual_fallback_required,
+            },
+            created_at=now_utc,
+        )
+        db.add(event)
+    db.add(report)
+    db.commit()
+    db.refresh(report)
+    if event:
+        publish_operations_event(
+            event="timeline.appended",
+            incident_id=report.incident_id,
+            payload=serialize_timeline_event(event),
+        )
+    return {"status": result.status.value, "result": result.model_dump(mode="json"), "report": serialize_report(report)}
 
 
 @router.post("/incidents/{incident_id}/duplicate-merge")

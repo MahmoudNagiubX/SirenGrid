@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+import re
 from uuid import uuid4
 
 from app.config import settings
@@ -28,6 +29,10 @@ _EXTENSIONS = {
     "image/png": ".png",
     "image/webp": ".webp",
 }
+_MEDIA_ID_PATTERN = re.compile(
+    r"^media:(?P<id>[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$",
+    re.IGNORECASE,
+)
 
 
 class MediaValidationError(ValueError):
@@ -109,3 +114,21 @@ def store_media(
         size_bytes=len(content),
         _path=path,
     )
+
+
+def resolve_media_path(
+    media_reference: str,
+    *,
+    mime_type: str,
+    media_dir: Path | None = None,
+) -> Path:
+    """Resolve an internally stored media reference without accepting a path."""
+    match = _MEDIA_ID_PATTERN.fullmatch(media_reference)
+    normalized_type = mime_type.casefold().strip()
+    if match is None or normalized_type not in _EXTENSIONS:
+        raise MediaValidationError("invalid media reference")
+    root = (media_dir or settings.phase06_media_dir).resolve()
+    path = (root / f"{match.group('id')}{_EXTENSIONS[normalized_type]}").resolve()
+    if path.parent != root or not path.is_file():
+        raise MediaValidationError("stored media is unavailable")
+    return path
