@@ -63,6 +63,17 @@ def file_hashes(directory: Path) -> dict[str, str]:
     }
 
 
+def test_json_writer_emits_canonical_utf8_lf_bytes(tmp_path: Path) -> None:
+    output = tmp_path / "artifact.json"
+
+    refresh._write_json(output, {"type": "FeatureCollection", "message": "مرحبا"})
+
+    assert output.read_bytes() == (
+        b'{\n  "message": "\xd9\x85\xd8\xb1\xd8\xad\xd8\xa8\xd8\xa7",\n'
+        b'  "type": "FeatureCollection"\n}\n'
+    )
+
+
 def write_valid_bundle(directory: Path, marker: str) -> None:
     directory.mkdir(exist_ok=True)
     graph = valid_graph()

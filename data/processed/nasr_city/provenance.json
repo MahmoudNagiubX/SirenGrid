@@ -9,7 +9,7 @@
       "freshness_status": "STATIC",
       "record_count": 41,
       "retrieved_at": "2026-09-07T01:09:08.959165+00:00",
-      "sha256": "5b0439c14e1920ee822602c98449e88d0e5b4c0b7562d9cd2c680934b40203b4",
+      "sha256": "ddd7c483e8ee959776eb1067944aba665eb617e3430c3e4541904a6618911db8",
       "source": "OpenStreetMap via OSMnx/Overpass",
       "source_reference": "https://overpass-api.de/api/interpreter?query=emergency_facilities"
     },
@@ -29,7 +29,7 @@
       "freshness_status": "STATIC",
       "record_count": 5,
       "retrieved_at": "2026-09-07T01:09:08.959165+00:00",
-      "sha256": "4027ebbe96d0a86b7082c43174758010b05e293114cc6f5ddeb9a103e59cd4af",
+      "sha256": "3c045613c26bd300c6beb80b124a31e62e42ccc23f1dd624167ba10bdfe3a2c0",
       "source": "SirenGrid derivation from refreshed named OSM graph edges",
       "source_reference": "nasr_city_graph.graphml"
     },
@@ -39,7 +39,7 @@
       "freshness_status": "STATIC",
       "record_count": 14,
       "retrieved_at": "2026-09-07T01:09:08.959165+00:00",
-      "sha256": "a83d9c3c6d73868009a3542fe9e58a69d527c8e97e412b3b15538e0792bb145c",
+      "sha256": "a7a6c1a2cf036400d35d8d6561ab01cf2a368a865d5fba46610b5410e7614c8f",
       "source": "OpenStreetMap via OSMnx/Overpass",
       "source_reference": "https://overpass-api.de/api/interpreter?query=traffic_signals"
     }

@@ -75,6 +75,44 @@ def test_publish_validated_artifact_preserves_last_validated_output_on_failure(
     assert target.read_bytes() == before
 
 
+def test_cli_writes_canonical_utf8_lf_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    output = tmp_path / "population.geojson"
+    artifact = {
+        "type": "FeatureCollection",
+        "message": "مرحبا",
+        "features": [
+            {"properties": {"zone_id": "zone-1", "population": 1.0}}
+        ],
+    }
+    monkeypatch.setattr(
+        worldpop, "build_artifact_from_worldpop_raster", lambda *_: artifact
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "build_worldpop_zone_population.py",
+            "--raster",
+            str(tmp_path / "source.tif"),
+            "--grid",
+            str(tmp_path / "grid.geojson"),
+            "--output",
+            str(output),
+        ],
+    )
+
+    worldpop.main()
+
+    assert output.read_bytes() == (
+        b'{\n  "features": [\n    {\n      "properties": {\n'
+        b'        "population": 1.0,\n        "zone_id": "zone-1"\n'
+        b'      }\n    }\n  ],\n  "message": '
+        b'"\xd9\x85\xd8\xb1\xd8\xad\xd8\xa8\xd8\xa7",\n'
+        b'  "type": "FeatureCollection"\n}'
+    )
+
+
 def test_zone_artifact_preserves_worldpop_reality_and_provenance() -> None:
     cells = [worldpop.PopulationCell(geometry=box(0, 0, 10, 10), population=100.0)]
     zones = [worldpop.OperationalZone(zone_id="zone-1", geometry=box(0, 0, 10, 10))]

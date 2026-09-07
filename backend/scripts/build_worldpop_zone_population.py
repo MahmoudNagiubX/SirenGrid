@@ -322,8 +322,8 @@ def main() -> None:
 
     artifact = build_artifact_from_worldpop_raster(arguments.raster, arguments.grid)
     staged_path = arguments.output.with_suffix(arguments.output.suffix + ".staged")
-    staged_path.write_text(
-        json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8"
+    staged_path.write_bytes(
+        json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True).encode("utf-8")
     )
     publish_validated_zone_population_artifact(staged_path, arguments.output)
 
