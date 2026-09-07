@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
+import time
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
@@ -11,10 +13,11 @@ from app.config import settings
 from app.routing import (
     RouteNotFoundError,
     RoutingPointOutsideGraphError,
-    compute_route_on_graph,
+    compute_traffic_aware_route,
     load_routing_graph,
     snap_coordinate_to_graph,
 )
+from app.traffic.runtime import traffic_runtime
 from app.schemas import (
     MapLayerResponse,
     RoutePreviewRequest,
@@ -274,9 +277,22 @@ def preview_route(request: RoutePreviewRequest) -> RoutePreviewResponse:
             detail=f"Origin and destination snapped to the same graph node ({origin_node})",
         )
 
-    # 3. Compute route on graph
+    # 3. Capture one immutable traffic snapshot and compute independent routes.
+    now = datetime.now(timezone.utc)
     try:
-        result = compute_route_on_graph(graph, request.origin, request.destination)
+        snapshot = traffic_runtime.capture_snapshot(
+            graph,
+            now=now,
+            wall_clock=lambda: datetime.now(timezone.utc),
+            monotonic=time.monotonic,
+        )
+    except Exception:
+        # Provider/runtime failures must not remove immutable OSM base routing.
+        snapshot = None
+    try:
+        result = compute_traffic_aware_route(
+            graph, request.origin, request.destination, snapshot
+        )
     except RoutingPointOutsideGraphError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -297,5 +313,23 @@ def preview_route(request: RoutePreviewRequest) -> RoutePreviewResponse:
         origin_snap_distance_m=result.origin_snap_distance_m,
         destination_snap_distance_m=result.destination_snap_distance_m,
         nodes=result.nodes,
+        edge_keys=result.edge_keys,
         routing_source=result.routing_source,
+        base_eta=result.base_eta,
+        effective_eta=result.effective_eta,
+        traffic_selected_path_base_eta=result.traffic_selected_path_base_eta,
+        traffic_snapshot_id=result.traffic_snapshot_id,
+        traffic_snapshot_version=result.traffic_snapshot_version,
+        traffic_freshness_status=result.traffic_freshness_status,
+        matched_traversed_edge_count=result.matched_traversed_edge_count,
+        total_traversed_edge_count=result.total_traversed_edge_count,
+        traffic_coverage_ratio=result.traffic_coverage_ratio,
+        traffic_weight_affected_path_selection=(
+            result.traffic_weight_affected_path_selection
+        ),
+        traffic_closure_affected_path_selection=(
+            result.traffic_closure_affected_path_selection
+        ),
+        traffic_fallback_reason=result.traffic_fallback_reason,
+        alternatives=[alternative.model_dump() for alternative in result.alternatives],
     )

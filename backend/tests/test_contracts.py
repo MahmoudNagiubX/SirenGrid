@@ -436,8 +436,8 @@ def test_plan_and_approval_contracts_preserve_osm_and_version_fields(
     assert "expected_plan_version" in appr_example["approval"]
 
 
-def test_map_route_contracts_exposed_without_live_labels(client: TestClient) -> None:
-    """Verify map layer and route preview schemas remain exposed without live/TomTom labels."""
+def test_map_route_contracts_expose_honest_traffic_fallback(client: TestClient) -> None:
+    """Verify base examples expose fallback metadata without claiming live traffic."""
     response = client.get("/openapi.json")
     openapi = response.json()
     schemas = openapi.get("components", {}).get("schemas", {})
@@ -452,5 +452,12 @@ def test_map_route_contracts_exposed_without_live_labels(client: TestClient) -> 
     route_schema = schemas["RoutePreviewResponse"]
     route_example = route_schema.get("example") or route_schema.get("examples", [{}])[0]
     assert route_example["routing_source"] == "OSM_BASE_TRAVEL_TIME"
-    assert "TomTom" not in str(route_example)
+    assert route_example["base_eta"] == route_example["effective_eta"]
+    assert route_example["matched_traversed_edge_count"] == 0
+    assert route_example["traffic_coverage_ratio"] == 0
+    assert route_example["traffic_freshness_status"] != "LIVE"
+    assert "TOMTOM_TRAFFIC_ADJUSTED" not in str(route_example)
     assert "live traffic" not in str(route_example).lower()
+
+    assert "TrafficSnapshotRead" in schemas
+    assert "TrafficPrototypePolicyRead" in schemas

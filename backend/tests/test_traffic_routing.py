@@ -221,6 +221,49 @@ def test_graph_fingerprint_mismatch_falls_back_without_using_overlay() -> None:
     assert result.traffic_fallback_reason == "TOMTOM_GRAPH_FINGERPRINT_MISMATCH"
 
 
+def test_missing_snapshot_falls_back_without_fabricating_traffic() -> None:
+    graph = two_path_graph()
+
+    result = compute_traffic_aware_route(graph, ORIGIN, DESTINATION, None)
+
+    assert result.routing_source == ROUTING_SOURCE_OSM_BASE_TRAVEL_TIME
+    assert result.base_eta == result.effective_eta == 10
+    assert result.traffic_fallback_reason == "TOMTOM_SNAPSHOT_UNAVAILABLE"
+    assert result.matched_traversed_edge_count == 0
+
+
+def test_malformed_snapshot_preserves_specific_failure_reason() -> None:
+    graph = two_path_graph()
+    malformed = make_snapshot(graph, ()).model_copy(
+        update={
+            "provider_state": TrafficProviderState.MALFORMED,
+            "retrieved_at": None,
+            "data_reality": None,
+            "freshness_status": FreshnessStatus.UNKNOWN,
+            "overlay": None,
+            "failure_reason": "TOMTOM_MALFORMED_PAYLOAD",
+        }
+    )
+
+    result = compute_traffic_aware_route(graph, ORIGIN, DESTINATION, malformed)
+
+    assert result.routing_source == ROUTING_SOURCE_OSM_BASE_TRAVEL_TIME
+    assert result.traffic_fallback_reason == "TOMTOM_MALFORMED_PAYLOAD"
+    assert result.matched_traversed_edge_count == 0
+
+
+def test_fresh_but_unmatched_snapshot_visibly_uses_base_route() -> None:
+    graph = two_path_graph()
+    unmatched = make_snapshot(graph, ())
+
+    result = compute_traffic_aware_route(graph, ORIGIN, DESTINATION, unmatched)
+
+    assert result.routing_source == ROUTING_SOURCE_OSM_BASE_TRAVEL_TIME
+    assert result.traffic_fallback_reason == "TOMTOM_NO_MATCHED_TRAFFIC"
+    assert result.traffic_freshness_status is FreshnessStatus.LIVE
+    assert result.matched_traversed_edge_count == 0
+
+
 def test_validated_closure_never_routes_through_closed_only_path() -> None:
     graph = nx.MultiDiGraph(crs="EPSG:4326")
     graph.add_node("a", x=31.3300, y=30.0600)

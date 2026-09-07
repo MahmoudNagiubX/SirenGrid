@@ -14,7 +14,6 @@ from app.routing import RouteNotFoundError, RoutingPointOutsideGraphError
 client = TestClient(app)
 
 FORBIDDEN_TRAFFIC_STRINGS = [
-    "tomtom",
     "live_traffic",
     "traffic_congestion",
     "realtime_delay",
@@ -258,7 +257,7 @@ def test_route_preview_no_path_returns_409(monkeypatch: pytest.MonkeyPatch):
     def mock_compute(*args, **kwargs):
         raise RouteNotFoundError("No path found between nodes")
 
-    monkeypatch.setattr("app.map.compute_route_on_graph", mock_compute)
+    monkeypatch.setattr("app.map.compute_traffic_aware_route", mock_compute)
 
     payload = {
         "origin": {"lat": 30.0687969, "lon": 31.3411596},
@@ -295,7 +294,7 @@ def test_route_preview_compute_outside_graph_error_returns_422(monkeypatch: pyte
     def mock_compute(*args, **kwargs):
         raise RoutingPointOutsideGraphError("Snap exceeded threshold")
 
-    monkeypatch.setattr("app.map.compute_route_on_graph", mock_compute)
+    monkeypatch.setattr("app.map.compute_traffic_aware_route", mock_compute)
     payload = {
         "origin": {"lat": 30.0687969, "lon": 31.3411596},
         "destination": {"lat": 30.0642054, "lon": 31.3455818},

@@ -465,7 +465,7 @@ def _usable_overlay(
     if snapshot.freshness_status is FreshnessStatus.STALE:
         return None, "TOMTOM_SNAPSHOT_STALE"
     if snapshot.freshness_status not in (FreshnessStatus.LIVE, FreshnessStatus.FRESH):
-        return None, "TOMTOM_SNAPSHOT_NOT_FRESH"
+        return None, snapshot.failure_reason or "TOMTOM_SNAPSHOT_NOT_FRESH"
     if snapshot.overlay is None or not snapshot.overlay.entries:
         return None, snapshot.failure_reason or "TOMTOM_NO_MATCHED_TRAFFIC"
     if snapshot.overlay.graph_fingerprint != snapshot.graph_fingerprint:

@@ -28,6 +28,9 @@ __all__ = [
     "ApprovePlanRequest",
     "RoutePreviewRequest",
     "RoutePreviewResponse",
+    "RouteAlternativeRead",
+    "TrafficPrototypePolicyRead",
+    "TrafficSnapshotRead",
     "MapLayerResponse",
 ]
 
@@ -574,6 +577,14 @@ class RoutePreviewRequest(BaseModel):
     destination: Coordinate
 
 
+class RouteAlternativeRead(BaseModel):
+    nodes: list[Any]
+    edge_keys: list[tuple[str, str, str]]
+    geometry: dict[str, Any]
+    distance_m: float = Field(gt=0)
+    effective_eta: float = Field(gt=0)
+
+
 class RoutePreviewResponse(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
@@ -594,6 +605,20 @@ class RoutePreviewResponse(BaseModel):
                 "destination_snap_distance_m": 8.7,
                 "nodes": [101, 102, 103],
                 "routing_source": "OSM_BASE_TRAVEL_TIME",
+                "base_eta": 187.5,
+                "effective_eta": 187.5,
+                "traffic_selected_path_base_eta": 187.5,
+                "edge_keys": [["101", "102", "0"], ["102", "103", "0"]],
+                "matched_traversed_edge_count": 0,
+                "total_traversed_edge_count": 2,
+                "traffic_coverage_ratio": 0,
+                "traffic_fallback_reason": "TOMTOM_API_KEY_MISSING",
+                "traffic_snapshot_id": "traffic-snapshot-example",
+                "traffic_snapshot_version": 1,
+                "traffic_freshness_status": "UNKNOWN",
+                "traffic_weight_affected_path_selection": False,
+                "traffic_closure_affected_path_selection": False,
+                "alternatives": [],
             }
         }
     )
@@ -606,7 +631,51 @@ class RoutePreviewResponse(BaseModel):
     origin_snap_distance_m: float = Field(ge=0)
     destination_snap_distance_m: float = Field(ge=0)
     nodes: list[Any]
+    edge_keys: list[tuple[str, str, str]]
     routing_source: str = "OSM_BASE_TRAVEL_TIME"
+    base_eta: float = Field(gt=0)
+    effective_eta: float = Field(gt=0)
+    traffic_selected_path_base_eta: float = Field(gt=0)
+    traffic_snapshot_id: str | None = None
+    traffic_snapshot_version: int | None = None
+    traffic_freshness_status: FreshnessStatus | None = None
+    matched_traversed_edge_count: int = Field(ge=0)
+    total_traversed_edge_count: int = Field(ge=1)
+    traffic_coverage_ratio: float = Field(ge=0, le=1)
+    traffic_weight_affected_path_selection: bool = False
+    traffic_closure_affected_path_selection: bool = False
+    traffic_fallback_reason: str | None = None
+    alternatives: list[RouteAlternativeRead] = Field(default_factory=list)
+
+
+class TrafficPrototypePolicyRead(BaseModel):
+    refresh_interval_seconds: int
+    fresh_max_age_seconds: int
+    refresh_timeout_seconds: int
+    min_provider_confidence: float
+    max_geometry_separation_m: int
+    max_direction_difference_degrees: int
+
+
+class TrafficSnapshotRead(BaseModel):
+    snapshot_id: str | None
+    version: int | None
+    provider_state: str | None
+    refresh_attempted_at: datetime | None
+    retrieved_at: datetime | None
+    provider_last_updated: datetime | None
+    freshness_status: FreshnessStatus
+    source: str
+    source_reference: str | None
+    data_reality: DataReality | None
+    flow_style: str
+    flow_zoom: int
+    units: str
+    observation_count: int = Field(ge=0)
+    match_count: int = Field(ge=0)
+    matched_edge_count: int = Field(ge=0)
+    failure_reason: str | None
+    prototype_policy: TrafficPrototypePolicyRead
 
 
 class MapLayerResponse(BaseModel):
