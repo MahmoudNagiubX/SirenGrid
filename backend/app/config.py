@@ -40,6 +40,7 @@ class Settings(BaseModel):
     database_url: str = Field(default="sqlite:///./sirengrid.db")
     cors_origins: list[str] = Field(default_factory=lambda: ["*"])
     max_route_snap_distance_m: float = Field(default=1500.0)
+    prototype_target_response_time_seconds: Literal[600] = 600
     nasr_city_data_dir: Path = Field(default_factory=lambda: DEFAULT_DATA_DIR)
     tomtom_api_key: str | None = Field(default=None, exclude=True)
     tomtom_refresh_interval_seconds: Literal[60] = 60
@@ -71,6 +72,10 @@ class Settings(BaseModel):
     @property
     def MAX_ROUTE_SNAP_DISTANCE_M(self) -> float:
         return self.max_route_snap_distance_m
+
+    @property
+    def PROTOTYPE_TARGET_RESPONSE_TIME_SECONDS(self) -> int:
+        return self.prototype_target_response_time_seconds
 
     @property
     def NASR_CITY_DATA_DIR(self) -> Path:
@@ -133,6 +138,9 @@ def get_settings() -> Settings:
         cors_origins=cors_origins,
         max_route_snap_distance_m=float(
             os.getenv("MAX_ROUTE_SNAP_DISTANCE_M", "1500.0")
+        ),
+        prototype_target_response_time_seconds=int(
+            os.getenv("PROTOTYPE_TARGET_RESPONSE_TIME_SECONDS", "600")
         ),
         nasr_city_data_dir=nasr_city_data_dir,
         tomtom_api_key=os.getenv("TOMTOM_API_KEY") or None,

@@ -18,11 +18,13 @@ __all__ = [
     "RouteNotFoundError",
     "RouteResult",
     "TrafficAwareRouteResult",
+    "SingleSourceTravelTimes",
     "haversine_distance_m",
     "load_routing_graph",
     "snap_coordinate_to_graph",
     "compute_route_on_graph",
     "compute_traffic_aware_route",
+    "compute_single_source_travel_times",
 ]
 
 ROUTING_SOURCE_OSM_BASE_TRAVEL_TIME = "OSM_BASE_TRAVEL_TIME"
@@ -90,6 +92,23 @@ class TrafficAwareRouteResult(BaseModel):
 
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump()
+
+
+@dataclass(frozen=True)
+class SingleSourceTravelTimes:
+    """Captured base/overlay travel-time trees from one snapped origin."""
+
+    origin_node: Any
+    origin_snap_distance_m: float
+    base_travel_times: dict[Any, float]
+    base_paths: dict[Any, list[Any]]
+    effective_travel_times: dict[Any, float]
+    effective_paths: dict[Any, list[Any]]
+    traffic_snapshot_id: str | None
+    traffic_snapshot_version: int | None
+    traffic_freshness_status: FreshnessStatus | None
+    traffic_overlay_available: bool
+    traffic_fallback_reason: str | None
 
 
 @dataclass(frozen=True)
@@ -471,6 +490,57 @@ def _usable_overlay(
     if snapshot.overlay.graph_fingerprint != snapshot.graph_fingerprint:
         return None, "TOMTOM_OVERLAY_GRAPH_FINGERPRINT_MISMATCH"
     return snapshot.overlay, None
+
+
+def compute_single_source_travel_times(
+    graph: nx.Graph,
+    origin: Coordinate,
+    snapshot: TrafficSnapshot | None,
+    max_snap_distance_m: float | None = None,
+) -> SingleSourceTravelTimes:
+    """Run base and, when valid, overlay-aware Dijkstra from one origin.
+
+    The graph is read-only. Callers receive both trees so they can keep base
+    fallback facts visible instead of inventing traffic values.
+    """
+    threshold = (
+        max_snap_distance_m
+        if max_snap_distance_m is not None
+        else settings.MAX_ROUTE_SNAP_DISTANCE_M
+    )
+    origin_node, origin_snap_distance = snap_coordinate_to_graph(
+        graph, origin, threshold
+    )
+    base_travel_times, base_paths = nx.single_source_dijkstra(
+        graph,
+        source=origin_node,
+        weight=_path_weight(None),
+    )
+    overlay, fallback_reason = _usable_overlay(graph, snapshot)
+    if overlay is None:
+        effective_travel_times = dict(base_travel_times)
+        effective_paths = {node: list(path) for node, path in base_paths.items()}
+    else:
+        effective_travel_times, effective_paths = nx.single_source_dijkstra(
+            graph,
+            source=origin_node,
+            weight=_path_weight(overlay),
+        )
+    return SingleSourceTravelTimes(
+        origin_node=origin_node,
+        origin_snap_distance_m=origin_snap_distance,
+        base_travel_times={node: float(value) for node, value in base_travel_times.items()},
+        base_paths={node: list(path) for node, path in base_paths.items()},
+        effective_travel_times={
+            node: float(value) for node, value in effective_travel_times.items()
+        },
+        effective_paths={node: list(path) for node, path in effective_paths.items()},
+        traffic_snapshot_id=snapshot.snapshot_id if snapshot else None,
+        traffic_snapshot_version=snapshot.version if snapshot else None,
+        traffic_freshness_status=snapshot.freshness_status if snapshot else None,
+        traffic_overlay_available=overlay is not None,
+        traffic_fallback_reason=fallback_reason,
+    )
 
 
 def _edge_disjoint_alternative(
