@@ -147,6 +147,73 @@ def _require_transport(incident: Incident) -> None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
 
 
+def invalidate_selected_hospital_for_replan(
+    db: Session,
+    *,
+    incident_id: str,
+    hospital_id: str,
+    reason: str,
+    operator_reference: str,
+) -> bool:
+    """Invalidate a selected destination after a confirmed route-health event."""
+    _acquire_write_lock(db)
+    incident = db.get(Incident, incident_id)
+    if incident is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Incident '{incident_id}' not found",
+        )
+    plan = _approved_plan(db, incident)
+    destination = db.scalars(
+        select(HospitalDestination)
+        .where(
+            HospitalDestination.incident_id == incident.id,
+            HospitalDestination.plan_id == plan.id,
+            HospitalDestination.status == "SELECTED",
+        )
+        .order_by(HospitalDestination.selected_at.desc(), HospitalDestination.id.desc())
+    ).first()
+    if destination is None:
+        return False
+    if destination.hospital_id != hospital_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Hospital invalidation does not match the current destination",
+        )
+
+    now = datetime.now(timezone.utc)
+    destination.status = "INVALIDATED"
+    destination.provenance_json = {
+        **dict(destination.provenance_json or {}),
+        "invalidation_source": "phase07_hospital_route_health",
+        "invalidation_reason": reason,
+        "invalidation_at": now.isoformat(),
+        "operator_reference": operator_reference,
+    }
+    db.add(
+        TimelineEvent(
+            id=str(uuid.uuid4()),
+            incident_id=incident.id,
+            event_type="HOSPITAL_DESTINATION_INVALIDATED",
+            details_json={
+                "hospital_id": hospital_id,
+                "destination_id": destination.id,
+                "plan_id": plan.id,
+                "reason": reason,
+                "operator_reference": operator_reference,
+            },
+            created_at=now,
+        )
+    )
+    db.commit()
+
+    # Refresh recommendations against the same active response plan. This
+    # creates options only; it never selects or redirects a destination.
+    if plan.resource_ids_json:
+        generate_hospital_options(incident.id, db)
+    return True
+
+
 def _resource_origin(db: Session, plan: ResponsePlan) -> tuple[str, dict[str, float]]:
     route_records = plan.routes_json if isinstance(plan.routes_json, list) else []
     resources = {

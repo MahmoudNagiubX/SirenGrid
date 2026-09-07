@@ -28,6 +28,7 @@ from app.candidate_generation import CandidateResource, _is_hard_eligible
 from app.candidate_generation import CandidateCombination, CandidateResponder
 from app.candidate_evaluation import evaluate_candidate_combination
 from app.coverage import CoverageZone
+from app.hospitals import load_static_hospitals
 from app.routing import compute_traffic_aware_route
 from app.response_requirements import ResponseRequirement
 from app.response_requirements import RequirementSource, ResolvedResponseRequirements
@@ -804,6 +805,136 @@ def test_selected_hospital_not_accepting_records_replan_trigger(
         and item["reason"] == "NOT_ACCEPTING"
         for item in option_set.excluded_hospitals_json
     )
+
+
+def test_selected_hospital_unreachable_trigger_invalidates_and_refreshes_options(
+    isolated_engine: Engine,
+    db_session: Session,
+    monkeypatch,
+) -> None:
+    init_db(isolated_engine)
+    target_hospital = next(
+        hospital
+        for hospital in load_static_hospitals()
+        if hospital.id == "osm:('node', 443368255)"
+    )
+    incident = Incident(
+        id=str(uuid.uuid4()),
+        version=4,
+        incident_type="traffic_collision",
+        severity=Severity.HIGH,
+        confidence_level=ConfidenceLevel.HIGH,
+        status=IncidentStatus.RESPONSE_ACTIVE,
+        latitude=30.05,
+        longitude=31.34,
+        current_plan_id="approved-plan",
+        transport_required=True,
+    )
+    plan = ResponsePlan(
+        id="approved-plan",
+        incident_id=incident.id,
+        incident_version=4,
+        plan_version=1,
+        status=ResponsePlanStatus.APPROVED,
+        resource_ids_json=["resource-a"],
+        routes_json=[
+            {
+                "resource_id": "resource-a",
+                "resource_type": "AMBULANCE",
+                "origin": {"lat": 30.05, "lon": 31.34},
+                "distance_m": 100.0,
+                "eta_seconds": 20.0,
+                "geometry": {
+                    "type": "LineString",
+                    "coordinates": [[31.34, 30.05], [31.345, 30.055]],
+                },
+            }
+        ],
+        metrics_json={},
+        score_breakdown_json={},
+    )
+    resource = EmergencyResource(
+        id="resource-a",
+        version=1,
+        name="Assigned ambulance",
+        resource_type=ResourceType.AMBULANCE,
+        capability_tags_json=[],
+        status=ResourceStatus.ASSIGNED,
+        latitude=30.05,
+        longitude=31.34,
+        assigned_incident_id=incident.id,
+        provenance_json={"data_reality": DataReality.SIMULATED.value},
+    )
+    destination = HospitalDestination(
+        id="destination-unreachable",
+        incident_id=incident.id,
+        plan_id=plan.id,
+        option_set_id="option-set-1",
+        hospital_id=target_hospital.id,
+        status="SELECTED",
+        incident_version=incident.version,
+        plan_version=plan.plan_version,
+    )
+    db_session.add_all([incident, plan, resource, destination])
+    db_session.commit()
+
+    monkeypatch.setattr("app.hospital_api.load_routing_graph", lambda: object())
+    monkeypatch.setattr("app.hospital_api._traffic_snapshot", lambda graph: None)
+
+    def fake_route(*args, **kwargs):
+        destination_coordinate = kwargs.get("destination")
+        if (
+            destination_coordinate is not None
+            and destination_coordinate.lat == target_hospital.latitude
+            and destination_coordinate.lon == target_hospital.longitude
+        ):
+            raise ValueError("confirmed hospital route is unreachable")
+        return _Phase07FakeHospitalRoute()
+
+    monkeypatch.setattr("app.hospital_api.compute_traffic_aware_route", fake_route)
+
+    response = TestClient(app).post(
+        f"/api/v1/incidents/{incident.id}/replan/triggers",
+        json={
+            "expected_incident_version": 4,
+            "trigger_reasons": ["HOSPITAL_STATE_CHANGED"],
+            "input_references": {
+                "hospital_id": target_hospital.id,
+                "hospital_unreachable": True,
+            },
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    db_session.expire_all()
+    saved_destination = db_session.get(HospitalDestination, destination.id)
+    pending = db_session.scalar(
+        select(ReplanEvaluation).where(
+            ReplanEvaluation.incident_id == incident.id,
+            ReplanEvaluation.status == "PENDING",
+        )
+    )
+    option_set = db_session.scalar(
+        select(HospitalOptionSet).where(
+            HospitalOptionSet.incident_id == incident.id,
+            HospitalOptionSet.plan_id == plan.id,
+        )
+    )
+    saved_resource = db_session.get(EmergencyResource, resource.id)
+    assert saved_destination is not None
+    assert saved_destination.status == "INVALIDATED"
+    assert pending is not None
+    assert pending.input_references_json["hospital_unreachable"] is True
+    assert option_set is not None
+    assert any(
+        item["hospital_id"] == target_hospital.id
+        and item["reason"] == "UNREACHABLE"
+        for item in option_set.excluded_hospitals_json
+    )
+    assert saved_resource is not None
+    assert saved_resource.version == 1
+    assert saved_resource.status == ResourceStatus.ASSIGNED
+    assert saved_resource.assigned_incident_id == incident.id
 
 
 def test_replacement_approval_releases_out_of_service_resource_without_reactivating_it(

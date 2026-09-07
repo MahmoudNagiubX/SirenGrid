@@ -536,6 +536,13 @@ def create_replan_trigger(
     payload: ReplanTriggerRequest,
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
+    if payload.input_references.get("hospital_unreachable") and not payload.input_references.get(
+        "hospital_id"
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="hospital_id is required when hospital_unreachable is confirmed",
+        )
     evaluation, idempotent = record_replan_trigger(
         db,
         incident_id=incident_id,
@@ -543,6 +550,18 @@ def create_replan_trigger(
         trigger_reasons=payload.trigger_reasons,
         input_references=payload.input_references,
     )
+    if payload.input_references.get("hospital_unreachable"):
+        from app.hospital_api import invalidate_selected_hospital_for_replan
+
+        invalidate_selected_hospital_for_replan(
+            db,
+            incident_id=incident_id,
+            hospital_id=str(payload.input_references["hospital_id"]),
+            reason="UNREACHABLE",
+            operator_reference=payload.input_references.get(
+                "operator_reference", "replan-trigger"
+            ),
+        )
     incident = db.get(Incident, incident_id)
     assert incident is not None
     result = serialize_replan_evaluation(
