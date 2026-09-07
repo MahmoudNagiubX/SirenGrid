@@ -402,3 +402,45 @@ def test_coverage_keeps_base_optimal_eta_independent_of_traffic_selected_resourc
     assert zone.base_eta_seconds == 500.0
     assert zone.eta_seconds == 600.0
     assert zone.routing_source == ROUTING_SOURCE_TOMTOM_TRAFFIC_ADJUSTED
+
+
+def test_dispatch_impact_is_hypothetical_and_exposes_deterministic_coverage_delta() -> None:
+    graph = coverage_graph()
+    resources = [
+        ambulance_resource(),
+        coverage.CoverageResource(
+            resource_id="amb-reserve",
+            resource_type=ResourceType.AMBULANCE,
+            capability_tags=(),
+            status=ResourceStatus.AVAILABLE,
+            coordinate=Coordinate(lat=30.0, lon=31.32),
+            data_reality=DataReality.SIMULATED,
+            source="phase03_simulated_resource",
+        ),
+    ]
+    original_resources = deepcopy(resources)
+    original_graph = deepcopy(list(graph.edges(data=True, keys=True)))
+    captured_traffic = traffic_snapshot(graph, FreshnessStatus.STALE)
+
+    impact = coverage.simulate_dispatch_impact(
+        graph=graph,
+        zones=zones(),
+        resources=resources,
+        cohort=ambulance_cohort(),
+        dispatched_resource_ids=("amb-1",),
+        traffic_snapshot=captured_traffic,
+        modeled_at=datetime(2026, 9, 7, tzinfo=timezone.utc),
+    )
+
+    assert impact.dispatched_resource_ids == ("amb-1",)
+    assert impact.baseline.eligible_resource_ids == ("amb-1", "amb-reserve")
+    assert impact.post_dispatch.eligible_resource_ids == ("amb-reserve",)
+    assert impact.remaining_reserve_resource_ids == ("amb-reserve",)
+    assert impact.coverage_delta <= 0.0
+    assert impact.newly_undercovered_zone_ids == ("zone-b",)
+    assert impact.affected_zone_ids == ("zone-b",)
+    assert impact.baseline.traffic_snapshot_id == captured_traffic.snapshot_id
+    assert impact.post_dispatch.traffic_snapshot_id == captured_traffic.snapshot_id
+    assert impact.baseline.traffic_snapshot_version == impact.post_dispatch.traffic_snapshot_version
+    assert resources == original_resources
+    assert list(graph.edges(data=True, keys=True)) == original_graph

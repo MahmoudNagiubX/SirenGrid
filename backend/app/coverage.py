@@ -129,6 +129,20 @@ class CoverageSnapshot:
     traffic_adjusted_zone_count: int
 
 
+@dataclass(frozen=True)
+class DispatchImpactSimulation:
+    """Immutable baseline/post-dispatch coverage facts for one analytical cohort."""
+
+    cohort: CoverageCohort
+    dispatched_resource_ids: tuple[str, ...]
+    baseline: CoverageSnapshot
+    post_dispatch: CoverageSnapshot
+    coverage_delta: float
+    affected_zone_ids: tuple[str, ...]
+    newly_undercovered_zone_ids: tuple[str, ...]
+    remaining_reserve_resource_ids: tuple[str, ...]
+
+
 def load_population_zones(path: Path) -> tuple[CoverageZone, ...]:
     """Load and validate the immutable REAL_DERIVED population-zone artifact."""
     payload = json.loads(path.read_text(encoding="utf-8"))
@@ -389,6 +403,89 @@ def compute_coverage_snapshot(
             )
         ),
         traffic_adjusted_zone_count=traffic_adjusted_zone_count,
+    )
+
+
+def simulate_dispatch_impact(
+    *,
+    graph: nx.Graph,
+    zones: Iterable[CoverageZone],
+    resources: Iterable[CoverageResource],
+    cohort: CoverageCohort,
+    dispatched_resource_ids: Iterable[str],
+    traffic_snapshot: TrafficSnapshot | None,
+    modeled_at: datetime,
+) -> DispatchImpactSimulation:
+    """Compare coverage before and after a purely hypothetical dispatch.
+
+    The caller supplies one captured traffic snapshot. This function neither
+    refreshes traffic nor mutates graph or resource state; candidate planning
+    remains an analytical operation until the existing approval boundary.
+    """
+    zones_tuple = tuple(zones)
+    resources_tuple = tuple(resources)
+    resource_ids = [resource.resource_id for resource in resources_tuple]
+    if len(resource_ids) != len(set(resource_ids)):
+        raise ValueError("Coverage resource IDs must be unique")
+    dispatched_ids = tuple(sorted(set(dispatched_resource_ids)))
+    dispatched_id_set = set(dispatched_ids)
+    if any(not resource_id.strip() for resource_id in dispatched_ids):
+        raise ValueError("Dispatched resource IDs must be non-empty")
+
+    baseline = compute_coverage_snapshot(
+        graph=graph,
+        zones=zones_tuple,
+        resources=resources_tuple,
+        cohort=cohort,
+        traffic_snapshot=traffic_snapshot,
+        modeled_at=modeled_at,
+    )
+    eligible_ids = set(baseline.eligible_resource_ids)
+    unknown_or_ineligible_ids = dispatched_id_set - eligible_ids
+    if unknown_or_ineligible_ids:
+        names = ", ".join(sorted(unknown_or_ineligible_ids))
+        raise ValueError(
+            "Dispatched resources must be currently eligible for the coverage cohort: "
+            f"{names}"
+        )
+
+    post_dispatch = compute_coverage_snapshot(
+        graph=graph,
+        zones=zones_tuple,
+        resources=(
+            resource
+            for resource in resources_tuple
+            if resource.resource_id not in dispatched_id_set
+        ),
+        cohort=cohort,
+        traffic_snapshot=traffic_snapshot,
+        modeled_at=modeled_at,
+    )
+    baseline_by_zone = {zone.zone_id: zone for zone in baseline.zones}
+    post_by_zone = {zone.zone_id: zone for zone in post_dispatch.zones}
+    affected_zone_ids = tuple(
+        zone_id
+        for zone_id in sorted(baseline_by_zone)
+        if baseline_by_zone[zone_id].eta_seconds != post_by_zone[zone_id].eta_seconds
+    )
+    newly_undercovered_zone_ids = tuple(
+        zone_id
+        for zone_id in sorted(baseline_by_zone)
+        if baseline_by_zone[zone_id].covered
+        and not post_by_zone[zone_id].covered
+    )
+    return DispatchImpactSimulation(
+        cohort=cohort,
+        dispatched_resource_ids=dispatched_ids,
+        baseline=baseline,
+        post_dispatch=post_dispatch,
+        coverage_delta=(
+            post_dispatch.population_weighted_coverage
+            - baseline.population_weighted_coverage
+        ),
+        affected_zone_ids=affected_zone_ids,
+        newly_undercovered_zone_ids=newly_undercovered_zone_ids,
+        remaining_reserve_resource_ids=post_dispatch.eligible_resource_ids,
     )
 
 
