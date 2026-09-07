@@ -292,3 +292,33 @@ Phase 1 replan commands must be version-checked and must preserve the approval b
 
 ### Notes
 Dynamic replanning remains out of scope for Phase 00.
+
+## PD-016 — Phase 04 Population, Coverage, and Candidate Planning Policy
+
+**Date:** 2026-09-07
+**Status:** Approved
+**Owner:** Project owner
+
+### Decision
+Phase 04 uses WorldPop Egypt 2025 constrained ~100 m population counts, geodata ID 56914 / R2024B v1, as its only population source. Population is allocated to the existing Nasr City 500 m zones using exact area-weighted raster-cell/zone overlap in a projected metric or equal-area representation. Processed zone population is `REAL_DERIVED`; WorldPop remains the underlying `REAL_PUBLIC` source. NoData is not treated as zero unless the source explicitly defines it as zero.
+
+Coverage uses `PROTOTYPE_TARGET_RESPONSE_TIME_SECONDS = 600`. This is a SirenGrid prototype/benchmark parameter, not an official Egyptian emergency-service SLA, dispatch standard, or guarantee. Coverage is calculated independently for each required resource cohort: resource type plus its sorted required capability tags, when known. Unknown capability is not confirmed capability. Unreachable valid zones remain in the denominator, are undercovered, and are exposed without an invented ETA. When any zone is unreachable, `worst_zone_eta` is null and the result also exposes the finite worst ETA and unreachable-zone details.
+
+Response Requirement Matrix v1 is limited to explicit traffic-collision inputs: LOW/MEDIUM requires one ambulance; HIGH/CRITICAL requires two ambulances and one fire/rescue unit. Requirement precedence is operator-confirmed, then structured/source requirements, then this prototype matrix. Unsupported or insufficient inputs require operator confirmation.
+
+Candidate generation ranks eligible responders by captured incident ETA, route distance, and ID; retains at most five per required cohort; and evaluates at most 50 feasible combinations. The same physical resource may not be assigned twice. Unavailable, incompatible, committed, or unroutable resources are never candidates.
+
+Plans use lower-is-better transparent prototype scoring. The weights are ETA 0.35, coverage 0.40, reserve 0.20, reposition 0.05, hospital 0.00. Terms, weights, policy version, and final score are persisted. Exact ties are resolved by lower raw maximum incident ETA, higher post-dispatch population-weighted coverage, no reposition proposal, then lexicographically sorted resource IDs.
+
+Hypothetical repositioning is evaluated when a covered zone becomes undercovered or population-weighted coverage falls by at least 0.05. It inspects at most three newly undercovered zones and three eligible reserve responders per target; only proposals at or below 600 seconds that improve a primary coverage result without reducing coverage are retained. Repositioning does not mutate resources in Phase 04.
+
+One candidate set has exactly one current `RECOMMENDED` plan and zero or more `ALTERNATIVE` plans. A version-safe selection command promotes one alternative, supersedes all other plans in that set, increments the incident version once, emits audit history, and performs no resource mutation. Existing approval remains limited to the current recommended plan and retains all Phase 01 transactional guards.
+
+### Reason
+These explicit prototype policies make population coverage, candidate comparison, and human selection reproducible without presenting prototype values as emergency doctrine or silently weakening existing approval/resource safety.
+
+### Impact
+Phase 04 adds deterministic file-backed population preprocessing, coverage/planning contracts, plan alternatives, and version-safe candidate selection. It must preserve the immutable OSM graph, Phase 02 traffic truth/fallback behavior, Phase 03 resource locking, and the existing Golden Flow.
+
+### Notes
+`rasterio` is approved as the narrowly scoped GeoTIFF dependency when required. A WorldPop release upgrade, changed target, changed matrix, changed candidate cap, changed score policy, or changed reposition policy requires a new approved decision.
