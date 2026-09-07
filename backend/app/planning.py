@@ -10,7 +10,9 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.models import Approval, EmergencyResource, Incident, ResponsePlan, TimelineEvent
+from app.incidents import serialize_incident
 from app.resources import is_planner_eligible, serialize_resource
+from app.websocket import publish_operations_event
 from app.routing import (
     RouteNotFoundError,
     RouteResult,
@@ -302,6 +304,12 @@ def generate_response_plan(
     db.refresh(plan)
     db.refresh(incident)
 
+    publish_operations_event(
+        event="incident.updated",
+        incident_id=incident.id,
+        payload=serialize_incident(incident),
+    )
+
     return serialize_plan(plan)
 
 
@@ -585,7 +593,7 @@ def approve_response_plan(
         else str(incident.status)
     )
 
-    return {
+    result = {
         **serialized_plan,
         "incident_status": inc_status_str,
         "incident": {
@@ -605,3 +613,11 @@ def approve_response_plan(
             "created_at": approval.created_at.isoformat() if approval.created_at else None,
         },
     }
+
+    publish_operations_event(
+        event="plan.approved",
+        incident_id=plan.incident_id,
+        payload=result,
+    )
+
+    return result

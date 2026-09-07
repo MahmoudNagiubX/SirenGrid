@@ -44,6 +44,7 @@ __all__ = [
     "ResourceAssignRequest",
     "ResourceStatePatchRequest",
     "ResourceReleaseRequest",
+    "OperationsEventEnvelope",
 ]
 
 
@@ -1123,3 +1124,15 @@ class ResourceReleaseRequest(BaseModel):
         if not v or not str(v).strip():
             raise ValueError("operator_reference must be a non-empty string")
         return str(v).strip()
+
+
+class OperationsEventEnvelope(BaseModel):
+    """Authoritative envelope for all events delivered over /api/v1/ws/operations."""
+
+    event: str
+    incident_id: str | None = None
+    timestamp: str
+    version: int = Field(ge=1)
+    payload: dict[str, Any]
+
+    model_config = ConfigDict(extra="forbid")

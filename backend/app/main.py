@@ -9,6 +9,7 @@ from app.map import router as map_router
 from app.planning import router as planning_router
 from app.resources import router as resources_router
 from app.traffic.api import router as traffic_router
+from app.websocket import router as websocket_router
 
 app = FastAPI(
     title=settings.app_name,
@@ -40,5 +41,6 @@ api_router.include_router(resources_router)
 api_router.include_router(planning_router)
 api_router.include_router(map_router)
 api_router.include_router(traffic_router)
+api_router.include_router(websocket_router)
 
 app.include_router(api_router)

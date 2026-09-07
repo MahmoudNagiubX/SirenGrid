@@ -24,6 +24,7 @@ from app.schemas import (
     ReportRead,
     TimelineEventRead,
 )
+from app.websocket import publish_operations_event
 
 __all__ = [
     "router",
@@ -255,7 +256,13 @@ def create_manual_incident(
     db.commit()
     db.refresh(incident)
 
-    return serialize_incident(incident)
+    result = serialize_incident(incident)
+    publish_operations_event(
+        event="incident.created",
+        incident_id=incident.id,
+        payload=result,
+    )
+    return result
 
 @router.get(
     "/incidents",
@@ -370,7 +377,13 @@ def create_incident_report(
     db.commit()
     db.refresh(report)
 
-    return serialize_report(report)
+    result = serialize_report(report)
+    publish_operations_event(
+        event="timeline.appended",
+        incident_id=incident_id,
+        payload=serialize_timeline_event(timeline_event),
+    )
+    return result
 
 
 @router.get(
@@ -479,7 +492,14 @@ def create_standalone_report(
     db.commit()
     db.refresh(report)
 
-    return serialize_report(report)
+    result = serialize_report(report)
+    if payload.incident_id and timeline_event is not None:
+        publish_operations_event(
+            event="timeline.appended",
+            incident_id=payload.incident_id,
+            payload=serialize_timeline_event(timeline_event),
+        )
+    return result
 
 
 @router.get(
@@ -566,7 +586,13 @@ def transition_incident_lifecycle(
     db.commit()
     db.refresh(incident)
 
-    return serialize_incident(incident)
+    result = serialize_incident(incident)
+    publish_operations_event(
+        event="incident.updated",
+        incident_id=incident.id,
+        payload=result,
+    )
+    return result
 
 
 @router.post(
@@ -817,8 +843,15 @@ def patch_incident_facts(
     db.commit()
     db.refresh(incident)
 
+    serialized_incident = serialize_incident(incident)
+    publish_operations_event(
+        event="incident.updated",
+        incident_id=incident.id,
+        payload=serialized_incident,
+    )
+
     return {
-        "incident": serialize_incident(incident),
+        "incident": serialized_incident,
         "changed_fields": changed_fields,
         "downstream_inputs_dirty": downstream_inputs_dirty,
     }

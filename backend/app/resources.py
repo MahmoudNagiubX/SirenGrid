@@ -20,6 +20,7 @@ from app.schemas import (
     ResourceStatus,
     ResourceType,
 )
+from app.websocket import publish_operations_event
 
 __all__ = [
     "router",
@@ -257,7 +258,13 @@ def assign_resource(
         raise
 
     db.refresh(resource)
-    return serialize_resource(resource)
+    result = serialize_resource(resource)
+    publish_operations_event(
+        event="resource.updated",
+        incident_id=incident.id,
+        payload=result,
+    )
+    return result
 
 
 @router.patch(
@@ -393,7 +400,13 @@ def patch_resource_state(
         raise
 
     db.refresh(resource)
-    return serialize_resource(resource)
+    result = serialize_resource(resource)
+    publish_operations_event(
+        event="resource.updated",
+        incident_id=incident.id if incident is not None else None,
+        payload=result,
+    )
+    return result
 
 
 @router.post(
@@ -487,4 +500,10 @@ def release_resource(
         raise
 
     db.refresh(resource)
-    return serialize_resource(resource)
+    result = serialize_resource(resource)
+    publish_operations_event(
+        event="resource.updated",
+        incident_id=incident.id,
+        payload=result,
+    )
+    return result
