@@ -104,3 +104,22 @@ def test_explicit_driver_alert_refresh_is_version_checked_without_mutating_resou
         json={"expected_resource_version": resource_version - 1, "operator_reference": "operator-refresh"},
     )
     assert stale.status_code == 409
+
+
+def test_aggregate_operational_state_exposes_current_phase05_references(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    incident, resource, _ = _create_approved_transport_plan(db_session)
+    moved = _move(client, incident.id, resource.id, resource.version, 0.25)
+    assert moved.status_code == 200
+
+    aggregate = client.get(f"/api/v1/incidents/{incident.id}/operational-state")
+
+    assert aggregate.status_code == 200, aggregate.text
+    data = aggregate.json()
+    assert data["incident_id"] == incident.id
+    assert data["plan_id"] is not None
+    assert len(data["driver_alerts"]) == 1
+    assert data["driver_alerts"][0]["resource_id"] == resource.id
+    assert data["driver_alert"]["id"] == data["driver_alerts"][0]["id"]

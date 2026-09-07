@@ -1414,4 +1414,6 @@ class IncidentOperationalStateRead(BaseModel):
     selected_destination: HospitalDestinationRead | None = None
     hospital_pre_alert: HospitalPreAlertRead | None = None
     corridor: CorridorRead | None = None
+    corridors: list[CorridorRead] = Field(default_factory=list)
     driver_alert: DriverAlertRead | None = None
+    driver_alerts: list[DriverAlertRead] = Field(default_factory=list)
