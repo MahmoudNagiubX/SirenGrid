@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Iterable
 
@@ -243,6 +243,21 @@ def evaluate_candidate_combination(
         combination=combination,
         metrics=metrics,
         score=_score(metrics),
+    )
+
+
+def rescore_evaluated_candidate(
+    candidate: EvaluatedCandidate,
+    *,
+    proposed_reposition_eta_seconds: float | None,
+) -> EvaluatedCandidate:
+    """Recompute only the approved score terms after proposal selection."""
+    return replace(
+        candidate,
+        score=_score(
+            candidate.metrics,
+            proposed_reposition_eta_seconds=proposed_reposition_eta_seconds,
+        ),
     )
 
 

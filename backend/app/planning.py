@@ -10,7 +10,11 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.candidate_evaluation import evaluate_candidate_combination, rank_evaluated_candidates
+from app.candidate_evaluation import (
+    evaluate_candidate_combination,
+    rank_evaluated_candidates,
+    rescore_evaluated_candidate,
+)
 from app.candidate_generation import (
     CandidateResource,
     NoFeasibleCandidateError,
@@ -27,6 +31,7 @@ from app.response_requirements import (
     ResponseRequirementsUnavailableError,
     resolve_response_requirements,
 )
+from app.repositioning import select_reposition_proposal, simulate_repositioning
 from app.traffic.runtime import traffic_runtime
 from app.websocket import publish_operations_event
 from app.routing import (
@@ -485,7 +490,31 @@ def generate_phase04_candidate_plans(
             )
             for combination in generated.combinations
         )
-        ranked = rank_evaluated_candidates(evaluated)
+        reposition_proposals: dict[tuple[str, ...], Any] = {}
+        rescored_candidates = []
+        for candidate in evaluated:
+            repositioning = simulate_repositioning(
+                graph=graph,
+                zones=zones,
+                resources=resources,
+                requirements=resolution.requirements,
+                candidate=candidate,
+                traffic_snapshot=traffic_snapshot,
+                modeled_at=now_utc,
+            )
+            selected_proposal = select_reposition_proposal(repositioning.proposals)
+            if selected_proposal is not None:
+                reposition_proposals[candidate.combination.resource_ids] = (
+                    selected_proposal
+                )
+                candidate = rescore_evaluated_candidate(
+                    candidate,
+                    proposed_reposition_eta_seconds=(
+                        selected_proposal.reposition_eta_seconds
+                    ),
+                )
+            rescored_candidates.append(candidate)
+        ranked = rank_evaluated_candidates(rescored_candidates)
     except (NoFeasibleCandidateError, ValueError) as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -496,6 +525,7 @@ def generate_phase04_candidate_plans(
         db,
         incident,
         ranked,
+        reposition_proposals=reposition_proposals,
         now_utc=now_utc,
         requirements_metadata={
             "source": resolution.source.value,

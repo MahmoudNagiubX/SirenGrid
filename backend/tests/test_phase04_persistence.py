@@ -63,6 +63,52 @@ def persistence_graph() -> nx.MultiDiGraph:
     return graph
 
 
+def repositioning_persistence_graph() -> nx.MultiDiGraph:
+    graph = nx.MultiDiGraph()
+    nodes = {
+        "amb-dispatch": 31.300,
+        "fire-dispatch": 31.301,
+        "fire-reserve": 31.303,
+        "amb-reserve": 31.302,
+        "zone-west": 31.304,
+        "zone-target": 31.305,
+        "zone-east": 31.306,
+    }
+    for node, longitude in nodes.items():
+        graph.add_node(node, x=longitude, y=30.0)
+    for source, destination, travel_time in (
+        ("amb-dispatch", "zone-target", 100.0),
+        ("fire-dispatch", "zone-target", 110.0),
+        ("fire-reserve", "zone-target", 100.0),
+        ("amb-reserve", "zone-west", 600.0),
+        ("zone-west", "zone-target", 500.0),
+    ):
+        graph.add_edge(
+            source,
+            destination,
+            key="0",
+            length=travel_time,
+            travel_time=travel_time,
+            base_travel_time_s=travel_time,
+        )
+    return graph
+
+
+def square_zone_geometry(minimum: float, maximum: float) -> dict[str, object]:
+    return {
+        "type": "Polygon",
+        "coordinates": [
+            [
+                [minimum, 29.9995],
+                [maximum, 29.9995],
+                [maximum, 30.0005],
+                [minimum, 30.0005],
+                [minimum, 29.9995],
+            ]
+        ],
+    }
+
+
 def phase04_candidate_resources() -> tuple[CandidateResource, CandidateResource]:
     return tuple(
         CandidateResource(
@@ -135,6 +181,46 @@ def persistence_incident(db: Session) -> Incident:
             provenance_json={"source": "phase03_simulated_resource", "data_reality": "SIMULATED"},
         )
         for resource_id, longitude in (("resource-a", 31.300), ("resource-b", 31.301))
+    )
+    db.commit()
+    return incident
+
+
+def repositioning_persistence_incident(db: Session) -> Incident:
+    incident = Incident(
+        id=str(uuid.uuid4()),
+        version=1,
+        incident_type="traffic_collision",
+        severity=Severity.HIGH,
+        confidence_level=ConfidenceLevel.HIGH,
+        status=IncidentStatus.ACTIVE_UNCONFIRMED,
+        latitude=30.0,
+        longitude=31.305,
+        required_resources_json=[
+            {"resource_type": "AMBULANCE", "count": 1},
+            {"resource_type": "FIRE_RESCUE", "count": 1},
+        ],
+        provenance_json={"source": "operator_manual_entry", "data_reality": "SIMULATED"},
+    )
+    db.add(incident)
+    db.add_all(
+        EmergencyResource(
+            id=resource_id,
+            version=1,
+            name=resource_id,
+            resource_type=resource_type,
+            status=ResourceStatus.AVAILABLE,
+            latitude=30.0,
+            longitude=longitude,
+            capability_tags_json=[],
+            provenance_json={"source": "phase03_simulated_resource", "data_reality": "SIMULATED"},
+        )
+        for resource_id, resource_type, longitude in (
+            ("amb-dispatch", ResourceType.AMBULANCE, 31.300),
+            ("fire-dispatch", ResourceType.FIRE_RESCUE, 31.301),
+            ("amb-reserve", ResourceType.AMBULANCE, 31.302),
+            ("fire-reserve", ResourceType.FIRE_RESCUE, 31.303),
+        )
     )
     db.commit()
     return incident
@@ -232,3 +318,134 @@ def test_phase04_candidate_generation_endpoint_persists_comparison_set(
     assert body[0]["metrics"]["phase04"]["joint_aggregation_policy"] == (
         "JOINT_ALL_REQUIRED_COHORTS_V1"
     )
+    assert all("reposition_proposal" not in plan["metrics"]["phase04"] for plan in body)
+    assert all(plan["score_breakdown"]["reposition_penalty"] == 0.0 for plan in body)
+
+
+def test_phase04_candidate_generation_api_persists_selected_reposition_without_mutation(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    incident = repositioning_persistence_incident(db_session)
+    zones = (
+        CoverageZone(
+            "zone-west",
+            Coordinate(lat=30.0, lon=31.304),
+            100.0,
+            geometry=square_zone_geometry(31.3035, 31.3045),
+        ),
+        CoverageZone(
+            "zone-target",
+            Coordinate(lat=30.0, lon=31.305),
+            100.0,
+            geometry=square_zone_geometry(31.3045, 31.3055),
+        ),
+        CoverageZone(
+            "zone-east",
+            Coordinate(lat=30.0, lon=31.306),
+            100.0,
+            geometry=square_zone_geometry(31.3055, 31.3065),
+        ),
+    )
+    monkeypatch.setattr(
+        planning,
+        "load_routing_graph",
+        repositioning_persistence_graph,
+    )
+    monkeypatch.setattr(planning, "load_population_zones", lambda _path: zones)
+    monkeypatch.setattr(
+        planning.traffic_runtime,
+        "capture_snapshot",
+        lambda *_args, **_kwargs: None,
+    )
+    original_simulate_repositioning = planning.simulate_repositioning
+    simulation_calls: list[tuple[str, ...]] = []
+
+    def track_repositioning(**kwargs: object) -> object:
+        candidate = kwargs["candidate"]
+        simulation_calls.append(candidate.combination.resource_ids)  # type: ignore[attr-defined]
+        return original_simulate_repositioning(**kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(planning, "simulate_repositioning", track_repositioning)
+    before_resources = {
+        resource.id: (
+            resource.status,
+            resource.latitude,
+            resource.longitude,
+            resource.assigned_incident_id,
+            resource.version,
+        )
+        for resource in db_session.scalars(select(EmergencyResource)).all()
+    }
+
+    with TestClient(app) as client:
+        response = client.post(
+            f"/api/v1/incidents/{incident.id}/plans/generate-candidates"
+        )
+        repeated_response = client.post(
+            f"/api/v1/incidents/{incident.id}/plans/generate-candidates"
+        )
+
+    assert response.status_code == 201, response.text
+    assert repeated_response.status_code == 201, repeated_response.text
+    body = response.json()
+    repeated_body = repeated_response.json()
+    assert len(simulation_calls) == 2 * len(body)
+    assert len(repeated_body) == len(body)
+    assert [
+        (
+            plan["status"],
+            tuple(plan["resource_ids"]),
+            plan["metrics"]["phase04"]["candidate_rank"],
+            plan["metrics"]["phase04"].get("reposition_proposal", {}).get(
+                "repositioned_resource_id"
+            ),
+        )
+        for plan in repeated_body
+    ] == [
+        (
+            plan["status"],
+            tuple(plan["resource_ids"]),
+            plan["metrics"]["phase04"]["candidate_rank"],
+            plan["metrics"]["phase04"].get("reposition_proposal", {}).get(
+                "repositioned_resource_id"
+            ),
+        )
+        for plan in body
+    ]
+    repositioned = [
+        plan
+        for plan in body
+        if "reposition_proposal" in plan["metrics"]["phase04"]
+    ]
+    assert repositioned
+    selected = repositioned[0]
+    phase04 = selected["metrics"]["phase04"]
+    proposal = phase04["reposition_proposal"]
+    score = selected["score_breakdown"]
+    assert proposal["staging_data_reality"] == "SIMULATED"
+    assert proposal["target_zone_id"] == "zone-target"
+    assert score["proposed_reposition_eta_seconds"] == proposal[
+        "reposition_eta_seconds"
+    ]
+    assert score["reposition_penalty"] == pytest.approx(
+        proposal["reposition_eta_seconds"] / 600.0
+    )
+    assert score["coverage_penalty"] == pytest.approx(
+        1 - phase04["post_dispatch_joint"]["population_weighted_coverage"]
+    )
+    assert "pre_reposition_joint" in proposal
+    assert "post_reposition_joint" in proposal
+
+    db_session.expire_all()
+    after_resources = {
+        resource.id: (
+            resource.status,
+            resource.latitude,
+            resource.longitude,
+            resource.assigned_incident_id,
+            resource.version,
+        )
+        for resource in db_session.scalars(select(EmergencyResource)).all()
+    }
+    assert after_resources == before_resources

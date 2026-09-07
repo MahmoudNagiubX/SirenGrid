@@ -3,13 +3,18 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import replace
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import networkx as nx
 
 from app.candidate_evaluation import evaluate_candidate_combination
 from app.candidate_generation import CandidateCombination, CandidateResource, CandidateResponder
 from app.coverage import CoverageZone
-from app.repositioning import find_adjacent_staging_zones, simulate_repositioning
+from app.repositioning import (
+    find_adjacent_staging_zones,
+    select_reposition_proposal,
+    simulate_repositioning,
+)
 from app.response_requirements import ResponseRequirement
 from app.routing import compute_traffic_aware_route
 from app.schemas import Coordinate, DataReality, ResourceStatus, ResourceType
@@ -309,3 +314,133 @@ def test_coverage_drop_trigger_uses_inclusive_approved_boundary() -> None:
     assert result.trigger_reasons == ("POPULATION_COVERAGE_DROP",)
     assert result.target_zone_ids == ()
     assert result.proposals == ()
+
+
+def _proposal_stub(
+    *,
+    coverage: float,
+    undercovered: int,
+    unreachable: int,
+    eta: float,
+    distance: float,
+    target: str,
+    staging: str,
+    resource_id: str,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        post_reposition_joint=SimpleNamespace(
+            population_weighted_coverage=coverage,
+            undercovered_zone_count=undercovered,
+            unreachable_zone_count=unreachable,
+        ),
+        reposition_eta_seconds=eta,
+        reposition_distance_m=distance,
+        target_zone_id=target,
+        staging_zone_id=staging,
+        repositioned_resource_id=resource_id,
+    )
+
+
+def test_reposition_proposal_selection_prefers_coverage_outcomes_before_eta() -> None:
+    lower_eta = _proposal_stub(
+        coverage=0.80,
+        undercovered=1,
+        unreachable=0,
+        eta=10.0,
+        distance=10.0,
+        target="target-a",
+        staging="staging-a",
+        resource_id="resource-a",
+    )
+    higher_coverage = _proposal_stub(
+        coverage=0.90,
+        undercovered=2,
+        unreachable=1,
+        eta=500.0,
+        distance=500.0,
+        target="target-z",
+        staging="staging-z",
+        resource_id="resource-z",
+    )
+    fewer_undercovered = _proposal_stub(
+        coverage=0.90,
+        undercovered=1,
+        unreachable=1,
+        eta=400.0,
+        distance=400.0,
+        target="target-y",
+        staging="staging-y",
+        resource_id="resource-y",
+    )
+    fewer_unreachable = _proposal_stub(
+        coverage=0.90,
+        undercovered=1,
+        unreachable=0,
+        eta=300.0,
+        distance=300.0,
+        target="target-x",
+        staging="staging-x",
+        resource_id="resource-x",
+    )
+
+    selected = select_reposition_proposal(
+        (lower_eta, higher_coverage, fewer_undercovered, fewer_unreachable)
+    )
+
+    assert selected is fewer_unreachable
+    assert select_reposition_proposal(
+        (fewer_unreachable, lower_eta, fewer_undercovered, higher_coverage)
+    ) is selected
+
+
+def test_reposition_proposal_selection_uses_eta_then_distance_then_ids() -> None:
+    higher_eta = _proposal_stub(
+        coverage=0.90,
+        undercovered=1,
+        unreachable=0,
+        eta=20.0,
+        distance=1.0,
+        target="target-a",
+        staging="staging-a",
+        resource_id="resource-a",
+    )
+    lower_eta = _proposal_stub(
+        coverage=0.90,
+        undercovered=1,
+        unreachable=0,
+        eta=10.0,
+        distance=100.0,
+        target="target-z",
+        staging="staging-z",
+        resource_id="resource-z",
+    )
+    shorter_distance = _proposal_stub(
+        coverage=0.90,
+        undercovered=1,
+        unreachable=0,
+        eta=10.0,
+        distance=10.0,
+        target="target-z",
+        staging="staging-z",
+        resource_id="resource-z",
+    )
+    lexically_first = _proposal_stub(
+        coverage=0.90,
+        undercovered=1,
+        unreachable=0,
+        eta=10.0,
+        distance=10.0,
+        target="target-a",
+        staging="staging-a",
+        resource_id="resource-a",
+    )
+
+    selected = select_reposition_proposal(
+        (higher_eta, lower_eta, shorter_distance, lexically_first)
+    )
+
+    assert selected is lexically_first
+
+
+def test_reposition_proposal_selection_returns_none_for_no_valid_proposals() -> None:
+    assert select_reposition_proposal(()) is None

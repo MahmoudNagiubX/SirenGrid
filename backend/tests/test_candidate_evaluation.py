@@ -10,6 +10,7 @@ import pytest
 from app.candidate_evaluation import (
     evaluate_candidate_combination,
     rank_evaluated_candidates,
+    rescore_evaluated_candidate,
 )
 from app.candidate_generation import (
     CandidateCombination,
@@ -141,6 +142,99 @@ def test_candidate_evaluation_uses_joint_coverage_for_reproducible_score_without
     assert over_target.score.normalized_eta_term == pytest.approx(1.2)
     assert resources == original_resources
     assert list(graph.edges(data=True, keys=True)) == original_graph
+
+
+def test_rescore_with_reposition_eta_keeps_pre_reposition_coverage_penalty() -> None:
+    graph = nx.MultiDiGraph()
+    graph.add_node("ambulance", x=31.3000, y=30.0000)
+    graph.add_node("zone", x=31.3100, y=30.0000)
+    graph.add_edge(
+        "ambulance",
+        "zone",
+        key="0",
+        length=1000.0,
+        travel_time=120.0,
+        base_travel_time_s=120.0,
+    )
+    requirement = ResponseRequirement(ResourceType.AMBULANCE, 1)
+    resource = CandidateResource(
+        resource_id="amb-1",
+        resource_type=ResourceType.AMBULANCE,
+        capability_tags=(),
+        status=ResourceStatus.AVAILABLE,
+        assigned_incident_id=None,
+        coordinate=Coordinate(lat=30.0, lon=31.3),
+        data_reality=DataReality.SIMULATED,
+        source="phase03_simulated_resource",
+    )
+    candidate = evaluate_candidate_combination(
+        graph=graph,
+        zones=(CoverageZone("zone", Coordinate(lat=30.0, lon=31.31), 100.0),),
+        resources=(resource,),
+        requirements=(requirement,),
+        combination=CandidateCombination(
+            (CandidateResponder(requirement, resource, _route(120.0)),)
+        ),
+        traffic_snapshot=None,
+        modeled_at=datetime(2026, 9, 7, tzinfo=timezone.utc),
+    )
+
+    rescored = rescore_evaluated_candidate(
+        candidate, proposed_reposition_eta_seconds=300.0
+    )
+
+    assert rescored.score.proposed_reposition_eta_seconds == 300.0
+    assert rescored.score.reposition_penalty == pytest.approx(0.5)
+    assert rescored.score.coverage_penalty == (
+        1 - candidate.metrics.post_dispatch_joint.population_weighted_coverage
+    )
+    assert rescored.score.final_score == pytest.approx(0.025 + candidate.score.final_score)
+
+
+def test_ranking_reorders_candidates_after_reposition_penalty_is_applied() -> None:
+    graph = nx.MultiDiGraph()
+    graph.add_node("ambulance", x=31.3000, y=30.0000)
+    graph.add_node("zone", x=31.3100, y=30.0000)
+    graph.add_edge(
+        "ambulance",
+        "zone",
+        key="0",
+        length=1000.0,
+        travel_time=120.0,
+        base_travel_time_s=120.0,
+    )
+    requirement = ResponseRequirement(ResourceType.AMBULANCE, 1)
+    resource = CandidateResource(
+        resource_id="amb-1",
+        resource_type=ResourceType.AMBULANCE,
+        capability_tags=(),
+        status=ResourceStatus.AVAILABLE,
+        assigned_incident_id=None,
+        coordinate=Coordinate(lat=30.0, lon=31.3),
+        data_reality=DataReality.SIMULATED,
+        source="phase03_simulated_resource",
+    )
+    candidate = evaluate_candidate_combination(
+        graph=graph,
+        zones=(CoverageZone("zone", Coordinate(lat=30.0, lon=31.31), 100.0),),
+        resources=(resource,),
+        requirements=(requirement,),
+        combination=CandidateCombination(
+            (CandidateResponder(requirement, resource, _route(120.0)),)
+        ),
+        traffic_snapshot=None,
+        modeled_at=datetime(2026, 9, 7, tzinfo=timezone.utc),
+    )
+    with_reposition_penalty = rescore_evaluated_candidate(
+        candidate, proposed_reposition_eta_seconds=600.0
+    )
+    without_reposition_penalty = rescore_evaluated_candidate(
+        candidate, proposed_reposition_eta_seconds=None
+    )
+
+    assert rank_evaluated_candidates(
+        (with_reposition_penalty, without_reposition_penalty)
+    ) == (without_reposition_penalty, with_reposition_penalty)
 
 
 def test_candidate_ranking_uses_locked_score_then_deterministic_tie_breakers() -> None:

@@ -330,6 +330,19 @@ added an integration regression. It does not change the approved scoring,
 coverage, resource, selection, or approval policy, and it preserves the
 Phase 01 single-plan endpoint.
 
+The final bounded integration fix now runs Task 7 simulation for every
+evaluated API candidate. When multiple accepted proposals exist, exactly one
+is selected using the owner-approved coverage-first deterministic policy:
+post-reposition joint coverage, undercovered count, unreachable count, ETA,
+distance, target zone, staging zone, and resource ID. The selected proposal is
+persisted in the existing singular field. The candidate is rescored only for
+the reposition term, using selected ETA divided by 600; the coverage penalty
+continues to use pre-reposition post-dispatch joint coverage. Candidates are
+reranked afterward with the existing tie order. No valid proposal leaves the
+reposition field absent and the reposition penalty zero. Integration tests
+verify deterministic selection, persistence, reranking, API invocation, and
+unchanged live resource state.
+
 ## Blocking issues
 
 None.
