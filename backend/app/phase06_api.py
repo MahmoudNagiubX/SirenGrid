@@ -1,0 +1,357 @@
+"""Minimal Phase 06 intake, claim review, and manual-authority endpoints."""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+import uuid
+from typing import Annotated, Any
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from sqlalchemy.orm import Session
+
+from app.ai import EvidenceClaim, StructuredExtractionStatus
+from app.ai_processing import process_structured_extraction
+from app.claims import append_claims_to_evidence_items
+from app.db import get_db
+from app.incidents import (
+    FACT_FIELD_NAMES,
+    patch_incident_facts,
+    serialize_incident,
+    serialize_report,
+    serialize_timeline_event,
+)
+from app.media import MediaValidationError, store_media
+from app.models import Incident, Report, TimelineEvent
+from app.schemas import DataReality, FreshnessStatus, IncidentFactsPatchRequest, ReportRead
+from app.websocket import publish_operations_event
+
+router = APIRouter(tags=["phase06"])
+
+
+class ClaimResolutionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_incident_version: int = Field(ge=1)
+    operator_reference: str = Field(min_length=1, max_length=200)
+    field_name: str = Field(min_length=1, max_length=80)
+    value: Any
+    selected_evidence_id: str | None = None
+
+
+def _report_claims(report: Report) -> list[EvidenceClaim]:
+    claims: list[EvidenceClaim] = []
+    for item in report.evidence_items_json or []:
+        if item.get("type") != "EVIDENCE_CLAIMS":
+            continue
+        for raw_claim in item.get("claims", []):
+            try:
+                claims.append(EvidenceClaim.model_validate(raw_claim))
+            except ValidationError:
+                continue
+    return claims
+
+
+def _incident_claims(db: Session, incident_id: str) -> list[EvidenceClaim]:
+    reports = db.query(Report).filter(Report.incident_id == incident_id).all()
+    claims: list[EvidenceClaim] = []
+    for report in reports:
+        claims.extend(_report_claims(report))
+    return claims
+
+
+def _timeline_event(
+    *, incident_id: str, event_type: str, details: dict[str, Any], created_at: datetime
+) -> TimelineEvent:
+    return TimelineEvent(
+        id=str(uuid.uuid4()),
+        incident_id=incident_id,
+        event_type=event_type,
+        details_json=details,
+        created_at=created_at,
+    )
+
+
+def _create_media_report(
+    *,
+    db: Session,
+    content: bytes,
+    media_kind: str,
+    content_type: str | None,
+    source_reference: str,
+    incident_id: str | None,
+    data_reality: DataReality,
+) -> dict[str, Any]:
+    if incident_id and db.get(Incident, incident_id) is None:
+        raise HTTPException(status_code=404, detail=f"Incident '{incident_id}' not found")
+    if not content_type:
+        raise HTTPException(status_code=422, detail="upload MIME type is required")
+    try:
+        stored = store_media(
+            content,
+            media_kind=media_kind,
+            content_type=content_type,
+        )
+    except MediaValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    now_utc = datetime.now(timezone.utc)
+    processing_status = (
+        "ASR_MANUAL_REQUIRED" if media_kind == "audio" else "VISION_MANUAL_REVIEW"
+    )
+    evidence_item = {
+        "type": media_kind.upper(),
+        "uri_or_reference": stored.media_reference,
+        "extracted_facts": {},
+        "provenance": {
+            "source": "control_room_media_upload",
+            "source_reference": source_reference,
+            "media_id": stored.media_id,
+            "mime_type": stored.mime_type,
+            "data_reality": data_reality.value,
+            "freshness_status": FreshnessStatus.FRESH.value,
+            "received_at": now_utc.isoformat(),
+        },
+        "confidence_support": None,
+        "created_at": now_utc.isoformat(),
+    }
+    report = Report(
+        id=str(uuid.uuid4()),
+        incident_id=incident_id,
+        source_type=f"control_room_{media_kind}",
+        source_reference=source_reference,
+        raw_text="",
+        received_at=now_utc,
+        data_reality=data_reality,
+        provenance_json=evidence_item["provenance"],
+        processing_status=processing_status,
+        evidence_items_json=[evidence_item],
+        created_at=now_utc,
+    )
+    db.add(report)
+    timeline_event = None
+    if incident_id:
+        timeline_event = _timeline_event(
+            incident_id=incident_id,
+            event_type="REPORT_CREATED",
+            details={
+                "report_id": report.id,
+                "source_type": report.source_type,
+                "processing_status": processing_status,
+                "data_reality": data_reality.value,
+            },
+            created_at=now_utc,
+        )
+        db.add(timeline_event)
+    db.commit()
+    db.refresh(report)
+    if timeline_event:
+        publish_operations_event(
+            event="timeline.appended",
+            incident_id=incident_id,
+            payload=serialize_timeline_event(timeline_event),
+        )
+    return serialize_report(report)
+
+
+def _read_upload(file: UploadFile, *, media_kind: str) -> bytes:
+    max_bytes = 15 * 1024 * 1024 if media_kind == "audio" else 10 * 1024 * 1024
+    return file.file.read(max_bytes + 1)
+
+
+@router.post(
+    "/reports/intake/audio",
+    status_code=status.HTTP_201_CREATED,
+    response_model=ReportRead,
+)
+def intake_audio(
+    file: Annotated[UploadFile, File(...)],
+    source_reference: Annotated[str, Form(min_length=1, max_length=200)] = "control-room-upload",
+    incident_id: Annotated[str | None, Form()] = None,
+    data_reality: Annotated[DataReality, Form()] = DataReality.SIMULATED,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    return _create_media_report(
+        db=db,
+        content=_read_upload(file, media_kind="audio"),
+        media_kind="audio",
+        content_type=file.content_type,
+        source_reference=source_reference,
+        incident_id=incident_id,
+        data_reality=data_reality,
+    )
+
+
+@router.post(
+    "/reports/intake/image",
+    status_code=status.HTTP_201_CREATED,
+    response_model=ReportRead,
+)
+def intake_image(
+    file: Annotated[UploadFile, File(...)],
+    source_reference: Annotated[str, Form(min_length=1, max_length=200)] = "control-room-upload",
+    incident_id: Annotated[str | None, Form()] = None,
+    data_reality: Annotated[DataReality, Form()] = DataReality.SIMULATED,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    return _create_media_report(
+        db=db,
+        content=_read_upload(file, media_kind="image"),
+        media_kind="image",
+        content_type=file.content_type,
+        source_reference=source_reference,
+        incident_id=incident_id,
+        data_reality=data_reality,
+    )
+
+
+@router.post("/reports/{report_id}/process")
+def process_report(
+    report_id: str,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    report = db.get(Report, report_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail=f"Report '{report_id}' not found")
+    evidence_id = next(
+        (
+            item.get("provenance", {}).get("media_id") or item.get("uri_or_reference")
+            for item in report.evidence_items_json or []
+            if item.get("uri_or_reference")
+        ),
+        report.id,
+    )
+    result = process_structured_extraction(
+        report.raw_text,
+        evidence_id=evidence_id,
+        report_id=report.id,
+    )
+    now_utc = datetime.now(timezone.utc)
+    report.processing_status = (
+        "AI_DISABLED_MANUAL_REQUIRED"
+        if result.status is StructuredExtractionStatus.DISABLED
+        else f"AI_{result.status.value}"
+    )
+    provenance = dict(report.provenance_json or {})
+    provenance["ai_processing"] = {
+        "status": result.status.value,
+        "provider": result.provider,
+        "model": result.model,
+        "error_code": result.error_code,
+        "retry_count": result.retry_count,
+        "manual_fallback_required": result.manual_fallback_required,
+        "processed_at": now_utc.isoformat(),
+    }
+    report.provenance_json = provenance
+    if result.claims:
+        report.evidence_items_json = append_claims_to_evidence_items(
+            report.evidence_items_json,
+            result.claims,
+        )
+    event = None
+    if report.incident_id:
+        event = _timeline_event(
+            incident_id=report.incident_id,
+            event_type="AI_PROCESSING_COMPLETED",
+            details={
+                "report_id": report.id,
+                "status": result.status.value,
+                "manual_fallback_required": result.manual_fallback_required,
+                "claims_added": len(result.claims),
+            },
+            created_at=now_utc,
+        )
+        db.add(event)
+    db.add(report)
+    db.commit()
+    db.refresh(report)
+    if event:
+        publish_operations_event(
+            event="timeline.appended",
+            incident_id=report.incident_id,
+            payload=serialize_timeline_event(event),
+        )
+    return {
+        "status": result.status.value,
+        "result": result.model_dump(mode="json"),
+        "report": serialize_report(report),
+    }
+
+
+@router.get("/reports/{report_id}/claims")
+def get_report_claims(report_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+    report = db.get(Report, report_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail=f"Report '{report_id}' not found")
+    return {
+        "report_id": report.id,
+        "claims": [claim.model_dump(mode="json") for claim in _report_claims(report)],
+        "processing_status": report.processing_status,
+    }
+
+
+@router.post("/incidents/{incident_id}/fact-claims/resolve")
+def resolve_incident_claim(
+    incident_id: str,
+    payload: ClaimResolutionRequest,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    if payload.field_name not in FACT_FIELD_NAMES:
+        raise HTTPException(status_code=422, detail="field is not an approved incident fact")
+    claims = [
+        claim
+        for claim in _incident_claims(db, incident_id)
+        if claim.field_name == payload.field_name
+    ]
+    if payload.selected_evidence_id and not any(
+        claim.evidence_id == payload.selected_evidence_id and claim.value == payload.value
+        for claim in claims
+    ):
+        raise HTTPException(status_code=409, detail="selected evidence claim does not match the value")
+
+    try:
+        patch_payload = IncidentFactsPatchRequest.model_validate(
+            {
+                "expected_incident_version": payload.expected_incident_version,
+                "operator_reference": payload.operator_reference,
+                payload.field_name: payload.value,
+            }
+        )
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail="resolved value is invalid for the selected fact") from exc
+
+    correction = patch_incident_facts(incident_id, patch_payload, db)
+    incident = db.get(Incident, incident_id)
+    if incident is None:  # pragma: no cover - correction already validates this
+        raise HTTPException(status_code=404, detail=f"Incident '{incident_id}' not found")
+    now_utc = datetime.now(timezone.utc)
+    provenance = dict(incident.provenance_json or {})
+    states = dict(provenance.get("resolved_fact_states", {}))
+    states[payload.field_name] = "CONSISTENT"
+    provenance["resolved_fact_states"] = states
+    selected = dict(provenance.get("resolved_claim_evidence_ids", {}))
+    selected[payload.field_name] = payload.selected_evidence_id
+    provenance["resolved_claim_evidence_ids"] = selected
+    incident.provenance_json = provenance
+    event = _timeline_event(
+        incident_id=incident_id,
+        event_type="FACT_CLAIM_RESOLVED",
+        details={
+            "field_name": payload.field_name,
+            "selected_evidence_id": payload.selected_evidence_id,
+            "operator_reference": payload.operator_reference,
+            "incident_version": incident.version,
+            "timestamp": now_utc.isoformat(),
+        },
+        created_at=now_utc,
+    )
+    db.add(incident)
+    db.add(event)
+    db.commit()
+    db.refresh(incident)
+    publish_operations_event(
+        event="incident.updated",
+        incident_id=incident_id,
+        payload=serialize_incident(incident),
+    )
+    return {**correction, "incident": serialize_incident(incident)}
