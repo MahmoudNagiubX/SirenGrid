@@ -1,14 +1,25 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models import EmergencyResource
-from app.schemas import ResourceRead, ResourceStatus, ResourceType
+from app.models import EmergencyResource, Incident, TimelineEvent
+from app.schemas import (
+    DataReality,
+    FreshnessStatus,
+    ResourceAssignRequest,
+    ResourceRead,
+    ResourceReleaseRequest,
+    ResourceStatePatchRequest,
+    ResourceStatus,
+    ResourceType,
+)
 
 __all__ = [
     "router",
@@ -16,9 +27,19 @@ __all__ = [
     "serialize_resource",
     "list_resources",
     "get_resource",
+    "assign_resource",
+    "patch_resource_state",
+    "release_resource",
 ]
 
 router = APIRouter(tags=["resources"])
+
+
+def _acquire_write_lock(db: Session) -> None:
+    """Execute BEGIN IMMEDIATE on SQLite to serialize concurrent operations in one process."""
+    bind = db.get_bind()
+    if bind and bind.dialect.name == "sqlite":
+        db.execute(text("BEGIN IMMEDIATE"))
 
 
 def is_planner_eligible(resource: EmergencyResource | dict[str, Any]) -> bool:
@@ -134,4 +155,336 @@ def get_resource(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Emergency resource '{resource_id}' not found",
         )
+    return serialize_resource(resource)
+
+
+@router.post(
+    "/resources/{resource_id}/assign",
+    status_code=status.HTTP_200_OK,
+    response_model=ResourceRead,
+)
+def assign_resource(
+    resource_id: str,
+    payload: ResourceAssignRequest,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Atomically assign an available emergency resource to an existing incident with version checking."""
+    _acquire_write_lock(db)
+
+    resource = db.get(EmergencyResource, resource_id)
+    if resource is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Emergency resource '{resource_id}' not found",
+        )
+
+    incident = db.get(Incident, payload.incident_id)
+    if incident is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Referenced incident '{payload.incident_id}' not found",
+        )
+
+    if resource.version != payload.expected_resource_version:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Stale resource version: expected {payload.expected_resource_version}, "
+                f"current {resource.version}"
+            ),
+        )
+
+    if resource.assigned_incident_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Resource '{resource_id}' is already assigned to incident "
+                f"'{resource.assigned_incident_id}'"
+            ),
+        )
+
+    if resource.status != ResourceStatus.AVAILABLE:
+        status_val = (
+            resource.status.value
+            if hasattr(resource.status, "value")
+            else str(resource.status)
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Resource '{resource_id}' is not AVAILABLE "
+                f"(current status: '{status_val}')"
+            ),
+        )
+
+    now_utc = datetime.now(timezone.utc)
+
+    # Atomic mutation
+    resource.assigned_incident_id = incident.id
+    resource.status = ResourceStatus.ASSIGNED
+    resource.version = resource.version + 1
+    resource.last_updated = now_utc
+
+    current_provenance = dict(resource.provenance_json or {})
+    resource.provenance_json = {
+        **current_provenance,
+        "source": current_provenance.get("source") or "operator_action",
+        "data_reality": DataReality.SIMULATED.value,
+        "freshness_status": FreshnessStatus.FRESH.value,
+        "last_updated": now_utc.isoformat(),
+        "source_reference": payload.operator_reference,
+    }
+
+    timeline_event = TimelineEvent(
+        id=str(uuid.uuid4()),
+        incident_id=incident.id,
+        event_type="RESOURCE_ASSIGNED",
+        details_json={
+            "resource_id": resource.id,
+            "resource_version": resource.version,
+            "incident_id": incident.id,
+            "operator_reference": payload.operator_reference,
+            "status": ResourceStatus.ASSIGNED.value,
+        },
+        created_at=now_utc,
+    )
+    db.add(timeline_event)
+
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    db.refresh(resource)
+    return serialize_resource(resource)
+
+
+@router.patch(
+    "/resources/{resource_id}/state",
+    status_code=status.HTTP_200_OK,
+    response_model=ResourceRead,
+)
+def patch_resource_state(
+    resource_id: str,
+    payload: ResourceStatePatchRequest,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Update resource operational status with version checking and incident ownership safeguards."""
+    _acquire_write_lock(db)
+
+    resource = db.get(EmergencyResource, resource_id)
+    if resource is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Emergency resource '{resource_id}' not found",
+        )
+
+    if resource.version != payload.expected_resource_version:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Stale resource version: expected {payload.expected_resource_version}, "
+                f"current {resource.version}"
+            ),
+        )
+
+    incident: Incident | None = None
+    target_status = payload.status
+
+    if resource.assigned_incident_id is None:
+        # Unassigned resource
+        if payload.incident_id is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Cannot assign resource via state patch; use assign operation",
+            )
+        if target_status not in (ResourceStatus.AVAILABLE, ResourceStatus.OUT_OF_SERVICE):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Invalid status '{target_status.value}' for unassigned resource; "
+                    f"only AVAILABLE or OUT_OF_SERVICE permitted; assignment must use assign operation"
+                ),
+            )
+    else:
+        # Assigned resource
+        if payload.incident_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Owning incident_id is required when resource is assigned",
+            )
+        if payload.incident_id != resource.assigned_incident_id:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Cross-incident mutation rejected: resource is assigned to '{resource.assigned_incident_id}', "
+                    f"got '{payload.incident_id}'"
+                ),
+            )
+        incident = db.get(Incident, payload.incident_id)
+        if incident is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Referenced incident '{payload.incident_id}' not found",
+            )
+        if target_status == ResourceStatus.AVAILABLE:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Cannot set assigned resource to AVAILABLE via state patch; use release operation",
+            )
+        valid_assigned_statuses = {
+            ResourceStatus.ASSIGNED,
+            ResourceStatus.EN_ROUTE,
+            ResourceStatus.ON_SCENE,
+            ResourceStatus.TRANSPORTING,
+        }
+        if target_status not in valid_assigned_statuses:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Invalid status '{target_status.value}' for assigned resource; "
+                    f"permitted statuses are {[s.value for s in valid_assigned_statuses]}"
+                ),
+            )
+
+    now_utc = datetime.now(timezone.utc)
+    prev_status = (
+        resource.status.value
+        if hasattr(resource.status, "value")
+        else str(resource.status)
+    )
+
+    resource.status = target_status
+    resource.version = resource.version + 1
+    resource.last_updated = now_utc
+
+    current_provenance = dict(resource.provenance_json or {})
+    resource.provenance_json = {
+        **current_provenance,
+        "source": current_provenance.get("source") or "operator_action",
+        "data_reality": DataReality.SIMULATED.value,
+        "freshness_status": FreshnessStatus.FRESH.value,
+        "last_updated": now_utc.isoformat(),
+        "source_reference": payload.operator_reference,
+    }
+
+    if incident is not None:
+        timeline_event = TimelineEvent(
+            id=str(uuid.uuid4()),
+            incident_id=incident.id,
+            event_type="RESOURCE_STATUS_CHANGED",
+            details_json={
+                "resource_id": resource.id,
+                "resource_version": resource.version,
+                "incident_id": incident.id,
+                "operator_reference": payload.operator_reference,
+                "previous_status": prev_status,
+                "status": target_status.value,
+            },
+            created_at=now_utc,
+        )
+        db.add(timeline_event)
+
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    db.refresh(resource)
+    return serialize_resource(resource)
+
+
+@router.post(
+    "/resources/{resource_id}/release",
+    status_code=status.HTTP_200_OK,
+    response_model=ResourceRead,
+)
+def release_resource(
+    resource_id: str,
+    payload: ResourceReleaseRequest,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Atomically release an assigned emergency resource back to AVAILABLE with version checking."""
+    _acquire_write_lock(db)
+
+    resource = db.get(EmergencyResource, resource_id)
+    if resource is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Emergency resource '{resource_id}' not found",
+        )
+
+    if resource.version != payload.expected_resource_version:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Stale resource version: expected {payload.expected_resource_version}, "
+                f"current {resource.version}"
+            ),
+        )
+
+    if resource.assigned_incident_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Resource '{resource_id}' is already unassigned",
+        )
+
+    if resource.assigned_incident_id != payload.incident_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Wrong incident: resource is assigned to '{resource.assigned_incident_id}', "
+                f"release requested for '{payload.incident_id}'"
+            ),
+        )
+
+    incident = db.get(Incident, payload.incident_id)
+    if incident is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Referenced incident '{payload.incident_id}' not found",
+        )
+
+    now_utc = datetime.now(timezone.utc)
+
+    # Atomic mutation
+    resource.assigned_incident_id = None
+    resource.status = ResourceStatus.AVAILABLE
+    resource.version = resource.version + 1
+    resource.last_updated = now_utc
+
+    current_provenance = dict(resource.provenance_json or {})
+    resource.provenance_json = {
+        **current_provenance,
+        "source": current_provenance.get("source") or "operator_action",
+        "data_reality": DataReality.SIMULATED.value,
+        "freshness_status": FreshnessStatus.FRESH.value,
+        "last_updated": now_utc.isoformat(),
+        "source_reference": payload.operator_reference,
+    }
+
+    timeline_event = TimelineEvent(
+        id=str(uuid.uuid4()),
+        incident_id=incident.id,
+        event_type="RESOURCE_RELEASED",
+        details_json={
+            "resource_id": resource.id,
+            "resource_version": resource.version,
+            "incident_id": incident.id,
+            "operator_reference": payload.operator_reference,
+            "status": ResourceStatus.AVAILABLE.value,
+        },
+        created_at=now_utc,
+    )
+    db.add(timeline_event)
+
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    db.refresh(resource)
     return serialize_resource(resource)

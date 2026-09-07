@@ -41,6 +41,9 @@ __all__ = [
     "TimelineEventRead",
     "IncidentFactsPatchRequest",
     "IncidentFactsPatchResponse",
+    "ResourceAssignRequest",
+    "ResourceStatePatchRequest",
+    "ResourceReleaseRequest",
 ]
 
 
@@ -1028,3 +1031,95 @@ class IncidentFactsPatchResponse(BaseModel):
     incident: IncidentRead
     changed_fields: list[str] = Field(default_factory=list)
     downstream_inputs_dirty: bool = False
+
+
+class ResourceAssignRequest(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "incident_id": "inc-7c9b2f14-9a3c-4b6e-8210-95e2df894a11",
+                "expected_resource_version": 1,
+                "operator_reference": "dispatcher-op-01",
+            }
+        }
+    )
+
+    incident_id: str
+    expected_resource_version: int = Field(ge=1)
+    operator_reference: str
+
+    @field_validator("incident_id", mode="before")
+    @classmethod
+    def validate_incident_id(cls, v: Any) -> Any:
+        if not v or not str(v).strip():
+            raise ValueError("incident_id must be a non-empty string")
+        return str(v).strip()
+
+    @field_validator("operator_reference", mode="before")
+    @classmethod
+    def validate_operator_reference(cls, v: Any) -> Any:
+        if not v or not str(v).strip():
+            raise ValueError("operator_reference must be a non-empty string")
+        return str(v).strip()
+
+
+class ResourceStatePatchRequest(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "expected_resource_version": 1,
+                "status": "OUT_OF_SERVICE",
+                "operator_reference": "dispatcher-op-01",
+                "incident_id": None,
+            }
+        }
+    )
+
+    expected_resource_version: int = Field(ge=1)
+    status: ResourceStatus
+    operator_reference: str
+    incident_id: str | None = None
+
+    @field_validator("operator_reference", mode="before")
+    @classmethod
+    def validate_operator_reference(cls, v: Any) -> Any:
+        if not v or not str(v).strip():
+            raise ValueError("operator_reference must be a non-empty string")
+        return str(v).strip()
+
+    @field_validator("incident_id", mode="before")
+    @classmethod
+    def validate_incident_id(cls, v: Any) -> Any:
+        if v is not None and not str(v).strip():
+            return None
+        return v
+
+
+class ResourceReleaseRequest(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "incident_id": "inc-7c9b2f14-9a3c-4b6e-8210-95e2df894a11",
+                "expected_resource_version": 2,
+                "operator_reference": "dispatcher-op-01",
+            }
+        }
+    )
+
+    incident_id: str
+    expected_resource_version: int = Field(ge=1)
+    operator_reference: str
+
+    @field_validator("incident_id", mode="before")
+    @classmethod
+    def validate_incident_id(cls, v: Any) -> Any:
+        if not v or not str(v).strip():
+            raise ValueError("incident_id must be a non-empty string")
+        return str(v).strip()
+
+    @field_validator("operator_reference", mode="before")
+    @classmethod
+    def validate_operator_reference(cls, v: Any) -> Any:
+        if not v or not str(v).strip():
+            raise ValueError("operator_reference must be a non-empty string")
+        return str(v).strip()
