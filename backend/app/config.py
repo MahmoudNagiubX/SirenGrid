@@ -14,6 +14,7 @@ except ImportError:  # pragma: no cover
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DATA_DIR = REPO_ROOT / "data" / "processed" / "nasr_city"
+DEFAULT_PHASE06_MEDIA_DIR = REPO_ROOT / "backend" / ".runtime" / "media"
 
 ENV_PATH = REPO_ROOT / "backend" / ".env"
 if load_dotenv is not None and ENV_PATH.exists():
@@ -60,6 +61,15 @@ class Settings(BaseModel):
     driver_alert_lookahead_meters: Literal[500] = 500
     driver_alert_buffer_meters: Literal[30] = 30
     driver_alert_expiry_seconds: Literal[120] = 120
+    phase06_ai_total_processing_budget_seconds: Literal[30] = 30
+    phase06_structured_primary: Literal["NOT_SELECTED"] = "NOT_SELECTED"
+    phase06_structured_secondary: Literal["NOT_SELECTED"] = "NOT_SELECTED"
+    phase06_structured_default_enabled: Literal[False] = False
+    phase06_vision_provider: str = "NOT_SELECTED"
+    phase06_vision_enabled: bool = False
+    phase06_max_audio_upload_bytes: Literal[15728640] = 15 * 1024 * 1024
+    phase06_max_image_upload_bytes: Literal[10485760] = 10 * 1024 * 1024
+    phase06_media_dir: Path = Field(default_factory=lambda: DEFAULT_PHASE06_MEDIA_DIR)
     nasr_city_data_dir: Path = Field(default_factory=lambda: DEFAULT_DATA_DIR)
     tomtom_api_key: str | None = Field(default=None, exclude=True)
     tomtom_refresh_interval_seconds: Literal[60] = 60
@@ -259,6 +269,9 @@ def get_settings() -> Settings:
         driver_alert_expiry_seconds=int(
             os.getenv("DRIVER_ALERT_EXPIRY_SECONDS", "120")
         ),
+        phase06_media_dir=Path(
+            os.getenv("PHASE06_MEDIA_DIR", str(DEFAULT_PHASE06_MEDIA_DIR))
+        ).resolve(),
         nasr_city_data_dir=nasr_city_data_dir,
         tomtom_api_key=os.getenv("TOMTOM_API_KEY") or None,
         tomtom_refresh_interval_seconds=int(

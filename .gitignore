@@ -33,6 +33,7 @@ Thumbs.db
 *.temp
 .tmp/
 tmp/
+backend/.runtime/
 
 # Local data / caches
 .cache/
