@@ -64,6 +64,7 @@ def _phase04_metrics(
     candidate_rank: int,
     candidate_count: int,
     reposition_proposal: Any | None,
+    requirements_metadata: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
     metrics = candidate.metrics
     baseline_by_cohort = [impact.baseline for impact in metrics.cohort_impacts]
@@ -92,7 +93,11 @@ def _phase04_metrics(
         "responder_arrival_spread_seconds": metrics.responder_arrival_spread_seconds,
         "population_data_reality": representative.population_data_reality.value,
         "population_source_reference": representative.population_source_reference,
-        "prototype_policy_label": "SirenGrid prototype demo configuration",
+        "prototype_policy_label": (
+            (requirements_metadata or {}).get("prototype_policy_label")
+            or "SirenGrid prototype demo configuration"
+        ),
+        "response_requirements": _json_safe(requirements_metadata or {}),
         "provenance": {
             "source": representative.source,
             "data_reality": representative.data_reality.value,
@@ -139,6 +144,7 @@ def persist_candidate_set(
     *,
     candidate_set_id: str | None = None,
     reposition_proposals: Mapping[tuple[str, ...], Any] | None = None,
+    requirements_metadata: Mapping[str, Any] | None = None,
     now_utc: datetime | None = None,
 ) -> tuple[ResponsePlan, ...]:
     """Persist one already-ranked candidate set atomically.
@@ -189,6 +195,7 @@ def persist_candidate_set(
                 if reposition_proposals
                 else None
             ),
+            requirements_metadata=requirements_metadata,
         )
         plan = ResponsePlan(
             id=str(uuid.uuid4()),

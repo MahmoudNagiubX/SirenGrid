@@ -3,15 +3,31 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 import uuid
+import time
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.db import get_db
+from app.candidate_evaluation import evaluate_candidate_combination, rank_evaluated_candidates
+from app.candidate_generation import (
+    CandidateResource,
+    NoFeasibleCandidateError,
+    generate_candidate_combinations,
+)
+from app.candidate_persistence import persist_candidate_set
+from app.config import settings
+from app.coverage import load_population_zones
 from app.models import Approval, EmergencyResource, Incident, ResponsePlan, TimelineEvent
 from app.incidents import serialize_incident
 from app.resources import is_planner_eligible, serialize_resource
+from app.response_requirements import (
+    ResponseRequirement,
+    ResponseRequirementsUnavailableError,
+    resolve_response_requirements,
+)
+from app.traffic.runtime import traffic_runtime
 from app.websocket import publish_operations_event
 from app.routing import (
     RouteNotFoundError,
@@ -24,6 +40,7 @@ from app.schemas import (
     ApprovalResult,
     ApprovePlanRequest,
     Coordinate,
+    DataReality,
     IncidentStatus,
     ResourceStatus,
     ResourceType,
@@ -35,6 +52,7 @@ from app.schemas import (
 __all__ = [
     "router",
     "generate_response_plan",
+    "generate_phase04_candidate_plans",
     "serialize_plan",
     "approve_response_plan",
     "list_incident_plans",
@@ -320,6 +338,177 @@ def generate_response_plan(
     )
 
     return serialize_plan(plan)
+
+
+def _phase04_source_requirements(
+    raw_requirements: object,
+) -> tuple[ResponseRequirement, ...] | None:
+    if raw_requirements is None:
+        return None
+    if not isinstance(raw_requirements, list):
+        raise ValueError("Incident required resources must be a list")
+    if not raw_requirements:
+        return None
+    parsed: list[ResponseRequirement] = []
+    for item in raw_requirements:
+        if not isinstance(item, dict):
+            raise ValueError("Each incident resource requirement must be an object")
+        try:
+            resource_type = ResourceType(item.get("resource_type"))
+            count = int(item.get("count", 0))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Incident resource requirements are invalid") from exc
+        raw_tags = item.get("required_capability_tags", ())
+        if raw_tags is None:
+            raw_tags = ()
+        if not isinstance(raw_tags, (list, tuple)) or not all(
+            isinstance(tag, str) for tag in raw_tags
+        ):
+            raise ValueError("Required capability tags must be a list of strings")
+        parsed.append(
+            ResponseRequirement(
+                resource_type=resource_type,
+                minimum_count=count,
+                required_capability_tags=tuple(raw_tags),
+            )
+        )
+    return tuple(parsed)
+
+
+@router.post(
+    "/incidents/{incident_id}/plans/generate-candidates",
+    status_code=status.HTTP_201_CREATED,
+    response_model=list[ResponsePlanRead],
+)
+def generate_phase04_candidate_plans(
+    incident_id: str,
+    db: Session = Depends(get_db),
+) -> list[dict[str, Any]]:
+    """Generate and persist the bounded Phase 04 comparison candidate set."""
+    incident = db.get(Incident, incident_id)
+    if incident is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Incident '{incident_id}' not found",
+        )
+    if incident.status in (
+        IncidentStatus.CLOSED,
+        IncidentStatus.CANCELLED_FALSE_REPORT,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Cannot generate response plans for incident with status {incident.status.value}",
+        )
+
+    try:
+        source_requirements = _phase04_source_requirements(
+            incident.required_resources_json
+        )
+        resolution = resolve_response_requirements(
+            incident_type=incident.incident_type,
+            severity=incident.severity,
+            source_requirements=source_requirements,
+        )
+    except (ResponseRequirementsUnavailableError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+
+    try:
+        graph = load_routing_graph()
+        zones = load_population_zones(
+            settings.NASR_CITY_DATA_DIR
+            / "nasr_city_zone_population_worldpop_2025.geojson"
+        )
+    except (OSError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Phase 04 planning assets unavailable: {exc}",
+        ) from exc
+
+    now_utc = datetime.now(timezone.utc)
+    try:
+        traffic_snapshot = traffic_runtime.capture_snapshot(
+            graph,
+            now=now_utc,
+            wall_clock=lambda: datetime.now(timezone.utc),
+            monotonic=time.monotonic,
+        )
+    except (OSError, ValueError, RuntimeError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Traffic snapshot capture failed: {exc}",
+        ) from exc
+
+    resources = tuple(
+        CandidateResource(
+            resource_id=resource.id,
+            resource_type=resource.resource_type,
+            capability_tags=tuple(resource.capability_tags_json or ()),
+            status=resource.status,
+            assigned_incident_id=resource.assigned_incident_id,
+            coordinate=Coordinate(lat=resource.latitude, lon=resource.longitude),
+            data_reality=DataReality(
+                (resource.provenance_json or {}).get(
+                    "data_reality", DataReality.SIMULATED.value
+                )
+            ),
+            source=(resource.provenance_json or {}).get(
+                "source", "phase03_simulated_resource"
+            ),
+        )
+        for resource in db.scalars(
+            select(EmergencyResource).order_by(EmergencyResource.id.asc())
+        ).all()
+    )
+    try:
+        generated = generate_candidate_combinations(
+            graph=graph,
+            incident_coordinate=Coordinate(
+                lat=incident.latitude,
+                lon=incident.longitude,
+            ),
+            resources=resources,
+            requirements=resolution.requirements,
+            traffic_snapshot=traffic_snapshot,
+        )
+        evaluated = tuple(
+            evaluate_candidate_combination(
+                graph=graph,
+                zones=zones,
+                resources=resources,
+                requirements=resolution.requirements,
+                combination=combination,
+                traffic_snapshot=traffic_snapshot,
+                modeled_at=now_utc,
+            )
+            for combination in generated.combinations
+        )
+        ranked = rank_evaluated_candidates(evaluated)
+    except (NoFeasibleCandidateError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"No feasible Phase 04 candidate set: {exc}",
+        ) from exc
+
+    persisted = persist_candidate_set(
+        db,
+        incident,
+        ranked,
+        now_utc=now_utc,
+        requirements_metadata={
+            "source": resolution.source.value,
+            "matrix_version": resolution.matrix_version,
+            "prototype_policy_label": resolution.prototype_policy_label,
+        },
+    )
+    publish_operations_event(
+        event="incident.updated",
+        incident_id=incident.id,
+        payload=serialize_incident(incident),
+    )
+    return [serialize_plan(plan) for plan in persisted]
 
 
 @router.get(

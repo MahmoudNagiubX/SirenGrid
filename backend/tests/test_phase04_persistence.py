@@ -7,12 +7,15 @@ import networkx as nx
 import pytest
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
+from fastapi.testclient import TestClient
 
+import app.planning as planning
 from app.candidate_evaluation import evaluate_candidate_combination
 from app.candidate_generation import CandidateCombination, CandidateResource, CandidateResponder
 from app.candidate_persistence import persist_candidate_set
 from app.coverage import CoverageZone
 from app.db import init_db
+from app.main import app
 from app.models import EmergencyResource, Incident, ResponsePlan, TimelineEvent
 from app.response_requirements import ResponseRequirement
 from app.routing import compute_traffic_aware_route
@@ -192,3 +195,40 @@ def test_persist_one_candidate_keeps_recommended_approval_compatible(
     assert persisted[0].metrics_json["phase04"]["candidate_count"] == 1
     assert persisted[0].incident_version == incident.version
     assert persisted[0].resource_ids_json == ["resource-a"]
+
+
+def test_phase04_candidate_generation_endpoint_persists_comparison_set(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    incident = persistence_incident(db_session)
+    monkeypatch.setattr(planning, "load_routing_graph", persistence_graph)
+    monkeypatch.setattr(
+        planning,
+        "load_population_zones",
+        lambda _path: (
+            CoverageZone(
+                zone_id="zone",
+                centroid=Coordinate(lat=30.0, lon=31.302),
+                population=100.0,
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        planning.traffic_runtime,
+        "capture_snapshot",
+        lambda *_args, **_kwargs: None,
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            f"/api/v1/incidents/{incident.id}/plans/generate-candidates"
+        )
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert [plan["status"] for plan in body] == ["RECOMMENDED", "ALTERNATIVE"]
+    assert body[0]["candidate_set_id"] == body[1]["candidate_set_id"]
+    assert body[0]["metrics"]["phase04"]["joint_aggregation_policy"] == (
+        "JOINT_ALL_REQUIRED_COHORTS_V1"
+    )
