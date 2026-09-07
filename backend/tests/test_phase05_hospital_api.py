@@ -73,6 +73,14 @@ def _create_approved_transport_plan(db: Session) -> tuple[Incident, EmergencyRes
                 "resource_id": resource.id,
                 "resource_type": "AMBULANCE",
                 "origin": {"lat": resource.latitude, "lon": resource.longitude},
+                "route_geometry": {
+                    "type": "LineString",
+                    "coordinates": [[31.3400, 30.0500], [31.3450, 30.0550], [31.3500, 30.0600]],
+                },
+                "geometry": {
+                    "type": "LineString",
+                    "coordinates": [[31.3400, 30.0500], [31.3450, 30.0550], [31.3500, 30.0600]],
+                },
                 "distance_m": 1200.0,
                 "eta_seconds": 180.0,
             }

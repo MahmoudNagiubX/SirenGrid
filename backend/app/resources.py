@@ -10,6 +10,7 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.db import get_db
+from app.driver_alert import refresh_driver_alert
 from app.models import EmergencyResource, Incident, ResponsePlan, TimelineEvent
 from app.routing import haversine_distance_m
 from app.schemas import (
@@ -818,6 +819,18 @@ def patch_resource_movement(
         created_at=now_utc,
     )
     db.add(timeline_event)
+
+    try:
+        refresh_driver_alert(
+            db,
+            incident=incident,
+            plan=plan,
+            resource=resource,
+            operator_reference=payload.operator_reference,
+            now=now_utc,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Driver alert update failed: {exc}") from exc
 
     try:
         db.commit()
