@@ -569,3 +569,467 @@ def test_plan_generation_and_approval_transition_compatibility(
     assert t_res.status_code == 200
     assert t_res.json()["status"] == IncidentStatus.EN_ROUTE.value
     assert t_res.json()["version"] == 4
+
+
+# =============================================================================
+# 4. TIMELINE RETRIEVAL CONTRACT
+# =============================================================================
+
+
+def test_timeline_endpoint_unknown_incident_returns_404(client: TestClient) -> None:
+    """GET /api/v1/incidents/{id}/timeline returns 404 for an unknown incident."""
+    res = client.get("/api/v1/incidents/inc-nonexistent-00000000/timeline")
+    assert res.status_code == 404
+    assert "not found" in res.json()["detail"].lower()
+
+
+def test_timeline_endpoint_deterministic_order_and_structure(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    """Timeline returns events in deterministic ascending created_at then id order with complete fields."""
+    inc = create_test_incident(db_session, status=IncidentStatus.ACTIVE_UNCONFIRMED, version=1)
+
+    # Add a lifecycle transition to have at least two events
+    t_res = client.post(
+        f"/api/v1/incidents/{inc.id}/transition",
+        json={
+            "target_status": IncidentStatus.RESPONSE_PROPOSED.value,
+            "expected_incident_version": 1,
+            "operator_reference": "dispatcher-01",
+            "reason": "Units proposed",
+        },
+    )
+    assert t_res.status_code == 200
+
+    # Add a report attached to incident to have a third event
+    rep_res = client.post(
+        f"/api/v1/incidents/{inc.id}/reports",
+        json={
+            "source_type": "operator_manual_entry",
+            "source_reference": "disp-02",
+            "raw_text": "Follow-up bystander report",
+            "data_reality": "SIMULATED",
+        },
+    )
+    assert rep_res.status_code == 201
+
+    res = client.get(f"/api/v1/incidents/{inc.id}/timeline")
+    assert res.status_code == 200
+    events = res.json()
+    assert isinstance(events, list)
+    assert len(events) >= 2
+
+    # Verify deterministic ordering: created_at ascending, then id ascending
+    for i in range(len(events) - 1):
+        e1 = events[i]
+        e2 = events[i + 1]
+        assert (e1["created_at"], e1["id"]) <= (e2["created_at"], e2["id"])
+
+    # Verify event structure
+    for evt in events:
+        assert "id" in evt
+        assert evt["incident_id"] == inc.id
+        assert "event_type" in evt
+        assert "details" in evt
+        assert "details_json" in evt
+        assert "created_at" in evt
+
+    event_types = [e["event_type"] for e in events]
+    assert "LIFECYCLE_TRANSITION" in event_types
+    assert "REPORT_CREATED" in event_types
+
+
+# =============================================================================
+# 5. MANUAL FACTS CORRECTION CONTRACT
+# =============================================================================
+
+
+def test_facts_patch_stale_version_returns_409_without_mutation(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    """Stale expected_incident_version returns 409 and leaves incident and timeline unchanged."""
+    inc = create_test_incident(db_session, version=1)
+
+    res = client.patch(
+        f"/api/v1/incidents/{inc.id}/facts",
+        json={
+            "expected_incident_version": 99,
+            "operator_reference": "disp-stale",
+            "casualty_count": 9,
+            "severity": Severity.CRITICAL.value,
+        },
+    )
+    assert res.status_code == 409
+    assert "version mismatch" in res.json()["detail"].lower()
+
+    # Verify zero DB mutation
+    db_session.refresh(inc)
+    assert inc.version == 1
+    assert inc.casualty_count == 2
+    assert inc.severity == Severity.HIGH
+
+    # Verify no FACTS_CORRECTED timeline event was created
+    stmt = select(TimelineEvent).where(
+        TimelineEvent.incident_id == inc.id,
+        TimelineEvent.event_type == "FACTS_CORRECTED",
+    )
+    events = db_session.scalars(stmt).all()
+    assert len(events) == 0
+
+
+def test_facts_patch_semantic_noop_returns_200_no_version_or_event(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    """Semantic no-op returns 200 with changed_fields [] and does not mutate version or timeline."""
+    inc = create_test_incident(db_session, version=1)
+
+    res = client.patch(
+        f"/api/v1/incidents/{inc.id}/facts",
+        json={
+            "expected_incident_version": 1,
+            "operator_reference": "disp-noop",
+            "casualty_count": 2,
+            "severity": Severity.HIGH.value,
+            "location_text": "Nasr City intersection",
+        },
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["changed_fields"] == []
+    assert data["downstream_inputs_dirty"] is False
+    assert data["incident"]["version"] == 1
+    assert data["incident"]["casualty_count"] == 2
+
+    # Verify DB state unchanged
+    db_session.refresh(inc)
+    assert inc.version == 1
+
+    # Verify no FACTS_CORRECTED event appended
+    stmt = select(TimelineEvent).where(
+        TimelineEvent.incident_id == inc.id,
+        TimelineEvent.event_type == "FACTS_CORRECTED",
+    )
+    assert len(db_session.scalars(stmt).all()) == 0
+
+
+def test_facts_patch_successful_multi_field_correction(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    """Valid multi-field correction increments version once, writes per-field provenance, and appends audit event."""
+    inc = create_test_incident(db_session, version=1)
+
+    res = client.patch(
+        f"/api/v1/incidents/{inc.id}/facts",
+        json={
+            "expected_incident_version": 1,
+            "operator_reference": "disp-op-99",
+            "casualty_count": 5,
+            "severity": Severity.CRITICAL.value,
+            "location_text": "Corrected: Rabaa Al-Adawiya square",
+        },
+    )
+    assert res.status_code == 200, res.text
+    data = res.json()
+
+    assert sorted(data["changed_fields"]) == ["casualty_count", "location_text", "severity"]
+    assert data["downstream_inputs_dirty"] is False
+    assert data["incident"]["version"] == 2
+    assert data["incident"]["casualty_count"] == 5
+    assert data["incident"]["severity"] == Severity.CRITICAL.value
+    assert data["incident"]["location_text"] == "Corrected: Rabaa Al-Adawiya square"
+
+    # Verify provenance_json operator-corrected field map
+    prov = data["incident"]["provenance"]
+    assert "corrected_fields" in prov
+    corrected_map = prov["corrected_fields"]
+    for f in ["casualty_count", "severity", "location_text"]:
+        assert f in corrected_map
+        assert corrected_map[f]["source"] == "operator_correction"
+        assert corrected_map[f]["operator_reference"] == "disp-op-99"
+        assert corrected_map[f]["data_reality"] == DataReality.SIMULATED.value
+        assert corrected_map[f]["freshness_status"] == FreshnessStatus.FRESH.value
+        assert "timestamp" in corrected_map[f]
+
+    # Verify timeline event
+    t_res = client.get(f"/api/v1/incidents/{inc.id}/timeline")
+    assert t_res.status_code == 200
+    corr_events = [e for e in t_res.json() if e["event_type"] == "FACTS_CORRECTED"]
+    assert len(corr_events) == 1
+    evt = corr_events[0]
+    assert evt["details"]["operator_reference"] == "disp-op-99"
+    assert "correction_timestamp" in evt["details"] or "timestamp" in evt["details"]
+
+    changes = evt["details"]["changes"]
+    assert changes["casualty_count"]["old_value"] == 2
+    assert changes["casualty_count"]["new_value"] == 5
+    assert changes["severity"]["old_value"] == Severity.HIGH.value
+    assert changes["severity"]["new_value"] == Severity.CRITICAL.value
+    assert changes["location_text"]["old_value"] == "Nasr City intersection"
+    assert changes["location_text"]["new_value"] == "Corrected: Rabaa Al-Adawiya square"
+
+
+def test_facts_patch_planning_input_marks_downstream_inputs_dirty(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    """Patching location or required_resources marks downstream_inputs_dirty true without replanning."""
+    inc = create_test_incident(db_session, version=1)
+
+    # 1. Patch location -> dirty = True
+    res_loc = client.patch(
+        f"/api/v1/incidents/{inc.id}/facts",
+        json={
+            "expected_incident_version": 1,
+            "operator_reference": "disp-geo",
+            "location": {"lat": 30.0650, "lon": 31.3550},
+        },
+    )
+    assert res_loc.status_code == 200
+    data_loc = res_loc.json()
+    assert data_loc["changed_fields"] == ["location"]
+    assert data_loc["downstream_inputs_dirty"] is True
+    assert data_loc["incident"]["version"] == 2
+    assert data_loc["incident"]["location"] == {"lat": 30.0650, "lon": 31.3550}
+
+    # 2. Patch required_resources -> dirty = True
+    res_req = client.patch(
+        f"/api/v1/incidents/{inc.id}/facts",
+        json={
+            "expected_incident_version": 2,
+            "operator_reference": "disp-res",
+            "required_resources": [
+                {"resource_type": "AMBULANCE", "count": 3},
+                {"resource_type": "FIRE_RESCUE", "count": 2},
+            ],
+        },
+    )
+    assert res_req.status_code == 200
+    data_req = res_req.json()
+    assert data_req["changed_fields"] == ["required_resources"]
+    assert data_req["downstream_inputs_dirty"] is True
+    assert data_req["incident"]["version"] == 3
+    assert len(data_req["incident"]["required_resources"]) == 2
+
+
+def test_facts_patch_explicit_nullable_vs_omitted(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    """Omitted fields remain unchanged while explicit null values clear nullable fields."""
+    inc = create_test_incident(db_session, version=1)
+    assert inc.casualty_count == 2
+    assert inc.location_text == "Nasr City intersection"
+
+    # Explicit null on casualty_count; location_text omitted
+    res = client.patch(
+        f"/api/v1/incidents/{inc.id}/facts",
+        json={
+            "expected_incident_version": 1,
+            "operator_reference": "disp-null",
+            "casualty_count": None,
+        },
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["changed_fields"] == ["casualty_count"]
+    assert data["incident"]["casualty_count"] is None
+    assert data["incident"]["location_text"] == "Nasr City intersection"
+    assert data["incident"]["version"] == 2
+
+
+def test_facts_patch_invalid_patch_no_mutation(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    """Invalid facts patch fails validation and leaves DB completely unchanged."""
+    inc = create_test_incident(db_session, version=1)
+
+    # Coordinate latitude > 90
+    r1 = client.patch(
+        f"/api/v1/incidents/{inc.id}/facts",
+        json={
+            "expected_incident_version": 1,
+            "operator_reference": "disp-inv",
+            "location": {"lat": 999.0, "lon": 31.3452},
+        },
+    )
+    assert r1.status_code == 422
+
+    # Negative casualty count
+    r2 = client.patch(
+        f"/api/v1/incidents/{inc.id}/facts",
+        json={
+            "expected_incident_version": 1,
+            "operator_reference": "disp-inv",
+            "casualty_count": -5,
+        },
+    )
+    assert r2.status_code == 422
+
+    # Forbidden client-assigned field (e.g. status)
+    r3 = client.patch(
+        f"/api/v1/incidents/{inc.id}/facts",
+        json={
+            "expected_incident_version": 1,
+            "operator_reference": "disp-inv",
+            "status": "CLOSED",
+        },
+    )
+    assert r3.status_code == 422
+
+    # Non-nullable field passed as null
+    r4 = client.patch(
+        f"/api/v1/incidents/{inc.id}/facts",
+        json={
+            "expected_incident_version": 1,
+            "operator_reference": "disp-inv",
+            "incident_type": None,
+        },
+    )
+    assert r4.status_code == 422
+
+    # Empty required resources
+    r5 = client.patch(
+        f"/api/v1/incidents/{inc.id}/facts",
+        json={
+            "expected_incident_version": 1,
+            "operator_reference": "disp-inv",
+            "required_resources": [],
+        },
+    )
+    assert r5.status_code == 422
+
+    # Verify zero DB mutation
+    db_session.refresh(inc)
+    assert inc.version == 1
+    stmt = select(TimelineEvent).where(
+        TimelineEvent.incident_id == inc.id,
+        TimelineEvent.event_type == "FACTS_CORRECTED",
+    )
+    assert len(db_session.scalars(stmt).all()) == 0
+
+
+def test_facts_patch_preserves_provenance_across_sequential_corrections(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    """Sequential corrections retain previously corrected fields in provenance."""
+    inc = create_test_incident(db_session, version=1)
+
+    # Patch 1: casualty_count
+    r1 = client.patch(
+        f"/api/v1/incidents/{inc.id}/facts",
+        json={
+            "expected_incident_version": 1,
+            "operator_reference": "disp-01",
+            "casualty_count": 4,
+        },
+    )
+    assert r1.status_code == 200
+    assert r1.json()["incident"]["version"] == 2
+
+    # Patch 2: road_blockage (with expected_incident_version=2)
+    r2 = client.patch(
+        f"/api/v1/incidents/{inc.id}/facts",
+        json={
+            "expected_incident_version": 2,
+            "operator_reference": "disp-02",
+            "road_blockage": False,
+        },
+    )
+    assert r2.status_code == 200
+    data2 = r2.json()
+    assert data2["incident"]["version"] == 3
+
+    # Both casualty_count and road_blockage are retained in provenance
+    corr_map = data2["incident"]["provenance"]["corrected_fields"]
+    assert "casualty_count" in corr_map
+    assert corr_map["casualty_count"]["operator_reference"] == "disp-01"
+    assert "road_blockage" in corr_map
+    assert corr_map["road_blockage"]["operator_reference"] == "disp-02"
+
+    # Timeline has both FACTS_CORRECTED events in ascending order
+    t_res = client.get(f"/api/v1/incidents/{inc.id}/timeline")
+    assert t_res.status_code == 200
+    events = [e for e in t_res.json() if e["event_type"] == "FACTS_CORRECTED"]
+    assert len(events) == 2
+    assert events[0]["details"]["operator_reference"] == "disp-01"
+    assert events[1]["details"]["operator_reference"] == "disp-02"
+
+
+def test_facts_patch_preserves_golden_flow_compatibility(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    """Corrected incident seamlessly proceeds through plan generation, approval, and transitions."""
+    seed_resources(db_session)
+
+    # 1. Manual intake (version 1)
+    intake_res = client.post(
+        "/api/v1/intake/manual",
+        json={
+            "incident_type": "traffic_collision",
+            "severity": "HIGH",
+            "confidence_level": "HIGH",
+            "location": {"lat": 30.0561, "lon": 31.3452},
+            "location_text": "Initial location",
+            "casualty_count": 1,
+            "required_resources": [
+                {"resource_type": "AMBULANCE", "count": 1},
+                {"resource_type": "FIRE_RESCUE", "count": 1},
+            ],
+            "operator_reference": "disp-flow",
+        },
+    )
+    assert intake_res.status_code == 201
+    inc_data = intake_res.json()
+    inc_id = inc_data["id"]
+    assert inc_data["version"] == 1
+
+    # 2. Patch facts (version 1 -> 2)
+    patch_res = client.patch(
+        f"/api/v1/incidents/{inc_id}/facts",
+        json={
+            "expected_incident_version": 1,
+            "operator_reference": "disp-flow",
+            "casualty_count": 3,
+            "severity": "CRITICAL",
+        },
+    )
+    assert patch_res.status_code == 200
+    assert patch_res.json()["incident"]["version"] == 2
+
+    # 3. Generate response plan (version 2 -> 3, status AWAITING_APPROVAL)
+    plan_res = client.post(f"/api/v1/incidents/{inc_id}/plans/generate")
+    assert plan_res.status_code == 201
+    plan_data = plan_res.json()
+    plan_id = plan_data["id"]
+    assert plan_data["incident_version"] == 3
+
+    # 4. Approve plan (version 3 -> 4, status RESPONSE_ACTIVE)
+    app_res = client.post(
+        f"/api/v1/plans/{plan_id}/approve",
+        json={
+            "operator_reference": "disp-flow",
+            "expected_incident_version": 3,
+            "expected_plan_version": 1,
+        },
+    )
+    assert app_res.status_code == 200
+    app_data = app_res.json()
+    assert app_data["incident_status"] == IncidentStatus.RESPONSE_ACTIVE.value
+    assert app_data["incident"]["version"] == 4
+
+    # 5. Timeline audit check
+    timeline_res = client.get(f"/api/v1/incidents/{inc_id}/timeline")
+    assert timeline_res.status_code == 200
+    event_types = [e["event_type"] for e in timeline_res.json()]
+    assert "INCIDENT_CREATED" in event_types
+    assert "FACTS_CORRECTED" in event_types
+    assert "PLAN_GENERATED" in event_types
+    assert "PLAN_APPROVED" in event_types
+    assert "RESOURCES_ASSIGNED" in event_types

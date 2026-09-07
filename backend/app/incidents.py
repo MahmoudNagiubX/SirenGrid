@@ -14,12 +14,15 @@ from app.schemas import (
     DataReality,
     FreshnessStatus,
     IncidentCloseRequest,
+    IncidentFactsPatchRequest,
+    IncidentFactsPatchResponse,
     IncidentRead,
     IncidentStatus,
     IncidentTransitionRequest,
     ManualIncidentCreate,
     ReportCreate,
     ReportRead,
+    TimelineEventRead,
 )
 
 __all__ = [
@@ -27,8 +30,11 @@ __all__ = [
     "create_manual_incident",
     "serialize_incident",
     "serialize_report",
+    "serialize_timeline_event",
     "list_incidents",
     "get_incident",
+    "get_incident_timeline",
+    "patch_incident_facts",
     "create_incident_report",
     "list_incident_reports",
     "create_standalone_report",
@@ -36,6 +42,7 @@ __all__ = [
     "transition_incident_lifecycle",
     "close_incident",
     "LOCKED_FORWARD_TRANSITIONS",
+    "PLANNING_INPUT_FACT_FIELDS",
 ]
 
 router = APIRouter(tags=["incidents"])
@@ -141,6 +148,33 @@ def serialize_report(report: Report) -> dict[str, Any]:
         "evidence_items": report.evidence_items_json or [],
         "evidence_items_json": report.evidence_items_json or [],
         "created_at": report.created_at.isoformat() if report.created_at else None,
+    }
+
+
+PLANNING_INPUT_FACT_FIELDS: set[str] = {"location", "required_resources"}
+FACT_FIELD_NAMES: set[str] = {
+    "incident_type",
+    "severity",
+    "confidence_level",
+    "location",
+    "location_text",
+    "casualty_count",
+    "casualty_range",
+    "trapped_person",
+    "road_blockage",
+    "required_resources",
+}
+
+
+def serialize_timeline_event(event: TimelineEvent) -> dict[str, Any]:
+    """Serialize a TimelineEvent ORM instance into a frontend-agnostic dictionary."""
+    return {
+        "id": event.id,
+        "incident_id": event.incident_id,
+        "event_type": event.event_type,
+        "details": event.details_json or {},
+        "details_json": event.details_json or {},
+        "created_at": event.created_at.isoformat() if event.created_at else None,
     }
 
 
@@ -556,3 +590,235 @@ def close_incident(
         payload=transition_req,
         db=db,
     )
+
+
+@router.get(
+    "/incidents/{incident_id}/timeline",
+    status_code=status.HTTP_200_OK,
+    response_model=list[TimelineEventRead],
+)
+def get_incident_timeline(
+    incident_id: str,
+    db: Session = Depends(get_db),
+) -> list[dict[str, Any]]:
+    """Retrieve all timeline events for an incident in deterministic ascending created_at then id order."""
+    incident = db.get(Incident, incident_id)
+    if incident is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Incident '{incident_id}' not found",
+        )
+    stmt = (
+        select(TimelineEvent)
+        .where(TimelineEvent.incident_id == incident_id)
+        .order_by(TimelineEvent.created_at.asc(), TimelineEvent.id.asc())
+    )
+    events = db.scalars(stmt).all()
+    return [serialize_timeline_event(e) for e in events]
+
+
+@router.patch(
+    "/incidents/{incident_id}/facts",
+    status_code=status.HTTP_200_OK,
+    response_model=IncidentFactsPatchResponse,
+)
+def patch_incident_facts(
+    incident_id: str,
+    payload: IncidentFactsPatchRequest,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Atomically patch typed incident facts with single version increment, audit event, and dirty flag."""
+    _acquire_write_lock(db)
+
+    incident = db.get(Incident, incident_id)
+    if incident is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Incident '{incident_id}' not found",
+        )
+
+    if payload.expected_incident_version != incident.version:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Incident version mismatch: expected {payload.expected_incident_version}, "
+                f"but current version is {incident.version}"
+            ),
+        )
+
+    provided_fields = payload.model_fields_set.intersection(FACT_FIELD_NAMES)
+
+    changed_fields: list[str] = []
+    old_values: dict[str, Any] = {}
+    new_values: dict[str, Any] = {}
+
+    for field in sorted(provided_fields):
+        if field == "incident_type":
+            old_val = incident.incident_type
+            new_val = payload.incident_type
+            if new_val != old_val:
+                changed_fields.append(field)
+                old_values[field] = old_val
+                new_values[field] = new_val
+        elif field == "severity":
+            old_val = incident.severity.value if hasattr(incident.severity, "value") else str(incident.severity)
+            new_val = payload.severity.value if hasattr(payload.severity, "value") else str(payload.severity)
+            if new_val != old_val:
+                changed_fields.append(field)
+                old_values[field] = old_val
+                new_values[field] = new_val
+        elif field == "confidence_level":
+            old_val = incident.confidence_level.value if hasattr(incident.confidence_level, "value") else str(incident.confidence_level)
+            new_val = payload.confidence_level.value if hasattr(payload.confidence_level, "value") else str(payload.confidence_level)
+            if new_val != old_val:
+                changed_fields.append(field)
+                old_values[field] = old_val
+                new_values[field] = new_val
+        elif field == "location":
+            old_val = {"lat": incident.latitude, "lon": incident.longitude}
+            new_val = {"lat": payload.location.lat, "lon": payload.location.lon}
+            if abs(incident.latitude - payload.location.lat) > 1e-7 or abs(incident.longitude - payload.location.lon) > 1e-7:
+                changed_fields.append(field)
+                old_values[field] = old_val
+                new_values[field] = new_val
+        elif field == "location_text":
+            old_val = incident.location_text
+            new_val = payload.location_text
+            if new_val != old_val:
+                changed_fields.append(field)
+                old_values[field] = old_val
+                new_values[field] = new_val
+        elif field == "casualty_count":
+            old_val = incident.casualty_count
+            new_val = payload.casualty_count
+            if new_val != old_val:
+                changed_fields.append(field)
+                old_values[field] = old_val
+                new_values[field] = new_val
+        elif field == "casualty_range":
+            old_val = incident.casualty_range
+            new_val = payload.casualty_range
+            if new_val != old_val:
+                changed_fields.append(field)
+                old_values[field] = old_val
+                new_values[field] = new_val
+        elif field == "trapped_person":
+            old_val = incident.trapped_person
+            new_val = payload.trapped_person
+            if new_val != old_val:
+                changed_fields.append(field)
+                old_values[field] = old_val
+                new_values[field] = new_val
+        elif field == "road_blockage":
+            old_val = incident.road_blockage
+            new_val = payload.road_blockage
+            if new_val != old_val:
+                changed_fields.append(field)
+                old_values[field] = old_val
+                new_values[field] = new_val
+        elif field == "required_resources":
+            old_val = list(incident.required_resources_json or [])
+            new_val = [
+                {"resource_type": req.resource_type.value, "count": req.count}
+                for req in payload.required_resources
+            ]
+            if new_val != old_val:
+                changed_fields.append(field)
+                old_values[field] = old_val
+                new_values[field] = new_val
+
+    # Semantic no-op: return 200 with unchanged incident and no version increment or event
+    if not changed_fields:
+        return {
+            "incident": serialize_incident(incident),
+            "changed_fields": [],
+            "downstream_inputs_dirty": False,
+        }
+
+    now_utc = datetime.now(timezone.utc)
+    downstream_inputs_dirty = any(f in PLANNING_INPUT_FACT_FIELDS for f in changed_fields)
+
+    # Mutate accepted changes atomically
+    for field in changed_fields:
+        if field == "incident_type":
+            incident.incident_type = payload.incident_type
+        elif field == "severity":
+            incident.severity = payload.severity
+        elif field == "confidence_level":
+            incident.confidence_level = payload.confidence_level
+        elif field == "location":
+            incident.latitude = payload.location.lat
+            incident.longitude = payload.location.lon
+        elif field == "location_text":
+            incident.location_text = payload.location_text
+        elif field == "casualty_count":
+            incident.casualty_count = payload.casualty_count
+        elif field == "casualty_range":
+            incident.casualty_range = payload.casualty_range
+        elif field == "trapped_person":
+            incident.trapped_person = payload.trapped_person
+        elif field == "road_blockage":
+            incident.road_blockage = payload.road_blockage
+        elif field == "required_resources":
+            incident.required_resources_json = new_values[field]
+
+    # Increment version exactly once
+    incident.version = incident.version + 1
+    incident.updated_at = now_utc
+
+    # Update provenance_json with operator-corrected field map
+    provenance = dict(incident.provenance_json or {})
+    provenance["last_updated"] = now_utc.isoformat()
+    corrected_fields = dict(provenance.get("corrected_fields", {}))
+    for field in changed_fields:
+        corrected_fields[field] = {
+            "source": "operator_correction",
+            "operator_reference": payload.operator_reference,
+            "data_reality": DataReality.SIMULATED.value,
+            "freshness": FreshnessStatus.FRESH.value,
+            "freshness_status": FreshnessStatus.FRESH.value,
+            "timestamp": now_utc.isoformat(),
+        }
+    provenance["corrected_fields"] = corrected_fields
+    provenance["operator_corrected_fields"] = corrected_fields
+    incident.provenance_json = provenance
+
+    # Exactly one FACTS_CORRECTED TimelineEvent
+    changes_dict = {
+        field: {
+            "old": old_values[field],
+            "new": new_values[field],
+            "old_value": old_values[field],
+            "new_value": new_values[field],
+        }
+        for field in changed_fields
+    }
+    event_details = {
+        "operator_reference": payload.operator_reference,
+        "timestamp": now_utc.isoformat(),
+        "correction_timestamp": now_utc.isoformat(),
+        "changed_fields": list(changed_fields),
+        "downstream_inputs_dirty": downstream_inputs_dirty,
+        "changes": changes_dict,
+    }
+    for field, change_info in changes_dict.items():
+        event_details[field] = change_info
+
+    timeline_event = TimelineEvent(
+        id=str(uuid.uuid4()),
+        incident_id=incident.id,
+        event_type="FACTS_CORRECTED",
+        details_json=event_details,
+        created_at=now_utc,
+    )
+
+    db.add(incident)
+    db.add(timeline_event)
+    db.commit()
+    db.refresh(incident)
+
+    return {
+        "incident": serialize_incident(incident),
+        "changed_fields": changed_fields,
+        "downstream_inputs_dirty": downstream_inputs_dirty,
+    }

@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 __all__ = [
     "DataReality",
@@ -38,6 +38,9 @@ __all__ = [
     "ReportRead",
     "IncidentTransitionRequest",
     "IncidentCloseRequest",
+    "TimelineEventRead",
+    "IncidentFactsPatchRequest",
+    "IncidentFactsPatchResponse",
 ]
 
 
@@ -909,3 +912,119 @@ class IncidentCloseRequest(BaseModel):
     expected_incident_version: int = Field(ge=1)
     operator_reference: str = "demo-operator"
     reason: str | None = None
+
+
+class TimelineEventRead(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "id": "evt-7c9b2f14-9a3c-4b6e-8210-95e2df894a11",
+                "incident_id": "inc-7c9b2f14-9a3c-4b6e-8210-95e2df894a11",
+                "event_type": "FACTS_CORRECTED",
+                "details": {
+                    "operator_reference": "dispatcher-op-01",
+                    "correction_timestamp": "2026-09-07T12:00:00Z",
+                    "changed_fields": ["casualty_count"],
+                },
+                "details_json": {
+                    "operator_reference": "dispatcher-op-01",
+                    "correction_timestamp": "2026-09-07T12:00:00Z",
+                    "changed_fields": ["casualty_count"],
+                },
+                "created_at": "2026-09-07T12:00:00Z",
+            }
+        }
+    )
+
+    id: str
+    incident_id: str
+    event_type: str
+    details: dict[str, Any] = Field(default_factory=dict)
+    details_json: dict[str, Any] = Field(default_factory=dict)
+    created_at: str
+
+
+class IncidentFactsPatchRequest(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": {
+                "expected_incident_version": 1,
+                "operator_reference": "dispatcher-op-01",
+                "casualty_count": 3,
+                "location_text": "Updated location description",
+            }
+        },
+    )
+
+    expected_incident_version: int = Field(ge=1)
+    operator_reference: str = Field(min_length=1)
+    incident_type: str | None = None
+    severity: Severity | None = None
+    confidence_level: ConfidenceLevel | None = None
+    location: Coordinate | None = None
+    location_text: str | None = None
+    casualty_count: int | None = Field(default=None, ge=0)
+    casualty_range: str | None = None
+    trapped_person: bool | None = None
+    road_blockage: bool | None = None
+    required_resources: list[ResourceRequirement] | None = None
+
+    @field_validator("incident_type", mode="before")
+    @classmethod
+    def validate_incident_type(cls, v: Any) -> Any:
+        if v is None:
+            raise ValueError("incident_type cannot be null")
+        if isinstance(v, str) and not v.strip():
+            raise ValueError("incident_type cannot be empty")
+        return v
+
+    @field_validator("severity", mode="before")
+    @classmethod
+    def validate_severity(cls, v: Any) -> Any:
+        if v is None:
+            raise ValueError("severity cannot be null")
+        return v
+
+    @field_validator("confidence_level", mode="before")
+    @classmethod
+    def validate_confidence_level(cls, v: Any) -> Any:
+        if v is None:
+            raise ValueError("confidence_level cannot be null")
+        return v
+
+    @field_validator("location", mode="before")
+    @classmethod
+    def validate_location(cls, v: Any) -> Any:
+        if v is None:
+            raise ValueError("location cannot be null")
+        return v
+
+    @field_validator("required_resources", mode="before")
+    @classmethod
+    def validate_required_resources(cls, v: Any) -> Any:
+        if v is None:
+            raise ValueError("required_resources cannot be null")
+        if isinstance(v, list) and len(v) == 0:
+            raise ValueError("required_resources cannot be empty")
+        return v
+
+
+class IncidentFactsPatchResponse(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "incident": {
+                    "id": "inc-7c9b2f14-9a3c-4b6e-8210-95e2df894a11",
+                    "version": 2,
+                    "status": "ACTIVE_UNCONFIRMED",
+                },
+                "changed_fields": ["casualty_count"],
+                "downstream_inputs_dirty": False,
+            }
+        }
+    )
+
+    incident: IncidentRead
+    changed_fields: list[str] = Field(default_factory=list)
+    downstream_inputs_dirty: bool = False
