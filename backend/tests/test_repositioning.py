@@ -3,13 +3,19 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import replace
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import networkx as nx
+import pytest
 
 from app.candidate_evaluation import evaluate_candidate_combination
 from app.candidate_generation import CandidateCombination, CandidateResource, CandidateResponder
 from app.coverage import CoverageZone
-from app.repositioning import find_adjacent_staging_zones, simulate_repositioning
+from app.repositioning import (
+    find_adjacent_staging_zones,
+    select_reposition_proposal,
+    simulate_repositioning,
+)
 from app.response_requirements import ResponseRequirement
 from app.routing import compute_traffic_aware_route
 from app.schemas import Coordinate, DataReality, ResourceStatus, ResourceType
@@ -107,6 +113,70 @@ def resource(
         data_reality=DataReality.SIMULATED,
         source="phase03_simulated_resource",
     )
+
+
+def proposal(
+    *,
+    coverage: float = 0.5,
+    undercovered: int = 2,
+    unreachable: int = 1,
+    eta: float = 300.0,
+    distance: float = 1000.0,
+    target: str = "zone-b",
+    staging: str = "stage-b",
+    resource_id: str = "resource-b",
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        post_reposition_joint=SimpleNamespace(
+            population_weighted_coverage=coverage,
+            undercovered_zone_count=undercovered,
+            unreachable_zone_count=unreachable,
+        ),
+        reposition_eta_seconds=eta,
+        reposition_distance_m=distance,
+        target_zone_id=target,
+        staging_zone_id=staging,
+        repositioned_resource_id=resource_id,
+    )
+
+
+@pytest.mark.parametrize(
+    ("preferred", "other"),
+    (
+        (proposal(coverage=0.8), proposal(coverage=0.7)),
+        (proposal(undercovered=1), proposal(undercovered=2)),
+        (proposal(unreachable=0), proposal(unreachable=1)),
+        (proposal(eta=200.0), proposal(eta=300.0)),
+        (proposal(distance=900.0), proposal(distance=1000.0)),
+        (
+            proposal(target="zone-a", staging="stage-a", resource_id="resource-a"),
+            proposal(target="zone-b", staging="stage-a", resource_id="resource-a"),
+        ),
+        (
+            proposal(target="zone-a", staging="stage-a", resource_id="resource-a"),
+            proposal(target="zone-a", staging="stage-b", resource_id="resource-a"),
+        ),
+        (
+            proposal(target="zone-a", staging="stage-a", resource_id="resource-a"),
+            proposal(target="zone-a", staging="stage-a", resource_id="resource-b"),
+        ),
+    ),
+    ids=(
+        "highest-coverage",
+        "fewest-undercovered",
+        "fewest-unreachable",
+        "lowest-eta",
+        "lowest-distance",
+        "lexical-target",
+        "lexical-staging",
+        "lexical-resource",
+    ),
+)
+def test_select_reposition_proposal_uses_pd018_priority(
+    preferred: SimpleNamespace,
+    other: SimpleNamespace,
+) -> None:
+    assert select_reposition_proposal((other, preferred)) is preferred
 
 
 def test_reposition_is_hypothetical_targeted_and_improves_joint_coverage() -> None:

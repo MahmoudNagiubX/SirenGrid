@@ -74,6 +74,26 @@ class RepositioningSimulation:
     proposals: tuple[RepositionProposal, ...]
 
 
+def select_reposition_proposal(
+    proposals: Iterable[RepositionProposal],
+) -> RepositionProposal | None:
+    """Select the single representative proposal using approved PD-018 order."""
+    return min(
+        proposals,
+        key=lambda proposal: (
+            -proposal.post_reposition_joint.population_weighted_coverage,
+            proposal.post_reposition_joint.undercovered_zone_count,
+            proposal.post_reposition_joint.unreachable_zone_count,
+            proposal.reposition_eta_seconds,
+            proposal.reposition_distance_m,
+            proposal.target_zone_id,
+            proposal.staging_zone_id,
+            proposal.repositioned_resource_id,
+        ),
+        default=None,
+    )
+
+
 def _valid_geometry(zone: CoverageZone) -> Any | None:
     if not zone.geometry:
         return None

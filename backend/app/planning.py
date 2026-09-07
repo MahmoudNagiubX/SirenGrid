@@ -10,13 +10,18 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.candidate_evaluation import evaluate_candidate_combination, rank_evaluated_candidates
+from app.candidate_evaluation import (
+    evaluate_candidate_combination,
+    rank_evaluated_candidates,
+    rescore_candidate_for_reposition,
+)
 from app.candidate_generation import (
     CandidateResource,
     NoFeasibleCandidateError,
     generate_candidate_combinations,
 )
 from app.candidate_persistence import persist_candidate_set
+from app.repositioning import select_reposition_proposal, simulate_repositioning
 from app.config import settings
 from app.coverage import load_population_zones
 from app.models import Approval, EmergencyResource, Incident, ResponsePlan, TimelineEvent
@@ -485,7 +490,27 @@ def generate_phase04_candidate_plans(
             )
             for combination in generated.combinations
         )
-        ranked = rank_evaluated_candidates(evaluated)
+        reposition_proposals = {}
+        reposition_aware = []
+        for candidate in evaluated:
+            simulation = simulate_repositioning(
+                graph=graph,
+                zones=zones,
+                resources=resources,
+                requirements=resolution.requirements,
+                candidate=candidate,
+                traffic_snapshot=traffic_snapshot,
+                modeled_at=now_utc,
+            )
+            proposal = select_reposition_proposal(simulation.proposals)
+            if proposal is not None:
+                candidate = rescore_candidate_for_reposition(
+                    candidate,
+                    proposal.reposition_eta_seconds,
+                )
+                reposition_proposals[candidate.combination.resource_ids] = proposal
+            reposition_aware.append(candidate)
+        ranked = rank_evaluated_candidates(reposition_aware)
     except (NoFeasibleCandidateError, ValueError) as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -496,6 +521,7 @@ def generate_phase04_candidate_plans(
         db,
         incident,
         ranked,
+        reposition_proposals=reposition_proposals,
         now_utc=now_utc,
         requirements_metadata={
             "source": resolution.source.value,

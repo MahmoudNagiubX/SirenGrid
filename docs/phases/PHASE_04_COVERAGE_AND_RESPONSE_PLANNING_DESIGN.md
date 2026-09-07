@@ -4,7 +4,7 @@
 **Scope:** Phase 04 only
 **Product authority:** `docs/MASTER_PLAN.md` v1.2
 **Architecture authority:** `docs/TECHNICAL_ARCHITECTURE_PLAN.md` v1.1
-**Decision record:** PD-016, PD-017
+**Decision record:** PD-016, PD-017, PD-018
 
 ## Boundary
 
@@ -52,7 +52,7 @@ Each candidate persists assignments, route facts, baseline/post-dispatch per-coh
 
 The lower-is-better score and exact normalized terms are recorded in PD-016. The score is reproducible from stored raw terms, configured weights, and weighted terms. No LLM contributes to planning or scoring.
 
-Repositioning is only simulated. It runs after qualifying coverage loss, considers only the approved bounded reserve/zone candidates, rejects ETAs above the target, and retains a proposal only when it improves a primary coverage result without reducing coverage versus the same post-dispatch plan.
+Repositioning is only simulated. It runs after qualifying coverage loss, considers only the approved bounded reserve/zone candidates, rejects ETAs above the target, and retains a proposal only when it improves a primary coverage result without reducing coverage versus the same post-dispatch plan. When multiple proposals are retained, PD-018 deterministically selects one representative proposal for scoring and persistence; the coverage score term remains based on post-dispatch joint coverage.
 
 ## Candidate lifecycle and contracts
 

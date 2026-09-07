@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Iterable
 
@@ -64,6 +64,16 @@ class EvaluatedCandidate:
     combination: CandidateCombination
     metrics: CandidateMetrics
     score: CandidateScoreBreakdown
+
+
+def rescore_candidate_for_reposition(
+    candidate: EvaluatedCandidate,
+    proposed_reposition_eta_seconds: float,
+) -> EvaluatedCandidate:
+    return replace(
+        candidate,
+        score=_score(candidate.metrics, proposed_reposition_eta_seconds),
+    )
 
 
 def _coverage_resources(

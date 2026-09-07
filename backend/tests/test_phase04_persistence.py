@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import datetime, timezone
 import uuid
 
@@ -61,6 +62,56 @@ def persistence_graph() -> nx.MultiDiGraph:
         base_travel_time_s=200.0,
     )
     return graph
+
+
+def reposition_graph() -> nx.MultiDiGraph:
+    graph = nx.MultiDiGraph()
+    for node, lon in (
+        ("amb-dispatch", 31.300),
+        ("fire-dispatch", 31.301),
+        ("amb-reserve", 31.302),
+        ("fire-reserve", 31.303),
+        ("zone-west", 31.304),
+        ("zone-target", 31.305),
+        ("zone-east", 31.306),
+    ):
+        graph.add_node(node, x=lon, y=30.0)
+    for source, destination, travel_time in (
+        ("amb-dispatch", "zone-target", 100.0),
+        ("fire-dispatch", "zone-target", 110.0),
+        ("fire-reserve", "zone-target", 100.0),
+        ("amb-reserve", "zone-west", 600.0),
+        ("zone-west", "zone-target", 500.0),
+    ):
+        graph.add_edge(
+            source,
+            destination,
+            key="0",
+            length=travel_time,
+            travel_time=travel_time,
+            base_travel_time_s=travel_time,
+        )
+    return graph
+
+
+def reposition_zones() -> tuple[CoverageZone, ...]:
+    def square(min_lon: float, max_lon: float) -> dict[str, object]:
+        return {
+            "type": "Polygon",
+            "coordinates": [[
+                [min_lon, 29.9995], [max_lon, 29.9995],
+                [max_lon, 30.0005], [min_lon, 30.0005], [min_lon, 29.9995],
+            ]],
+        }
+
+    return tuple(
+        CoverageZone(zone_id, Coordinate(lat=30.0, lon=lon), 100.0, square(low, high))
+        for zone_id, lon, low, high in (
+            ("zone-west", 31.304, 31.3035, 31.3045),
+            ("zone-target", 31.305, 31.3045, 31.3055),
+            ("zone-east", 31.306, 31.3055, 31.3065),
+        )
+    )
 
 
 def phase04_candidate_resources() -> tuple[CandidateResource, CandidateResource]:
@@ -232,3 +283,96 @@ def test_phase04_candidate_generation_endpoint_persists_comparison_set(
     assert body[0]["metrics"]["phase04"]["joint_aggregation_policy"] == (
         "JOINT_ALL_REQUIRED_COHORTS_V1"
     )
+    assert all("reposition_proposal" not in plan["metrics"]["phase04"] for plan in body)
+    assert all(plan["score_breakdown"]["reposition_penalty"] == 0.0 for plan in body)
+
+
+def test_phase04_candidate_generation_executes_reposition_before_ranking_and_persistence(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    graph = reposition_graph()
+    incident = Incident(
+        id=str(uuid.uuid4()),
+        version=1,
+        incident_type="traffic_collision",
+        severity=Severity.HIGH,
+        confidence_level=ConfidenceLevel.HIGH,
+        status=IncidentStatus.ACTIVE_UNCONFIRMED,
+        latitude=30.0,
+        longitude=31.305,
+        required_resources_json=[
+            {"resource_type": "AMBULANCE", "count": 1},
+            {"resource_type": "FIRE_RESCUE", "count": 1},
+        ],
+        provenance_json={"source": "operator_manual_entry", "data_reality": "SIMULATED"},
+    )
+    resources = [
+        EmergencyResource(
+            id=resource_id,
+            version=1,
+            name=resource_id,
+            resource_type=resource_type,
+            status=ResourceStatus.AVAILABLE,
+            latitude=30.0,
+            longitude=longitude,
+            capability_tags_json=[],
+            provenance_json={"source": "phase03_simulated_resource", "data_reality": "SIMULATED"},
+        )
+        for resource_id, resource_type, longitude in (
+            ("amb-dispatch", ResourceType.AMBULANCE, 31.300),
+            ("fire-dispatch", ResourceType.FIRE_RESCUE, 31.301),
+            ("amb-reserve", ResourceType.AMBULANCE, 31.302),
+            ("fire-reserve", ResourceType.FIRE_RESCUE, 31.303),
+        )
+    ]
+    db_session.add(incident)
+    db_session.add_all(resources)
+    db_session.commit()
+    resource_state = {
+        resource.id: (resource.status, resource.assigned_incident_id, resource.latitude, resource.longitude)
+        for resource in resources
+    }
+    graph_state = deepcopy(list(graph.edges(data=True, keys=True)))
+    calls = 0
+    real_simulate = planning.simulate_repositioning
+
+    def tracked_simulate(**kwargs: object):
+        nonlocal calls
+        calls += 1
+        return real_simulate(**kwargs)
+
+    monkeypatch.setattr(planning, "load_routing_graph", lambda: graph)
+    monkeypatch.setattr(planning, "load_population_zones", lambda _path: reposition_zones())
+    monkeypatch.setattr(planning.traffic_runtime, "capture_snapshot", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(planning, "simulate_repositioning", tracked_simulate)
+
+    with TestClient(app) as client:
+        response = client.post(f"/api/v1/incidents/{incident.id}/plans/generate-candidates")
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert calls == len(body)
+    selected = next(
+        plan for plan in body
+        if plan["metrics"]["phase04"].get("reposition_proposal")
+    )
+    proposal = selected["metrics"]["phase04"]["reposition_proposal"]
+    score = selected["score_breakdown"]
+    assert proposal["target_zone_id"] == "zone-target"
+    assert proposal["staging_zone_id"] == "zone-west"
+    assert proposal["repositioned_resource_id"] == "amb-reserve"
+    assert score["proposed_reposition_eta_seconds"] == proposal["reposition_eta_seconds"] == 600.0
+    assert score["reposition_penalty"] == pytest.approx(1.0)
+    assert score["weighted_terms"]["reposition"] == pytest.approx(0.05)
+    assert score["final_score"] == pytest.approx(sum(score["weighted_terms"].values()))
+    assert [plan["candidate_rank"] for plan in body] == list(range(len(body)))
+    assert [plan["score_breakdown"]["final_score"] for plan in body] == sorted(
+        plan["score_breakdown"]["final_score"] for plan in body
+    )
+    db_session.expire_all()
+    assert {
+        resource.id: (resource.status, resource.assigned_incident_id, resource.latitude, resource.longitude)
+        for resource in db_session.scalars(select(EmergencyResource)).all()
+    } == resource_state
+    assert list(graph.edges(data=True, keys=True)) == graph_state
