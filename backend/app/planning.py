@@ -29,6 +29,7 @@ from app.schemas import (
     ResourceType,
     ResponsePlanRead,
     ResponsePlanStatus,
+    SelectAlternativePlanRequest,
 )
 
 __all__ = [
@@ -38,6 +39,7 @@ __all__ = [
     "approve_response_plan",
     "list_incident_plans",
     "get_response_plan",
+    "select_alternative_plan",
     "SCORE_BREAKDOWN_PHASE01",
 ]
 
@@ -58,6 +60,10 @@ def serialize_plan(plan: ResponsePlan) -> dict[str, Any]:
         if hasattr(plan.status, "value")
         else str(plan.status)
     )
+    metrics = plan.metrics_json or {}
+    phase04 = metrics.get("phase04") if isinstance(metrics, dict) else None
+    if not isinstance(phase04, dict):
+        phase04 = metrics if isinstance(metrics, dict) else {}
     return {
         "id": plan.id,
         "plan_id": plan.id,
@@ -75,6 +81,9 @@ def serialize_plan(plan: ResponsePlan) -> dict[str, Any]:
         "score_breakdown": plan.score_breakdown_json or {},
         "score_breakdown_json": plan.score_breakdown_json or {},
         "created_at": plan.created_at.isoformat() if plan.created_at else None,
+        "candidate_set_id": phase04.get("candidate_set_id"),
+        "candidate_rank": phase04.get("candidate_rank"),
+        "candidate_count": phase04.get("candidate_count"),
     }
 
 
@@ -354,6 +363,181 @@ def get_response_plan(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Response plan '{plan_id}' not found",
         )
+    return serialize_plan(plan)
+
+
+def _candidate_set_id(plan: ResponsePlan) -> str | None:
+    metrics = plan.metrics_json or {}
+    if not isinstance(metrics, dict):
+        return None
+    phase04 = metrics.get("phase04")
+    if isinstance(phase04, dict) and phase04.get("candidate_set_id"):
+        return str(phase04["candidate_set_id"])
+    if metrics.get("candidate_set_id"):
+        return str(metrics["candidate_set_id"])
+    return None
+
+
+@router.post(
+    "/plans/{plan_id}/select",
+    status_code=status.HTTP_200_OK,
+    response_model=ResponsePlanRead,
+)
+@router.post(
+    "/incidents/{incident_id}/plans/{plan_id}/select",
+    status_code=status.HTTP_200_OK,
+    response_model=ResponsePlanRead,
+)
+def select_alternative_plan(
+    plan_id: str,
+    payload: SelectAlternativePlanRequest,
+    incident_id: str | None = None,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Promote one active alternative without assigning resources."""
+    _acquire_write_lock(db)
+
+    if incident_id is None:
+        plan = db.get(ResponsePlan, plan_id)
+        if plan is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Response plan '{plan_id}' not found",
+            )
+        incident_id = plan.incident_id
+
+    incident = db.get(Incident, incident_id)
+    if incident is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Incident '{incident_id}' not found",
+        )
+    plan = db.get(ResponsePlan, plan_id)
+    if plan is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Response plan '{plan_id}' not found",
+        )
+    if plan.incident_id != incident.id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Response plan does not belong to the requested incident",
+        )
+    if plan.status != ResponsePlanStatus.ALTERNATIVE:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only an ALTERNATIVE response plan can be selected",
+        )
+    if payload.expected_incident_version != incident.version:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Stale incident version: expected {payload.expected_incident_version}, "
+                f"current {incident.version}"
+            ),
+        )
+    if payload.expected_plan_version != plan.plan_version:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Stale plan version: expected {payload.expected_plan_version}, "
+                f"current {plan.plan_version}"
+            ),
+        )
+    if plan.incident_version != incident.version:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Alternative response plan is stale for the current incident version",
+        )
+
+    candidate_set_id = _candidate_set_id(plan)
+    if candidate_set_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Response plan is not part of an active candidate set",
+        )
+    if incident.current_plan_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Incident has no current recommended response plan",
+        )
+    previous_recommended = db.get(ResponsePlan, incident.current_plan_id)
+    if previous_recommended is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Incident current_plan_id does not reference a response plan",
+        )
+    if previous_recommended.status != ResponsePlanStatus.RECOMMENDED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Incident current plan is not RECOMMENDED",
+        )
+    if _candidate_set_id(previous_recommended) != candidate_set_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Response plan is not in the incident's current candidate set",
+        )
+
+    candidate_set_plans = db.scalars(
+        select(ResponsePlan).where(ResponsePlan.incident_id == incident.id)
+    ).all()
+    active_set_plans = [
+        candidate
+        for candidate in candidate_set_plans
+        if _candidate_set_id(candidate) == candidate_set_id
+    ]
+    if plan not in active_set_plans:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Response plan is not in the active candidate set",
+        )
+
+    previous_recommended_id = previous_recommended.id
+    superseded_candidate_ids: list[str] = []
+    for candidate in active_set_plans:
+        if candidate.id == plan.id:
+            continue
+        if candidate.status in (
+            ResponsePlanStatus.RECOMMENDED,
+            ResponsePlanStatus.ALTERNATIVE,
+        ):
+            candidate.status = ResponsePlanStatus.SUPERSEDED
+            superseded_candidate_ids.append(candidate.id)
+
+    now_utc = datetime.now(timezone.utc)
+    incident.version += 1
+    incident.updated_at = now_utc
+    incident.current_plan_id = plan.id
+    plan.status = ResponsePlanStatus.RECOMMENDED
+    plan.incident_version = incident.version
+    timeline_event = TimelineEvent(
+        id=str(uuid.uuid4()),
+        incident_id=incident.id,
+        event_type="PLAN_ALTERNATIVE_SELECTED",
+        details_json={
+            "action": "SELECT_ALTERNATIVE_PLAN",
+            "previous_recommended_plan_id": previous_recommended_id,
+            "selected_plan_id": plan.id,
+            "selected_plan_version": plan.plan_version,
+            "resulting_incident_version": incident.version,
+            "operator_reference": payload.operator_reference,
+            "superseded_candidate_ids": sorted(superseded_candidate_ids),
+        },
+        created_at=now_utc,
+    )
+    try:
+        db.add(timeline_event)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    db.refresh(plan)
+    db.refresh(incident)
+    publish_operations_event(
+        event="incident.updated",
+        incident_id=incident.id,
+        payload=serialize_incident(incident),
+    )
     return serialize_plan(plan)
 
 

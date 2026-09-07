@@ -92,6 +92,7 @@ def test_exact_enum_values() -> None:
     assert {e.value for e in ResponsePlanStatus} == {
         "CANDIDATE",
         "RECOMMENDED",
+        "ALTERNATIVE",
         "APPROVED",
         "REJECTED",
         "SUPERSEDED",

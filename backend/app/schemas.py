@@ -23,6 +23,7 @@ __all__ = [
     "IncidentRead",
     "ResourceRead",
     "ResponsePlanRead",
+    "SelectAlternativePlanRequest",
     "PlanIncidentSummary",
     "ApprovalRecordRead",
     "ApprovalResult",
@@ -114,6 +115,7 @@ class ResourceStatus(str, Enum):
 class ResponsePlanStatus(str, Enum):
     CANDIDATE = "CANDIDATE"
     RECOMMENDED = "RECOMMENDED"
+    ALTERNATIVE = "ALTERNATIVE"
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
     SUPERSEDED = "SUPERSEDED"
@@ -439,6 +441,9 @@ class ResponsePlanRead(BaseModel):
     score_breakdown: dict[str, Any] = Field(default_factory=dict)
     score_breakdown_json: dict[str, Any] = Field(default_factory=dict)
     created_at: str | None = None
+    candidate_set_id: str | None = None
+    candidate_rank: int | None = None
+    candidate_count: int | None = None
 
 
 class PlanIncidentSummary(BaseModel):
@@ -574,6 +579,12 @@ class ApprovePlanRequest(BaseModel):
         }
     )
 
+    expected_incident_version: int = Field(gt=0)
+    expected_plan_version: int = Field(gt=0)
+    operator_reference: str = "demo-operator"
+
+
+class SelectAlternativePlanRequest(BaseModel):
     expected_incident_version: int = Field(gt=0)
     expected_plan_version: int = Field(gt=0)
     operator_reference: str = "demo-operator"
