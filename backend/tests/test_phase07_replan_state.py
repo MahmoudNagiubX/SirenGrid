@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import concurrent.futures
 from datetime import datetime, timedelta, timezone
+import threading
 import uuid
 
 import networkx as nx
@@ -288,6 +290,33 @@ def test_explicit_flush_records_no_material_change_without_new_plan(
     assert body["incident_version"] == 4
     assert body["pending_plan_id"] is None
 
+    repeat_trigger = client.post(
+        f"/api/v1/incidents/{incident.id}/replan/triggers",
+        json={
+            "expected_incident_version": 4,
+            "trigger_reasons": ["TRAFFIC_CHANGED"],
+            "input_references": {
+                "old_eta_seconds": 400,
+                "new_eta_seconds": 401,
+                "route_edge_overlap_ratio": 1.0,
+            },
+        },
+    )
+    assert repeat_trigger.status_code == 200
+    assert repeat_trigger.json()["idempotent"] is True
+
+    repeat_flush = client.post(
+        f"/api/v1/incidents/{incident.id}/replan/evaluate",
+        json={"expected_incident_version": 4},
+    )
+    assert repeat_flush.status_code == 200
+    assert repeat_flush.json()["status"] == "NO_MATERIAL_CHANGE"
+    assert repeat_flush.json()["idempotent"] is True
+    evaluations = db_session.scalars(
+        select(ReplanEvaluation).where(ReplanEvaluation.incident_id == incident.id)
+    ).all()
+    assert len(evaluations) == 1
+
 
 def test_pending_replacement_approval_switches_active_plan_pointer_once(
     isolated_engine: Engine,
@@ -487,6 +516,29 @@ def test_material_flush_persists_pending_replacement_without_repointing_active_p
     )
     assert repeat.status_code == 200
     assert repeat.json()["idempotent"] is True
+
+    repeat_stale = client.post(
+        f"/api/v1/incidents/{incident.id}/replan/triggers",
+        json={
+            "expected_incident_version": 4,
+            "trigger_reasons": ["TRAFFIC_CHANGED"],
+            "input_references": {
+                "old_eta_seconds": 100,
+                "new_eta_seconds": 160,
+                "route_edge_overlap_ratio": 1.0,
+            },
+        },
+    )
+    assert repeat_stale.status_code == 200, repeat_stale.text
+    assert repeat_stale.json()["idempotent"] is True
+
+    repeated_flush = client.post(
+        f"/api/v1/incidents/{incident.id}/replan/evaluate",
+        json={"expected_incident_version": 4},
+    )
+    assert repeated_flush.status_code == 200, repeated_flush.text
+    assert repeated_flush.json()["status"] == "IDEMPOTENT_NO_OP"
+    assert repeated_flush.json()["idempotent"] is True
 
 
 def test_phase04_generation_cannot_overwrite_an_active_approved_plan(
@@ -1264,3 +1316,142 @@ def test_replan_route_origin_uses_current_en_route_coordinate_from_active_route(
 
     assert coordinate.lat == 30.0
     assert coordinate.lon == 31.305
+
+
+def test_concurrent_identical_replan_flushes_persist_one_set(
+    isolated_engine: Engine,
+    db_session: Session,
+    monkeypatch,
+) -> None:
+    """Identical concurrent evaluations create one set and one idempotent result."""
+    init_db(isolated_engine)
+    incident = Incident(
+        id=str(uuid.uuid4()),
+        version=4,
+        incident_type="traffic_collision",
+        severity=Severity.LOW,
+        confidence_level=ConfidenceLevel.HIGH,
+        status=IncidentStatus.RESPONSE_ACTIVE,
+        latitude=30.0,
+        longitude=31.302,
+        current_plan_id="approved-plan",
+        required_resources_json=[{"resource_type": "AMBULANCE", "count": 1}],
+    )
+    active = ResponsePlan(
+        id="approved-plan",
+        incident_id=incident.id,
+        incident_version=3,
+        plan_version=1,
+        status=ResponsePlanStatus.APPROVED,
+        resource_ids_json=[],
+        routes_json=[],
+        metrics_json={},
+        score_breakdown_json={},
+    )
+    db_session.add_all([incident, active])
+    db_session.commit()
+
+    graph = nx.MultiDiGraph()
+    graph.add_node("resource", x=31.3, y=30.0)
+    graph.add_node("incident", x=31.302, y=30.0)
+    graph.add_edge(
+        "resource",
+        "incident",
+        key="0",
+        length=200.0,
+        travel_time=20.0,
+        base_travel_time_s=20.0,
+    )
+    requirement = ResponseRequirement(ResourceType.AMBULANCE, 1)
+    resource = CandidateResource(
+        resource_id="resource-a",
+        resource_type=ResourceType.AMBULANCE,
+        capability_tags=(),
+        status=ResourceStatus.AVAILABLE,
+        assigned_incident_id=None,
+        coordinate=Coordinate(lat=30.0, lon=31.3),
+        data_reality=DataReality.SIMULATED,
+        source="phase03_simulated_resource",
+    )
+    route = compute_traffic_aware_route(
+        graph,
+        resource.coordinate,
+        Coordinate(lat=30.0, lon=31.302),
+        None,
+    )
+    candidate = evaluate_candidate_combination(
+        graph=graph,
+        zones=(CoverageZone("zone-1", Coordinate(lat=30.0, lon=31.302), 100.0),),
+        resources=(resource,),
+        requirements=(requirement,),
+        combination=CandidateCombination(
+            (CandidateResponder(requirement, resource, route),)
+        ),
+        traffic_snapshot=None,
+        modeled_at=datetime(2026, 9, 8, tzinfo=timezone.utc),
+    )
+    resolution = ResolvedResponseRequirements(
+        requirements=(requirement,),
+        source=RequirementSource.STRUCTURED_SOURCE,
+        matrix_version=None,
+        prototype_policy_label=None,
+    )
+    monkeypatch.setattr(
+        "app.replanning.evaluate_phase04_candidate_set",
+        lambda *args, **kwargs: (resolution, (candidate,), {}, kwargs["now_utc"]),
+    )
+
+    client = TestClient(app)
+    trigger = client.post(
+        f"/api/v1/incidents/{incident.id}/replan/triggers",
+        json={
+            "expected_incident_version": 4,
+            "trigger_reasons": ["TRAFFIC_CHANGED"],
+            "input_references": {
+                "old_eta_seconds": 100,
+                "new_eta_seconds": 160,
+                "route_edge_overlap_ratio": 1.0,
+            },
+        },
+    )
+    assert trigger.status_code == 200, trigger.text
+
+    start_barrier = threading.Barrier(2)
+
+    def flush() -> tuple[int, dict[str, object]]:
+        with TestClient(app) as thread_client:
+            start_barrier.wait(timeout=5.0)
+            response = thread_client.post(
+                f"/api/v1/incidents/{incident.id}/replan/evaluate",
+                json={"expected_incident_version": 4},
+            )
+            return response.status_code, response.json()
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(flush) for _ in range(2)]
+        results = [future.result(timeout=15.0) for future in futures]
+
+    status_codes = [status_code for status_code, _ in results]
+    assert status_codes == [200, 200]
+    response_statuses = [body["status"] for _, body in results]
+    assert response_statuses.count("REPLACEMENT_RECOMMENDED") == 1, results
+    assert response_statuses.count("IDEMPOTENT_NO_OP") == 1, results
+
+    db_session.expire_all()
+    saved_incident = db_session.get(Incident, incident.id)
+    pending_plans = db_session.scalars(
+        select(ResponsePlan).where(
+            ResponsePlan.incident_id == incident.id,
+            ResponsePlan.status == ResponsePlanStatus.RECOMMENDED,
+        )
+    ).all()
+    evaluations = db_session.scalars(
+        select(ReplanEvaluation).where(ReplanEvaluation.incident_id == incident.id)
+    ).all()
+    assert saved_incident is not None
+    assert saved_incident.version == 5
+    assert saved_incident.current_plan_id == active.id
+    assert saved_incident.pending_replan_plan_id == pending_plans[0].id
+    assert len(pending_plans) == 1
+    assert len(evaluations) == 1
+    assert evaluations[0].status == "RECOMMENDED"

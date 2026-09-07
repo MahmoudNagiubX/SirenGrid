@@ -177,7 +177,9 @@ def _pending_for_active_plan(
         .where(
             ReplanEvaluation.incident_id == incident_id,
             ReplanEvaluation.active_plan_id == active_plan_id,
-            ReplanEvaluation.status.in_(("PENDING", "RECOMMENDED")),
+            ReplanEvaluation.status.in_(
+                ("PENDING", "RECOMMENDED", "NO_MATERIAL_CHANGE")
+            ),
         )
         .order_by(ReplanEvaluation.first_triggered_at.desc())
     )
@@ -259,14 +261,6 @@ def record_replan_trigger(
             detail=f"Incident '{incident_id}' not found",
         )
     active_plan = _get_active_approved_plan(db, incident)
-    if expected_incident_version != incident.version:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                f"Stale incident version: expected {expected_incident_version}, "
-                f"current {incident.version}"
-            ),
-        )
 
     now_utc = now or datetime.now(timezone.utc)
     fingerprint = build_replan_input_fingerprint(
@@ -283,6 +277,15 @@ def record_replan_trigger(
     if evaluation is not None:
         if evaluation.input_fingerprint == fingerprint:
             return evaluation, True
+    if expected_incident_version != incident.version:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Stale incident version: expected {expected_incident_version}, "
+                f"current {incident.version}"
+            ),
+        )
+    if evaluation is not None:
         merged_reasons, merged_references = merge_pending_trigger(
             existing_reasons=evaluation.trigger_reasons_json or [],
             existing_references=evaluation.input_references_json or {},
@@ -356,20 +359,20 @@ def evaluate_pending_replan(
             detail=f"Incident '{incident_id}' not found",
         )
     active_plan = _get_active_approved_plan(db, incident)
-    if expected_incident_version != incident.version:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                f"Stale incident version: expected {expected_incident_version}, "
-                f"current {incident.version}"
-            ),
-        )
     evaluation = _pending_for_active_plan(
         db,
         incident_id=incident.id,
         active_plan_id=active_plan.id,
     )
     if evaluation is None:
+        if expected_incident_version != incident.version:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Stale incident version: expected {expected_incident_version}, "
+                    f"current {incident.version}"
+                ),
+            )
         return _evaluation_response(
             incident=incident,
             active_plan=active_plan,
@@ -406,6 +409,25 @@ def evaluate_pending_replan(
                     if isinstance(pending_phase04, dict)
                     else None
                 ),
+            ),
+        )
+
+    if evaluation.status == "NO_MATERIAL_CHANGE":
+        return _evaluation_response(
+            incident=incident,
+            active_plan=active_plan,
+            evaluation=evaluation,
+            status_value="NO_MATERIAL_CHANGE",
+            material=False,
+            idempotent=True,
+        )
+
+    if expected_incident_version != incident.version:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Stale incident version: expected {expected_incident_version}, "
+                f"current {incident.version}"
             ),
         )
 
