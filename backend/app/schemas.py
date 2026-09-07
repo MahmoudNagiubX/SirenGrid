@@ -32,6 +32,12 @@ __all__ = [
     "TrafficPrototypePolicyRead",
     "TrafficSnapshotRead",
     "MapLayerResponse",
+    "EvidenceItemCreate",
+    "EvidenceItemRead",
+    "ReportCreate",
+    "ReportRead",
+    "IncidentTransitionRequest",
+    "IncidentCloseRequest",
 ]
 
 
@@ -721,3 +727,185 @@ class MapLayerResponse(BaseModel):
     layer: str
     geojson: dict[str, Any]
     provenance: dict[str, Any]
+
+
+class EvidenceItemCreate(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "type": "operator_entry",
+                "uri_or_reference": "call-log-8812",
+                "extracted_facts": {
+                    "reported_casualties": 2,
+                    "vehicle_type": "sedan",
+                },
+                "provenance": {
+                    "source": "operator_manual_entry",
+                    "data_reality": "SIMULATED",
+                },
+                "confidence_support": "HIGH",
+            }
+        }
+    )
+
+    type: str
+    uri_or_reference: str | None = None
+    extracted_facts: dict[str, Any] = Field(default_factory=dict)
+    provenance: dict[str, Any] = Field(default_factory=dict)
+    confidence_support: str | None = None
+    created_at: datetime | None = None
+
+
+class EvidenceItemRead(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "type": "operator_entry",
+                "uri_or_reference": "call-log-8812",
+                "extracted_facts": {
+                    "reported_casualties": 2,
+                },
+                "provenance": {
+                    "source": "operator_manual_entry",
+                    "data_reality": "SIMULATED",
+                },
+                "confidence_support": "HIGH",
+                "created_at": "2026-09-07T12:00:00Z",
+            }
+        }
+    )
+
+    type: str
+    uri_or_reference: str | None = None
+    extracted_facts: dict[str, Any] = Field(default_factory=dict)
+    provenance: dict[str, Any] = Field(default_factory=dict)
+    confidence_support: str | None = None
+    created_at: str | None = None
+
+
+class ReportCreate(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "incident_id": None,
+                "source_type": "operator_manual_entry",
+                "source_reference": "disp-01",
+                "raw_text": "Eyewitness called control room reporting two injured passengers in vehicle collision.",
+                "location_text": "Corner of Abbas El Akkad and El Nasr Road",
+                "location": {"lat": 30.0561, "lon": 31.3452},
+                "data_reality": "SIMULATED",
+                "processing_status": "PROCESSED",
+                "evidence_items": [
+                    {
+                        "type": "operator_entry",
+                        "uri_or_reference": "call-log-8812",
+                        "extracted_facts": {"reported_casualties": 2},
+                        "provenance": {
+                            "source": "operator_manual_entry",
+                            "data_reality": "SIMULATED",
+                        },
+                        "confidence_support": "HIGH",
+                    }
+                ],
+            }
+        }
+    )
+
+    incident_id: str | None = None
+    source_type: str = "operator_manual_entry"
+    source_reference: str = "demo-operator"
+    raw_text: str
+    location_text: str | None = None
+    location: Coordinate | None = None
+    received_at: datetime | None = None
+    data_reality: DataReality = DataReality.SIMULATED
+    processing_status: str = "PROCESSED"
+    provenance: dict[str, Any] | None = None
+    evidence_items: list[EvidenceItemCreate] = Field(default_factory=list)
+
+
+class ReportRead(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "id": "rep-4f81c9a1-0d32-4e78-9e6b-bfa1b3b19451",
+                "incident_id": "inc-7c9b2f14-9a3c-4b6e-8210-95e2df894a11",
+                "source_type": "operator_manual_entry",
+                "source_reference": "disp-01",
+                "raw_text": "Eyewitness called control room reporting two injured passengers.",
+                "location_text": "Corner of Abbas El Akkad and El Nasr Road",
+                "location": {"lat": 30.0561, "lon": 31.3452},
+                "location_json": {"lat": 30.0561, "lon": 31.3452},
+                "received_at": "2026-09-07T12:00:00Z",
+                "data_reality": "SIMULATED",
+                "provenance": {
+                    "source": "operator_manual_entry",
+                    "data_reality": "SIMULATED",
+                    "freshness_status": "FRESH",
+                    "last_updated": "2026-09-07T12:00:00Z",
+                    "source_reference": "disp-01",
+                },
+                "provenance_json": {
+                    "source": "operator_manual_entry",
+                    "data_reality": "SIMULATED",
+                    "freshness_status": "FRESH",
+                    "last_updated": "2026-09-07T12:00:00Z",
+                    "source_reference": "disp-01",
+                },
+                "processing_status": "PROCESSED",
+                "evidence_items": [],
+                "evidence_items_json": [],
+                "created_at": "2026-09-07T12:00:00Z",
+            }
+        }
+    )
+
+    id: str
+    incident_id: str | None = None
+    source_type: str
+    source_reference: str
+    raw_text: str
+    location_text: str | None = None
+    location: Coordinate | None = None
+    location_json: dict[str, Any] | None = None
+    received_at: str
+    data_reality: DataReality
+    provenance: dict[str, Any] = Field(default_factory=dict)
+    provenance_json: dict[str, Any] = Field(default_factory=dict)
+    processing_status: str
+    evidence_items: list[dict[str, Any]] = Field(default_factory=list)
+    evidence_items_json: list[dict[str, Any]] = Field(default_factory=list)
+    created_at: str
+
+
+class IncidentTransitionRequest(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "target_status": "EN_ROUTE",
+                "expected_incident_version": 3,
+                "operator_reference": "dispatcher-op-01",
+                "reason": "Units dispatched and moving to scene",
+            }
+        }
+    )
+
+    target_status: IncidentStatus
+    expected_incident_version: int = Field(ge=1)
+    operator_reference: str = "demo-operator"
+    reason: str | None = None
+
+class IncidentCloseRequest(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "expected_incident_version": 5,
+                "operator_reference": "dispatcher-op-01",
+                "reason": "Incident resolution completed",
+            }
+        }
+    )
+
+    expected_incident_version: int = Field(ge=1)
+    operator_reference: str = "demo-operator"
+    reason: str | None = None

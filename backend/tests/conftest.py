@@ -2,14 +2,19 @@ from __future__ import annotations
 
 from collections.abc import Generator
 from pathlib import Path
+import sys
 import tempfile
 
-import pytest
-from sqlalchemy import Engine, create_engine
-from sqlalchemy.orm import Session, sessionmaker
+_backend_dir = str(Path(__file__).resolve().parent.parent)
+if _backend_dir not in sys.path:
+    sys.path.insert(0, _backend_dir)
 
-from app.config import settings
-import app.db as db_module
+import pytest  # noqa: E402
+from sqlalchemy import Engine, create_engine  # noqa: E402
+from sqlalchemy.orm import Session, sessionmaker  # noqa: E402
+
+from app.config import settings  # noqa: E402
+import app.db as db_module  # noqa: E402
 
 ORIGINAL_ENGINE = getattr(db_module, "engine", None)
 

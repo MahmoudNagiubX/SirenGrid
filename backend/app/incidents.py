@@ -5,25 +5,37 @@ from typing import Any
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models import Incident, TimelineEvent
+from app.models import Incident, Report, TimelineEvent
 from app.schemas import (
     DataReality,
     FreshnessStatus,
+    IncidentCloseRequest,
     IncidentRead,
     IncidentStatus,
+    IncidentTransitionRequest,
     ManualIncidentCreate,
+    ReportCreate,
+    ReportRead,
 )
 
 __all__ = [
     "router",
     "create_manual_incident",
     "serialize_incident",
+    "serialize_report",
     "list_incidents",
     "get_incident",
+    "create_incident_report",
+    "list_incident_reports",
+    "create_standalone_report",
+    "get_report",
+    "transition_incident_lifecycle",
+    "close_incident",
+    "LOCKED_FORWARD_TRANSITIONS",
 ]
 
 router = APIRouter(tags=["incidents"])
@@ -71,6 +83,64 @@ def serialize_incident(incident: Incident) -> dict[str, Any]:
         "updated_at": incident.updated_at.isoformat() if incident.updated_at else None,
         "provenance": incident.provenance_json or {},
         "provenance_json": incident.provenance_json or {},
+    }
+
+
+LOCKED_FORWARD_TRANSITIONS: dict[IncidentStatus, set[IncidentStatus]] = {
+    IncidentStatus.RECEIVED: {IncidentStatus.INTERPRETING},
+    IncidentStatus.INTERPRETING: {IncidentStatus.ACTIVE_UNCONFIRMED},
+    IncidentStatus.ACTIVE_UNCONFIRMED: {IncidentStatus.RESPONSE_PROPOSED},
+    IncidentStatus.RESPONSE_PROPOSED: {IncidentStatus.AWAITING_APPROVAL},
+    IncidentStatus.AWAITING_APPROVAL: {IncidentStatus.RESPONSE_ACTIVE},
+    IncidentStatus.RESPONSE_ACTIVE: {IncidentStatus.EN_ROUTE},
+    IncidentStatus.EN_ROUTE: {IncidentStatus.ON_SCENE},
+    IncidentStatus.ON_SCENE: {IncidentStatus.TRANSPORT_ACTIVE, IncidentStatus.HANDOVER},
+    IncidentStatus.TRANSPORT_ACTIVE: {IncidentStatus.HANDOVER},
+    IncidentStatus.HANDOVER: {IncidentStatus.CLOSED},
+    IncidentStatus.CLOSED: set(),
+    IncidentStatus.REQUIRES_REVIEW: set(),
+    IncidentStatus.DUPLICATE_MERGED: set(),
+    IncidentStatus.CANCELLED_FALSE_REPORT: set(),
+}
+
+
+def _acquire_write_lock(db: Session) -> None:
+    """Execute BEGIN IMMEDIATE on SQLite to serialize concurrent operations in one process."""
+    bind = db.get_bind()
+    if bind and bind.dialect.name == "sqlite":
+        db.execute(text("BEGIN IMMEDIATE"))
+
+
+def serialize_report(report: Report) -> dict[str, Any]:
+    """Serialize a Report ORM instance into a frontend-agnostic dictionary."""
+    data_reality_str = (
+        report.data_reality.value
+        if hasattr(report.data_reality, "value")
+        else str(report.data_reality)
+    )
+    loc_coord = None
+    if report.location_json and "lat" in report.location_json and "lon" in report.location_json:
+        loc_coord = {
+            "lat": report.location_json["lat"],
+            "lon": report.location_json["lon"],
+        }
+    return {
+        "id": report.id,
+        "incident_id": report.incident_id,
+        "source_type": report.source_type,
+        "source_reference": report.source_reference,
+        "raw_text": report.raw_text,
+        "location_text": report.location_text,
+        "location": loc_coord,
+        "location_json": report.location_json,
+        "received_at": report.received_at.isoformat() if report.received_at else None,
+        "data_reality": data_reality_str,
+        "provenance": report.provenance_json or {},
+        "provenance_json": report.provenance_json or {},
+        "processing_status": report.processing_status,
+        "evidence_items": report.evidence_items_json or [],
+        "evidence_items_json": report.evidence_items_json or [],
+        "created_at": report.created_at.isoformat() if report.created_at else None,
     }
 
 
@@ -184,3 +254,305 @@ def get_incident(
             detail=f"Incident '{incident_id}' not found",
         )
     return serialize_incident(incident)
+
+
+@router.post(
+    "/incidents/{incident_id}/reports",
+    status_code=status.HTTP_201_CREATED,
+    response_model=ReportRead,
+)
+def create_incident_report(
+    incident_id: str,
+    payload: ReportCreate,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    incident = db.get(Incident, incident_id)
+    if incident is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Incident '{incident_id}' not found",
+        )
+
+    now_utc = datetime.now(timezone.utc)
+    received_at = payload.received_at or now_utc
+
+    location_json = payload.location.model_dump() if payload.location else None
+    provenance = payload.provenance or {
+        "source": payload.source_type,
+        "data_reality": payload.data_reality.value,
+        "freshness_status": FreshnessStatus.FRESH.value,
+        "last_updated": now_utc.isoformat(),
+        "source_reference": payload.source_reference,
+    }
+
+    evidence_items = [
+        {
+            "type": item.type,
+            "uri_or_reference": item.uri_or_reference,
+            "extracted_facts": item.extracted_facts,
+            "provenance": item.provenance or {
+                "source": payload.source_type,
+                "data_reality": payload.data_reality.value,
+            },
+            "confidence_support": item.confidence_support,
+            "created_at": item.created_at.isoformat() if item.created_at else now_utc.isoformat(),
+        }
+        for item in payload.evidence_items
+    ]
+
+    report = Report(
+        id=str(uuid.uuid4()),
+        incident_id=incident_id,
+        source_type=payload.source_type,
+        source_reference=payload.source_reference,
+        raw_text=payload.raw_text,
+        location_text=payload.location_text,
+        location_json=location_json,
+        received_at=received_at,
+        data_reality=payload.data_reality,
+        provenance_json=provenance,
+        processing_status=payload.processing_status,
+        evidence_items_json=evidence_items,
+        created_at=now_utc,
+    )
+
+    timeline_event = TimelineEvent(
+        id=str(uuid.uuid4()),
+        incident_id=incident_id,
+        event_type="REPORT_CREATED",
+        details_json={
+            "report_id": report.id,
+            "source_type": payload.source_type,
+            "source_reference": payload.source_reference,
+            "data_reality": payload.data_reality.value,
+            "processing_status": payload.processing_status,
+            "evidence_count": len(evidence_items),
+        },
+        created_at=now_utc,
+    )
+
+    db.add(report)
+    db.add(timeline_event)
+    db.commit()
+    db.refresh(report)
+
+    return serialize_report(report)
+
+
+@router.get(
+    "/incidents/{incident_id}/reports",
+    status_code=status.HTTP_200_OK,
+    response_model=list[ReportRead],
+)
+def list_incident_reports(
+    incident_id: str,
+    db: Session = Depends(get_db),
+) -> list[dict[str, Any]]:
+    incident = db.get(Incident, incident_id)
+    if incident is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Incident '{incident_id}' not found",
+        )
+    stmt = (
+        select(Report)
+        .where(Report.incident_id == incident_id)
+        .order_by(Report.created_at.asc(), Report.id.asc())
+    )
+    reports = db.scalars(stmt).all()
+    return [serialize_report(r) for r in reports]
+
+
+@router.post(
+    "/reports",
+    status_code=status.HTTP_201_CREATED,
+    response_model=ReportRead,
+)
+def create_standalone_report(
+    payload: ReportCreate,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    if payload.incident_id:
+        incident = db.get(Incident, payload.incident_id)
+        if incident is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Incident '{payload.incident_id}' not found",
+            )
+
+    now_utc = datetime.now(timezone.utc)
+    received_at = payload.received_at or now_utc
+
+    location_json = payload.location.model_dump() if payload.location else None
+    provenance = payload.provenance or {
+        "source": payload.source_type,
+        "data_reality": payload.data_reality.value,
+        "freshness_status": FreshnessStatus.FRESH.value,
+        "last_updated": now_utc.isoformat(),
+        "source_reference": payload.source_reference,
+    }
+
+    evidence_items = [
+        {
+            "type": item.type,
+            "uri_or_reference": item.uri_or_reference,
+            "extracted_facts": item.extracted_facts,
+            "provenance": item.provenance or {
+                "source": payload.source_type,
+                "data_reality": payload.data_reality.value,
+            },
+            "confidence_support": item.confidence_support,
+            "created_at": item.created_at.isoformat() if item.created_at else now_utc.isoformat(),
+        }
+        for item in payload.evidence_items
+    ]
+
+    report = Report(
+        id=str(uuid.uuid4()),
+        incident_id=payload.incident_id,
+        source_type=payload.source_type,
+        source_reference=payload.source_reference,
+        raw_text=payload.raw_text,
+        location_text=payload.location_text,
+        location_json=location_json,
+        received_at=received_at,
+        data_reality=payload.data_reality,
+        provenance_json=provenance,
+        processing_status=payload.processing_status,
+        evidence_items_json=evidence_items,
+        created_at=now_utc,
+    )
+
+    db.add(report)
+
+    if payload.incident_id:
+        timeline_event = TimelineEvent(
+            id=str(uuid.uuid4()),
+            incident_id=payload.incident_id,
+            event_type="REPORT_CREATED",
+            details_json={
+                "report_id": report.id,
+                "source_type": payload.source_type,
+                "source_reference": payload.source_reference,
+                "data_reality": payload.data_reality.value,
+                "processing_status": payload.processing_status,
+                "evidence_count": len(evidence_items),
+            },
+            created_at=now_utc,
+        )
+        db.add(timeline_event)
+
+    db.commit()
+    db.refresh(report)
+
+    return serialize_report(report)
+
+
+@router.get(
+    "/reports/{report_id}",
+    status_code=status.HTTP_200_OK,
+    response_model=ReportRead,
+)
+def get_report(
+    report_id: str,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    report = db.get(Report, report_id)
+    if report is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Report '{report_id}' not found",
+        )
+    return serialize_report(report)
+
+
+@router.post(
+    "/incidents/{incident_id}/transition",
+    status_code=status.HTTP_200_OK,
+    response_model=IncidentRead,
+)
+def transition_incident_lifecycle(
+    incident_id: str,
+    payload: IncidentTransitionRequest,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _acquire_write_lock(db)
+
+    incident = db.get(Incident, incident_id)
+    if incident is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Incident '{incident_id}' not found",
+        )
+
+    if payload.expected_incident_version != incident.version:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Incident version mismatch: expected {payload.expected_incident_version}, "
+                f"but current version is {incident.version}"
+            ),
+        )
+
+    allowed = LOCKED_FORWARD_TRANSITIONS.get(incident.status, set())
+    if payload.target_status not in allowed:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Illegal lifecycle transition from '{incident.status.value}' to '{payload.target_status.value}'. "
+                f"Allowed transitions: {sorted(s.value for s in allowed)}"
+            ),
+        )
+
+    now_utc = datetime.now(timezone.utc)
+    from_status = incident.status
+    previous_version = incident.version
+
+    incident.status = payload.target_status
+    incident.version = previous_version + 1
+    incident.updated_at = now_utc
+
+    timeline_event = TimelineEvent(
+        id=str(uuid.uuid4()),
+        incident_id=incident.id,
+        event_type="LIFECYCLE_TRANSITION",
+        details_json={
+            "from_status": from_status.value,
+            "to_status": payload.target_status.value,
+            "previous_version": previous_version,
+            "new_version": incident.version,
+            "operator_reference": payload.operator_reference,
+            "reason": payload.reason,
+        },
+        created_at=now_utc,
+    )
+
+    db.add(incident)
+    db.add(timeline_event)
+    db.commit()
+    db.refresh(incident)
+
+    return serialize_incident(incident)
+
+
+@router.post(
+    "/incidents/{incident_id}/close",
+    status_code=status.HTTP_200_OK,
+    response_model=IncidentRead,
+)
+def close_incident(
+    incident_id: str,
+    payload: IncidentCloseRequest,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    transition_req = IncidentTransitionRequest(
+        target_status=IncidentStatus.CLOSED,
+        expected_incident_version=payload.expected_incident_version,
+        operator_reference=payload.operator_reference,
+        reason=payload.reason or "Incident closed via close endpoint",
+    )
+    return transition_incident_lifecycle(
+        incident_id=incident_id,
+        payload=transition_req,
+        db=db,
+    )

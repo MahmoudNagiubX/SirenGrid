@@ -18,6 +18,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.db import Base
 from app.schemas import (
     ConfidenceLevel,
+    DataReality,
     IncidentStatus,
     ResourceStatus,
     ResourceType,
@@ -31,6 +32,7 @@ __all__ = [
     "ResponsePlan",
     "Approval",
     "TimelineEvent",
+    "Report",
 ]
 
 
@@ -206,7 +208,6 @@ class ResponsePlan(Base):
         default=lambda: datetime.now(timezone.utc),
     )
 
-
 class Approval(Base):
     __tablename__ = "approvals"
 
@@ -240,6 +241,62 @@ class TimelineEvent(Base):
     details_json: Mapped[dict[str, Any]] = mapped_column(
         JSON,
         default=dict,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+
+class Report(Base):
+    __tablename__ = "reports"
+
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+    )
+    incident_id: Mapped[str | None] = mapped_column(
+        String(36),
+        nullable=True,
+        default=None,
+    )
+    source_type: Mapped[str] = mapped_column(String)
+    source_reference: Mapped[str] = mapped_column(String)
+    raw_text: Mapped[str] = mapped_column(String)
+    location_text: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True,
+        default=None,
+    )
+    location_json: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON,
+        nullable=True,
+        default=None,
+    )
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+    )
+    data_reality: Mapped[DataReality] = mapped_column(
+        SAEnum(
+            DataReality,
+            native_enum=False,
+            values_callable=lambda obj: [e.value for e in obj],
+        ),
+        default=DataReality.SIMULATED,
+    )
+    provenance_json: Mapped[dict[str, Any]] = mapped_column(
+        JSON,
+        default=dict,
+    )
+    processing_status: Mapped[str] = mapped_column(
+        String,
+        default="PROCESSED",
+    )
+    evidence_items_json: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON,
+        default=list,
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
