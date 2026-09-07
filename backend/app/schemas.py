@@ -318,6 +318,7 @@ class IncidentRead(BaseModel):
     required_resources: list[ResourceRequirement] = Field(default_factory=list)
     required_resources_json: list[ResourceRequirement] = Field(default_factory=list)
     current_plan_id: str | None = None
+    pending_replan_plan_id: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
     provenance: dict[str, Any] = Field(default_factory=dict)

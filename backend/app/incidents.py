@@ -89,6 +89,7 @@ def serialize_incident(incident: Incident) -> dict[str, Any]:
         "required_resources": incident.required_resources_json or [],
         "required_resources_json": incident.required_resources_json or [],
         "current_plan_id": incident.current_plan_id,
+        "pending_replan_plan_id": incident.pending_replan_plan_id,
         "created_at": incident.created_at.isoformat() if incident.created_at else None,
         "updated_at": incident.updated_at.isoformat() if incident.updated_at else None,
         "provenance": incident.provenance_json or {},

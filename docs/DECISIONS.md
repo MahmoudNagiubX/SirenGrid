@@ -618,8 +618,8 @@ default even if a benchmark candidate passes.
 
 ## PD-039 - Phase 07 Active and Pending Plans
 
-**Date:** 2026-09-08  
-**Status:** Approved  
+**Date:** 2026-09-08
+**Status:** Approved
 **Owner:** Project owner
 
 After an approved response plan exists, `Incident.current_plan_id` remains the
@@ -631,8 +631,8 @@ history.
 
 ## PD-040 - Phase 07 Replan Materiality V1
 
-**Date:** 2026-09-08  
-**Status:** Approved  
+**Date:** 2026-09-08
+**Status:** Approved
 **Owner:** Project owner
 
 Policy version: `SIRENGRID_REPLAN_MATERIALITY_V1`. Confirmed active-route
@@ -648,8 +648,8 @@ prototype safety parameters, not emergency-service standards.
 
 ## PD-041 - Phase 07 Freshness Outside TomTom
 
-**Date:** 2026-09-08  
-**Status:** Approved  
+**Date:** 2026-09-08
+**Status:** Approved
 **Owner:** Project owner
 
 TomTom retains the Phase 02 60/120-second policy. Other inputs use provider
@@ -660,8 +660,8 @@ alone never triggers replanning.
 
 ## PD-042 - Phase 07 Trigger Coalescing
 
-**Date:** 2026-09-08  
-**Status:** Approved  
+**Date:** 2026-09-08
+**Status:** Approved
 **Owner:** Project owner
 
 Use a five-second per-incident debounce window. Qualifying events merge pending
@@ -672,8 +672,8 @@ inputs and trigger facts is idempotent and creates no new plan version.
 
 ## PD-043 - Old Plan While Replacement Waits
 
-**Date:** 2026-09-08  
-**Status:** Approved  
+**Date:** 2026-09-08
+**Status:** Approved
 **Owner:** Project owner
 
 The old approved plan remains fully operational while a replacement is pending.
@@ -683,8 +683,8 @@ state.
 
 ## PD-044 - Active Responder Replacement
 
-**Date:** 2026-09-08  
-**Status:** Approved  
+**Date:** 2026-09-08
+**Status:** Approved
 **Owner:** Project owner
 
 Reserved/assigned resources may be released and replaced atomically at
@@ -698,8 +698,8 @@ responders follow hospital-specific rules.
 
 ## PD-045 - Phase 07 Hospital Invalidation
 
-**Date:** 2026-09-08  
-**Status:** Approved  
+**Date:** 2026-09-08
+**Status:** Approved
 **Owner:** Project owner
 
 A confirmed selected-hospital `NOT_ACCEPTING` or unreachable state invalidates
@@ -710,8 +710,8 @@ does not trigger this exception.
 
 ## PD-046 - Phase 07 Pending Sets and Concurrency
 
-**Date:** 2026-09-08  
-**Status:** Approved  
+**Date:** 2026-09-08
+**Status:** Approved
 **Owner:** Project owner
 
 Only one pending replacement candidate set may exist per incident and active
@@ -724,8 +724,8 @@ repeats return `200` idempotent/no-op.
 
 ## PD-047 - Phase 07 Multi-Incident Contention
 
-**Date:** 2026-09-08  
-**Status:** Approved  
+**Date:** 2026-09-08
+**Status:** Approved
 **Owner:** Project owner
 
 Committed resources are never preempted or stolen. New incidents plan only

@@ -81,6 +81,11 @@ class Settings(BaseModel):
     tomtom_min_provider_confidence: Literal[0.8] = 0.8
     tomtom_max_geometry_separation_m: Literal[30] = 30
     tomtom_max_direction_difference_degrees: Literal[30] = 30
+    replan_eta_absolute_increase_seconds: Literal[60] = 60
+    replan_eta_percent_increase: Literal[0.15] = 0.15
+    replan_route_edge_overlap_threshold: Literal[0.80] = 0.80
+    replan_coverage_drop_trigger: Literal[0.05] = 0.05
+    replan_debounce_seconds: Literal[5] = 5
 
     @property
     def APP_NAME(self) -> str:
@@ -206,6 +211,26 @@ class Settings(BaseModel):
     def TOMTOM_MAX_DIRECTION_DIFFERENCE_DEGREES(self) -> int:
         return self.tomtom_max_direction_difference_degrees
 
+    @property
+    def REPLAN_ETA_ABSOLUTE_INCREASE_SECONDS(self) -> int:
+        return self.replan_eta_absolute_increase_seconds
+
+    @property
+    def REPLAN_ETA_PERCENT_INCREASE(self) -> float:
+        return self.replan_eta_percent_increase
+
+    @property
+    def REPLAN_ROUTE_EDGE_OVERLAP_THRESHOLD(self) -> float:
+        return self.replan_route_edge_overlap_threshold
+
+    @property
+    def REPLAN_COVERAGE_DROP_TRIGGER(self) -> float:
+        return self.replan_coverage_drop_trigger
+
+    @property
+    def REPLAN_DEBOUNCE_SECONDS(self) -> int:
+        return self.replan_debounce_seconds
+
 
 def get_settings() -> Settings:
     cors_raw = os.getenv("CORS_ORIGINS")
@@ -295,6 +320,19 @@ def get_settings() -> Settings:
         tomtom_max_direction_difference_degrees=int(
             os.getenv("TOMTOM_MAX_DIRECTION_DIFFERENCE_DEGREES", "30")
         ),
+        replan_eta_absolute_increase_seconds=int(
+            os.getenv("REPLAN_ETA_ABSOLUTE_INCREASE_SECONDS", "60")
+        ),
+        replan_eta_percent_increase=float(
+            os.getenv("REPLAN_ETA_PERCENT_INCREASE", "0.15")
+        ),
+        replan_route_edge_overlap_threshold=float(
+            os.getenv("REPLAN_ROUTE_EDGE_OVERLAP_THRESHOLD", "0.80")
+        ),
+        replan_coverage_drop_trigger=float(
+            os.getenv("REPLAN_COVERAGE_DROP_TRIGGER", "0.05")
+        ),
+        replan_debounce_seconds=int(os.getenv("REPLAN_DEBOUNCE_SECONDS", "5")),
     )
 
 

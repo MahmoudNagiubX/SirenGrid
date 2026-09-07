@@ -120,6 +120,11 @@ class Incident(Base):
         nullable=True,
         default=None,
     )
+    pending_replan_plan_id: Mapped[str | None] = mapped_column(
+        String(36),
+        nullable=True,
+        default=None,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
