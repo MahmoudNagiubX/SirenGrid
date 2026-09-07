@@ -438,3 +438,180 @@ Use explicit simulated route progress with `DRIVER_ALERT_LOOKAHEAD_METERS = 500`
 
 ### Decision
 Use separate domain action/state endpoints plus one aggregate read-only operational view under `/api/v1`. REST is canonical; WebSocket is invalidation/update transport only. The API must support hospital options/details/destination/pre-alert, corridor state/priority, driver-alert state/refresh, and an aggregate incident operational-state view. Exact endpoint schemas are implementation detail within these boundaries.
+
+## PD-028 - Phase 06 Structured Extraction Provider
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner
+
+### Decision
+
+Structured-extraction `PRIMARY` and `SECONDARY` remain `NOT_SELECTED`. Default
+AI extraction is disabled. Phase 06 implements a provider-neutral adapter,
+strict typed validation, exactly one schema-repair retry, visible provider
+failure state, and manual structured-fact fallback. Qwen, GPT-OSS, and Gemini
+remain benchmark evidence/candidates only; none is an operational default.
+
+## PD-029 - Phase 06 Vision Provider
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner
+
+### Decision
+
+Run one small fresh safety benchmark on synthetic/non-private fixture images
+before enabling vision. The gate requires at least five bounded cases, 100%
+schema-valid output, zero critical unsupported facts or identity claims,
+explicit unknown preservation, and no invented casualty, location, diagnosis,
+or injury facts. A passing candidate is benchmark-approved but remains opt-in
+and default-off. A failed or unavailable candidate remains not selected and
+manual image evidence remains available.
+
+## PD-030 - Phase 06 Fact and Support Claim Schema
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner
+
+### Decision
+
+Persist immutable per-field evidence claims containing the field, value,
+`fact_state`, evidence/report reference, qualitative support, provider/model,
+observation time, provenance, and uncertainty notes. Claim states are
+`ASSERTED`, `EXPLICIT_NEGATIVE`, and `UNKNOWN`. Resolved fields may be
+`CONSISTENT`, `CONFLICT`, or `REQUIRES_REVIEW`. Missing mention is unknown,
+not an explicit negative.
+
+## PD-031 - Phase 06 Confidence and Support
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner
+
+### Decision
+
+Use qualitative support levels `LOW`, `MEDIUM`, and `HIGH`. No numeric
+operational threshold is introduced. Provider-native confidence is retained
+only as metadata when supplied and never becomes SirenGrid support
+automatically. Support is informational/review-oriented and never authorizes
+activation, dispatch, routing, hospital selection, signal control, or fact
+overwrite.
+
+## PD-032 - Phase 06 Conflicting Facts
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner
+
+### Decision
+
+Preserve every evidence claim and never automatically choose the newest,
+highest-support, or highest-provider-confidence claim when material facts
+conflict. A material conflict sets the resolved field state to `CONFLICT` and
+requires operator review. Operator resolution explicitly selects/confirms a
+value, increments the incident version once, appends an audit timeline event,
+and retains all historical claims.
+
+## PD-033 - Phase 06 Conservative Duplicate Fusion
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner
+
+### Decision
+
+Use deterministic prototype association parameters of 500 metres and 900
+seconds. Automatic association requires trusted coordinates, both distance and
+time gates, compatible known categories, no strong structured contradiction,
+and at least one additional deterministic contextual match. No embeddings or
+external embedding provider are introduced. Unknown categories or
+insufficient evidence produce `REQUIRES_REVIEW`; different known categories
+do not auto-associate. Incidents with committed operational state cannot be
+auto-merged.
+
+The explicit association results are `AUTO_ASSOCIATE`, `SEPARATE_INCIDENT`,
+and `REQUIRES_REVIEW`, with deterministic explanation facts exposed.
+
+## PD-034 - Phase 06 AI Fact Mutation and Activation
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner
+
+### Decision
+
+AI creates evidence claims only. It never directly mutates authoritative
+incident facts. Operator confirmation is required before projecting material
+claims, including location, casualties, severity, trapped-person state, road
+blockage, required services, hospital, or transport facts. A credible urgent
+control-room report may activate immediately through the existing manual path;
+AI, fusion, and corroboration are never activation gates.
+
+## PD-035 - Phase 06 Provider Timeout and Failure
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner
+
+### Decision
+
+Use one monotonic 30-second total processing budget per request. Structured
+output permits at most one schema-repair retry and never automatically retries
+429, 5xx, authentication, or unavailable-provider failures. The approved ASR
+chain is Groq Whisper Large v3 followed by Turbo within the same budget, then
+manual transcript fallback. No missing transcript or fact is fabricated.
+
+## PD-036 - Phase 06 Evidence Media Contract
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner
+
+### Decision
+
+Allow bounded control-room audio and image uploads: audio up to 15 MiB,
+images up to 10 MiB, with the approved MIME allowlists and no video. Raw media
+is stored outside SQLite under opaque generated media IDs/UUID filenames.
+REST responses expose only opaque references, never filesystem paths. MIME and
+size are validated before processing, and uploaded media is never committed to
+git.
+
+## PD-037 - Phase 06 Report Association and Versioning
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner
+
+### Decision
+
+Raw reports, AI claims, and raw media persistence do not increment incident
+version. A single authoritative material action increments it exactly once:
+operator fact projection, explicit report fusion association, duplicate merge,
+or conflict resolution. Any auto-association that attaches an independent
+report increments the canonical incident exactly once. Timeline history is
+append-only.
+
+## PD-038 - Phase 06 Duplicate Incident State
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner
+
+### Decision
+
+When an incident is confirmed as a duplicate, preserve every report/evidence
+item, attach relevant reports to the canonical incident, mark the redundant
+incident `DUPLICATE_MERGED`, store the canonical incident ID, and append an
+auditable link event. Do not transfer resources, plans, hospital selection,
+corridor state, or driver alerts automatically. If the redundant incident has
+committed operational state, use `REQUIRES_REVIEW` instead.
+
+### Phase 06 carry-forward
+
+The approved ASR chain is Groq Whisper Large v3, Groq Whisper Large v3 Turbo,
+then manual operator transcript. Structured extraction infrastructure is
+implemented but provider selection is not selected/default-enabled; manual
+structured intake is the required fallback. Vision remains disabled by
+default even if a benchmark candidate passes.

@@ -1,0 +1,61 @@
+{
+  "benchmark": "siren_grid_phase06_compact_text_rebenchmark",
+  "captured_at": "2026-09-08",
+  "input_set": "data/evaluation/phase06/cases.json",
+  "fixture_reality": "SYNTHETIC",
+  "scope": "bounded text-only provider comparison; no raw provider payloads stored",
+  "structured_extraction": {
+    "primary": "NOT_SELECTED",
+    "secondary": "NOT_SELECTED",
+    "default_enabled": false,
+    "providers": {
+      "qwen": {
+        "schema_success_rate": 0.25,
+        "field_match_accuracy": 0.8,
+        "unknown_null_preservation": 1.0,
+        "critical_hallucination_count": 4,
+        "average_latency_ms": 1184.6,
+        "failure_counts": {
+          "invalid_after_one_retry": 4,
+          "rate_limited": 2
+        }
+      },
+      "gpt_oss": {
+        "schema_success_rate": 0.75,
+        "field_match_accuracy": 0.839,
+        "unknown_null_preservation": 1.0,
+        "critical_hallucination_count": 0,
+        "average_latency_ms": 1951.3,
+        "failure_counts": {
+          "invalid_after_one_retry": 2
+        }
+      },
+      "gemini": {
+        "schema_success_rate": 0.0,
+        "field_match_accuracy": null,
+        "unknown_null_preservation": null,
+        "critical_hallucination_count": 0,
+        "average_latency_ms": 2020.4,
+        "failure_counts": {
+          "rate_limited": 6,
+          "provider_server_error": 2
+        }
+      }
+    }
+  },
+  "vision": {
+    "provider": "NOT_YET_BENCHMARKED",
+    "enabled": false,
+    "default_enabled": false,
+    "required_gate": {
+      "minimum_cases": 5,
+      "schema_validity": 1.0,
+      "critical_unsupported_facts": 0,
+      "identity_claims": 0,
+      "invented_casualties": 0,
+      "invented_locations": 0,
+      "diagnosis_or_injury_inference": 0
+    }
+  },
+  "decision": "Manual/operator structured intake remains the authoritative Phase 06 fallback; no provider is operationally selected."
+}
