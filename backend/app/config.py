@@ -41,6 +41,8 @@ class Settings(BaseModel):
     cors_origins: list[str] = Field(default_factory=lambda: ["*"])
     max_route_snap_distance_m: float = Field(default=1500.0)
     prototype_target_response_time_seconds: Literal[600] = 600
+    max_candidate_responders_per_cohort: Literal[5] = 5
+    max_feasible_candidate_combinations: Literal[50] = 50
     nasr_city_data_dir: Path = Field(default_factory=lambda: DEFAULT_DATA_DIR)
     tomtom_api_key: str | None = Field(default=None, exclude=True)
     tomtom_refresh_interval_seconds: Literal[60] = 60
@@ -76,6 +78,14 @@ class Settings(BaseModel):
     @property
     def PROTOTYPE_TARGET_RESPONSE_TIME_SECONDS(self) -> int:
         return self.prototype_target_response_time_seconds
+
+    @property
+    def MAX_CANDIDATE_RESPONDERS_PER_COHORT(self) -> int:
+        return self.max_candidate_responders_per_cohort
+
+    @property
+    def MAX_FEASIBLE_CANDIDATE_COMBINATIONS(self) -> int:
+        return self.max_feasible_candidate_combinations
 
     @property
     def NASR_CITY_DATA_DIR(self) -> Path:
@@ -141,6 +151,12 @@ def get_settings() -> Settings:
         ),
         prototype_target_response_time_seconds=int(
             os.getenv("PROTOTYPE_TARGET_RESPONSE_TIME_SECONDS", "600")
+        ),
+        max_candidate_responders_per_cohort=int(
+            os.getenv("MAX_CANDIDATE_RESPONDERS_PER_COHORT", "5")
+        ),
+        max_feasible_candidate_combinations=int(
+            os.getenv("MAX_FEASIBLE_CANDIDATE_COMBINATIONS", "50")
         ),
         nasr_city_data_dir=nasr_city_data_dir,
         tomtom_api_key=os.getenv("TOMTOM_API_KEY") or None,
