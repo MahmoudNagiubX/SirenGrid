@@ -739,6 +739,65 @@ def test_replacement_approval_releases_out_of_service_resource_without_reactivat
     assert saved.assigned_incident_id is None
 
 
+def test_planning_fact_correction_records_replan_trigger_after_version_increment(
+    isolated_engine: Engine,
+    db_session: Session,
+) -> None:
+    init_db(isolated_engine)
+    incident = Incident(
+        id=str(uuid.uuid4()),
+        version=4,
+        incident_type="traffic_collision",
+        severity=Severity.HIGH,
+        confidence_level=ConfidenceLevel.HIGH,
+        status=IncidentStatus.RESPONSE_ACTIVE,
+        latitude=30.05,
+        longitude=31.34,
+        current_plan_id="approved-plan",
+        required_resources_json=[{"resource_type": "AMBULANCE", "count": 1}],
+    )
+    plan = ResponsePlan(
+        id="approved-plan",
+        incident_id=incident.id,
+        incident_version=4,
+        plan_version=1,
+        status=ResponsePlanStatus.APPROVED,
+        resource_ids_json=[],
+        routes_json=[],
+        metrics_json={},
+        score_breakdown_json={},
+    )
+    db_session.add_all([incident, plan])
+    db_session.commit()
+
+    response = TestClient(app).patch(
+        f"/api/v1/incidents/{incident.id}/facts",
+        json={
+            "expected_incident_version": 4,
+            "operator_reference": "operator-fact-change",
+            "required_resources": [
+                {"resource_type": "AMBULANCE", "count": 2},
+            ],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["incident"]["version"] == 5
+    db_session.expire_all()
+    pending = db_session.scalar(
+        select(ReplanEvaluation).where(
+            ReplanEvaluation.incident_id == incident.id,
+            ReplanEvaluation.status == "PENDING",
+        )
+    )
+    assert pending is not None
+    assert pending.trigger_reasons_json == ["INCIDENT_FACT_CHANGED"]
+    assert pending.input_references_json == {
+        "changed_fields": ["required_resources"],
+        "requirements_changed": True,
+    }
+
+
 def test_replan_route_origin_uses_current_en_route_coordinate_from_active_route() -> None:
     active_plan = ResponsePlan(
         id="approved-plan",

@@ -9,7 +9,7 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models import Incident, Report, TimelineEvent
+from app.models import Incident, Report, ResponsePlan, TimelineEvent
 from app.schemas import (
     DataReality,
     FreshnessStatus,
@@ -872,6 +872,26 @@ def patch_incident_facts(
     db.add(timeline_event)
     db.commit()
     db.refresh(incident)
+
+    if downstream_inputs_dirty and incident.current_plan_id:
+        active_plan = db.get(ResponsePlan, incident.current_plan_id)
+        if active_plan is not None and getattr(active_plan.status, "value", active_plan.status) == "APPROVED":
+            # Corrections are already authoritative and versioned by this
+            # endpoint. Replanning is a separate pending evaluation and does
+            # not mutate the active approved plan.
+            from app.replanning import record_replan_trigger
+
+            record_replan_trigger(
+                db,
+                incident_id=incident.id,
+                expected_incident_version=incident.version,
+                trigger_reasons=["INCIDENT_FACT_CHANGED"],
+                input_references={
+                    "changed_fields": list(changed_fields),
+                    "requirements_changed": True,
+                },
+                now=now_utc,
+            )
 
     serialized_incident = serialize_incident(incident)
     publish_operations_event(
