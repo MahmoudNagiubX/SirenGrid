@@ -20,6 +20,7 @@ from app.coverage import (
     simulate_dispatch_impact,
 )
 from app.response_requirements import ResponseRequirement
+from app.schemas import ResourceStatus
 from app.traffic.models import TrafficSnapshot
 
 
@@ -165,6 +166,7 @@ def evaluate_candidate_combination(
     combination: CandidateCombination,
     traffic_snapshot: TrafficSnapshot | None,
     modeled_at: datetime,
+    incident_id: str | None = None,
 ) -> EvaluatedCandidate:
     """Evaluate one hypothetical combination without mutating operations state."""
     resources_tuple = tuple(resources)
@@ -178,6 +180,20 @@ def evaluate_candidate_combination(
         requirements_tuple, combination, resource_ids
     )
     coverage_resources = _coverage_resources(resources_tuple)
+    allowed_precommitted_resource_ids = {
+        resource.resource_id
+        for resource in resources_tuple
+        if (
+            incident_id is not None
+            and resource.assigned_incident_id == incident_id
+            and resource.status
+            in (
+                ResourceStatus.RESERVED,
+                ResourceStatus.ASSIGNED,
+                ResourceStatus.EN_ROUTE,
+            )
+        )
+    }
     zones_tuple = tuple(zones)
     impacts: list[DispatchImpactSimulation] = []
     for requirement in requirements_tuple:
@@ -194,6 +210,7 @@ def evaluate_candidate_combination(
                 dispatched_resource_ids=dispatched_by_requirement[requirement.cohort_key],
                 traffic_snapshot=traffic_snapshot,
                 modeled_at=modeled_at,
+                allowed_precommitted_resource_ids=allowed_precommitted_resource_ids,
             )
         )
     baseline_joint = derive_joint_coverage_snapshot(

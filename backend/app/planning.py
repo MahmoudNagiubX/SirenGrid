@@ -537,6 +537,7 @@ def evaluate_phase04_candidate_set(
             combination=combination,
             traffic_snapshot=traffic_snapshot,
             modeled_at=timestamp,
+            incident_id=planning_incident_id,
         )
         for combination in generated.combinations
     )

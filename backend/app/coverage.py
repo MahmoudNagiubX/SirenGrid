@@ -456,6 +456,7 @@ def simulate_dispatch_impact(
     dispatched_resource_ids: Iterable[str],
     traffic_snapshot: TrafficSnapshot | None,
     modeled_at: datetime,
+    allowed_precommitted_resource_ids: Iterable[str] = (),
 ) -> DispatchImpactSimulation:
     """Compare coverage before and after a purely hypothetical dispatch.
 
@@ -470,6 +471,7 @@ def simulate_dispatch_impact(
         raise ValueError("Coverage resource IDs must be unique")
     dispatched_ids = tuple(sorted(set(dispatched_resource_ids)))
     dispatched_id_set = set(dispatched_ids)
+    allowed_precommitted_ids = set(allowed_precommitted_resource_ids)
     if any(not resource_id.strip() for resource_id in dispatched_ids):
         raise ValueError("Dispatched resource IDs must be non-empty")
 
@@ -482,11 +484,21 @@ def simulate_dispatch_impact(
         modeled_at=modeled_at,
     )
     eligible_ids = set(baseline.eligible_resource_ids)
-    unknown_or_ineligible_ids = dispatched_id_set - eligible_ids
+    captured_ids = set(resource_ids)
+    unknown_or_ineligible_ids = (
+        dispatched_id_set & captured_ids
+    ) - eligible_ids - allowed_precommitted_ids
+    unknown_or_unapproved_ids = dispatched_id_set - captured_ids
     if unknown_or_ineligible_ids:
         names = ", ".join(sorted(unknown_or_ineligible_ids))
         raise ValueError(
             "Dispatched resources must be currently eligible for the coverage cohort: "
+            f"{names}"
+        )
+    if unknown_or_unapproved_ids:
+        names = ", ".join(sorted(unknown_or_unapproved_ids))
+        raise ValueError(
+            "Dispatched resources must be present in the captured coverage set: "
             f"{names}"
         )
 
