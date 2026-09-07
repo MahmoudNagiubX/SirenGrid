@@ -8,5 +8,6 @@ networkx
 shapely
 pyproj
 geopandas
+rasterio
 pytest
 ruff

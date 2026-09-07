@@ -36,6 +36,7 @@ tmp/
 
 # Local data / caches
 .cache/
+data/raw/
 *.sqlite
 *.sqlite3
 
