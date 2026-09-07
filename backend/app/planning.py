@@ -22,8 +22,18 @@ from app.candidate_generation import (
 )
 from app.candidate_persistence import persist_candidate_set
 from app.config import settings
+from app.corridor import corridor_provenance, extract_corridor_signals
 from app.coverage import load_population_zones
-from app.models import Approval, EmergencyResource, Incident, ResponsePlan, TimelineEvent
+from app.driver_alert import refresh_driver_alert
+from app.models import (
+    Approval,
+    CorridorState,
+    DriverAlert,
+    EmergencyResource,
+    Incident,
+    ResponsePlan,
+    TimelineEvent,
+)
 from app.incidents import serialize_incident
 from app.resources import interpolate_route_progress, is_planner_eligible, serialize_resource
 from app.response_requirements import (
@@ -862,6 +872,176 @@ def _acquire_write_lock(db: Session) -> None:
         db.execute(text("BEGIN IMMEDIATE"))
 
 
+def _plan_route_geometry(plan: ResponsePlan, resource_id: str) -> Any:
+    routes = plan.routes_json if isinstance(plan.routes_json, list) else []
+    route = next(
+        (
+            item
+            for item in routes
+            if isinstance(item, dict) and item.get("resource_id") == resource_id
+        ),
+        None,
+    )
+    if not isinstance(route, dict):
+        return None
+    return route.get("geometry") or route.get("route_geometry")
+
+
+def _supersede_replaced_route_state(
+    db: Session,
+    *,
+    incident: Incident,
+    previous_plan: ResponsePlan,
+    replacement_plan: ResponsePlan,
+    resources: list[EmergencyResource],
+    operator_reference: str,
+    now_utc: datetime,
+) -> None:
+    """Move route-derived state to an approved replacement route only.
+
+    The active plan is already being switched in this transaction. Existing
+    corridor and driver-alert records remain historical, while new derived
+    state is created only for resources that had a route-derived operational
+    record on the old approved plan.
+    """
+    old_corridors = db.scalars(
+        select(CorridorState).where(
+            CorridorState.incident_id == incident.id,
+            CorridorState.plan_id == previous_plan.id,
+        )
+    ).all()
+    active_alerts = db.scalars(
+        select(DriverAlert).where(
+            DriverAlert.incident_id == incident.id,
+            DriverAlert.plan_id == previous_plan.id,
+            DriverAlert.status == "ACTIVE",
+        )
+    ).all()
+    resource_by_id = {resource.id: resource for resource in resources}
+    now_iso = now_utc.isoformat()
+
+    for row in old_corridors:
+        row.provenance_json = {
+            **dict(row.provenance_json or {}),
+            "status": "SUPERSEDED",
+            "superseded_by_plan_id": replacement_plan.id,
+            "superseded_at": now_iso,
+            "operator_reference": operator_reference,
+        }
+        db.add(
+            TimelineEvent(
+                id=str(uuid.uuid4()),
+                incident_id=incident.id,
+                event_type="CORRIDOR_SUPERSEDED",
+                details_json={
+                    "corridor_id": row.id,
+                    "old_plan_id": previous_plan.id,
+                    "new_plan_id": replacement_plan.id,
+                    "operator_reference": operator_reference,
+                },
+                created_at=now_utc,
+            )
+        )
+        resource_id = row.route_reference.rsplit(":", 1)[-1]
+        replacement_route = next(
+            (
+                route
+                for route in (replacement_plan.routes_json or [])
+                if isinstance(route, dict) and route.get("resource_id") == resource_id
+            ),
+            None,
+        )
+        if not isinstance(replacement_route, dict):
+            continue
+        geometry = replacement_route.get("geometry") or replacement_route.get("route_geometry")
+        eta_seconds = replacement_route.get("eta_seconds")
+        if not isinstance(geometry, dict) or not isinstance(eta_seconds, (int, float)):
+            continue
+        signals = extract_corridor_signals(
+            geometry,
+            float(eta_seconds),
+            now_iso=now_iso,
+        )
+        new_row = CorridorState(
+            id=str(uuid.uuid4()),
+            incident_id=incident.id,
+            plan_id=replacement_plan.id,
+            route_reference=str(
+                replacement_route.get("route_id")
+                or f"{replacement_plan.id}:{resource_id}"
+            ),
+            route_geometry_json=geometry,
+            signals_json=[signal.__dict__ for signal in signals],
+            state="NORMAL",
+            safety_lead_time_seconds=settings.SIGNAL_PRIORITY_SAFETY_LEAD_TIME_SECONDS,
+            version=1,
+            data_reality=DataReality.REAL_DERIVED,
+            provenance_json={
+                **corridor_provenance(),
+                "source": "approved_replacement_response_route + OSM traffic signal asset",
+                "derived_from_plan_id": replacement_plan.id,
+                "superseded_plan_id": previous_plan.id,
+                "priority_reality": DataReality.SIMULATED.value,
+            },
+            updated_at=now_utc,
+        )
+        db.add(new_row)
+        db.add(
+            TimelineEvent(
+                id=str(uuid.uuid4()),
+                incident_id=incident.id,
+                event_type="CORRIDOR_REDERIVED",
+                details_json={
+                    "corridor_id": new_row.id,
+                    "plan_id": replacement_plan.id,
+                    "resource_id": resource_id,
+                    "data_reality": DataReality.REAL_DERIVED.value,
+                },
+                created_at=now_utc,
+            )
+        )
+
+    active_alert_resource_ids: set[str] = set()
+    for alert in active_alerts:
+        alert.status = "EXPIRED"
+        alert.provenance_json = {
+            **dict(alert.provenance_json or {}),
+            "status": "SUPERSEDED",
+            "superseded_by_plan_id": replacement_plan.id,
+            "superseded_at": now_iso,
+            "operator_reference": operator_reference,
+        }
+        active_alert_resource_ids.add(alert.resource_id)
+        db.add(
+            TimelineEvent(
+                id=str(uuid.uuid4()),
+                incident_id=incident.id,
+                event_type="DRIVER_ALERT_SUPERSEDED",
+                details_json={
+                    "driver_alert_id": alert.id,
+                    "old_plan_id": previous_plan.id,
+                    "new_plan_id": replacement_plan.id,
+                    "resource_id": alert.resource_id,
+                    "data_reality": DataReality.SIMULATED.value,
+                },
+                created_at=now_utc,
+            )
+        )
+
+    for resource_id in sorted(active_alert_resource_ids):
+        resource = resource_by_id.get(resource_id)
+        if resource is None or resource.assigned_incident_id != incident.id:
+            continue
+        refresh_driver_alert(
+            db,
+            incident=incident,
+            plan=replacement_plan,
+            resource=resource,
+            operator_reference=operator_reference,
+            now=now_utc,
+        )
+
+
 @router.post(
     "/plans/{plan_id}/approve",
     status_code=status.HTTP_200_OK,
@@ -1019,8 +1199,23 @@ def approve_response_plan(
                 ResourceStatus.ON_SCENE,
                 ResourceStatus.TRANSPORTING,
             ):
-                # Retaining an already committed responder is safe; changing or
-                # substituting it is rejected below when its assignment changes.
+                if previous_plan is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=f"Active responder '{res_id}' cannot be validated for replacement",
+                    )
+                old_geometry = _plan_route_geometry(previous_plan, res_id)
+                new_geometry = _plan_route_geometry(plan, res_id)
+                if old_geometry != new_geometry:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=(
+                            f"Cannot reroute responder '{res_id}' while in state "
+                            f"'{res.status.value}'; explicit handoff is required"
+                        ),
+                    )
+                # Retaining an already committed responder on the same route is
+                # safe; changing or substituting it is rejected.
                 resources.append(res)
                 continue
             if res.status not in (ResourceStatus.ASSIGNED, ResourceStatus.RESERVED, ResourceStatus.EN_ROUTE):
@@ -1155,6 +1350,17 @@ def approve_response_plan(
         res.assigned_incident_id = incident.id
         res.version = res.version + 1
         res.last_updated = now_utc
+
+    if pending_replacement and previous_plan is not None:
+        _supersede_replaced_route_state(
+            db,
+            incident=incident,
+            previous_plan=previous_plan,
+            replacement_plan=plan,
+            resources=resources,
+            operator_reference=payload.operator_reference,
+            now_utc=now_utc,
+        )
 
     approval = Approval(
         id=str(uuid.uuid4()),

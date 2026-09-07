@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import uuid
 
 import networkx as nx
@@ -10,7 +10,15 @@ from fastapi.testclient import TestClient
 
 from app.db import init_db
 from app.main import app
-from app.models import EmergencyResource, HospitalDestination, Incident, ReplanEvaluation, ResponsePlan
+from app.models import (
+    CorridorState,
+    DriverAlert,
+    EmergencyResource,
+    HospitalDestination,
+    Incident,
+    ReplanEvaluation,
+    ResponsePlan,
+)
 from app.replanning import merge_pending_trigger
 from app.planning import resource_coordinate_for_replan
 from app.candidate_generation import CandidateResource, _is_hard_eligible
@@ -796,6 +804,333 @@ def test_planning_fact_correction_records_replan_trigger_after_version_increment
         "changed_fields": ["required_resources"],
         "requirements_changed": True,
     }
+
+
+def test_en_route_replacement_resets_progress_on_route_from_current_coordinate(
+    isolated_engine: Engine,
+    db_session: Session,
+) -> None:
+    init_db(isolated_engine)
+    incident = Incident(
+        id=str(uuid.uuid4()),
+        version=5,
+        incident_type="traffic_collision",
+        severity=Severity.HIGH,
+        confidence_level=ConfidenceLevel.HIGH,
+        status=IncidentStatus.RESPONSE_ACTIVE,
+        latitude=30.0,
+        longitude=31.32,
+        current_plan_id="approved-plan",
+        pending_replan_plan_id="replacement-plan",
+    )
+    active = ResponsePlan(
+        id="approved-plan",
+        incident_id=incident.id,
+        incident_version=4,
+        plan_version=1,
+        status=ResponsePlanStatus.APPROVED,
+        resource_ids_json=["resource-a"],
+        routes_json=[
+            {
+                "resource_id": "resource-a",
+                "geometry": {
+                    "type": "LineString",
+                    "coordinates": [[31.30, 30.0], [31.31, 30.0]],
+                },
+            }
+        ],
+        metrics_json={},
+        score_breakdown_json={},
+    )
+    replacement = ResponsePlan(
+        id="replacement-plan",
+        incident_id=incident.id,
+        incident_version=5,
+        plan_version=2,
+        status=ResponsePlanStatus.RECOMMENDED,
+        resource_ids_json=["resource-a"],
+        routes_json=[
+            {
+                "resource_id": "resource-a",
+                "origin": {"lat": 30.0, "lon": 31.305},
+                "geometry": {
+                    "type": "LineString",
+                    "coordinates": [[31.305, 30.0], [31.32, 30.0]],
+                },
+            }
+        ],
+        metrics_json={"replan": {"active_plan_id": active.id}},
+        score_breakdown_json={},
+    )
+    resource = EmergencyResource(
+        id="resource-a",
+        version=3,
+        name="En-route ambulance",
+        resource_type=ResourceType.AMBULANCE,
+        capability_tags_json=[],
+        status=ResourceStatus.EN_ROUTE,
+        latitude=30.0,
+        longitude=31.305,
+        assigned_incident_id=incident.id,
+        provenance_json={
+            "movement": {
+                "incident_id": incident.id,
+                "plan_id": active.id,
+                "route_id": f"{active.id}:resource-a",
+                "route_progress": 0.5,
+            }
+        },
+    )
+    db_session.add_all([incident, active, replacement, resource])
+    db_session.commit()
+
+    response = TestClient(app).post(
+        "/api/v1/plans/replacement-plan/approve",
+        json={
+            "expected_incident_version": 5,
+            "expected_plan_version": 2,
+            "operator_reference": "operator-reroute",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    db_session.expire_all()
+    saved = db_session.get(EmergencyResource, resource.id)
+    assert saved is not None
+    assert saved.status is ResourceStatus.EN_ROUTE
+    assert saved.latitude == 30.0
+    assert saved.longitude == 31.305
+    movement = (saved.provenance_json or {}).get("movement")
+    assert movement is not None
+    assert movement["plan_id"] == replacement.id
+    assert movement["route_progress"] == 0.0
+    assert movement["previous_route"]["plan_id"] == active.id
+    assert movement["route_geometry"]["coordinates"][0] == [31.305, 30.0]
+
+
+def test_on_scene_replacement_route_change_requires_review(
+    isolated_engine: Engine,
+    db_session: Session,
+) -> None:
+    init_db(isolated_engine)
+    incident = Incident(
+        id=str(uuid.uuid4()),
+        version=5,
+        incident_type="traffic_collision",
+        severity=Severity.HIGH,
+        confidence_level=ConfidenceLevel.HIGH,
+        status=IncidentStatus.RESPONSE_ACTIVE,
+        latitude=30.0,
+        longitude=31.32,
+        current_plan_id="approved-plan",
+        pending_replan_plan_id="replacement-plan",
+    )
+    active = ResponsePlan(
+        id="approved-plan",
+        incident_id=incident.id,
+        incident_version=4,
+        plan_version=1,
+        status=ResponsePlanStatus.APPROVED,
+        resource_ids_json=["resource-a"],
+        routes_json=[
+            {
+                "resource_id": "resource-a",
+                "geometry": {
+                    "type": "LineString",
+                    "coordinates": [[31.30, 30.0], [31.31, 30.0]],
+                },
+            }
+        ],
+        metrics_json={},
+        score_breakdown_json={},
+    )
+    replacement = ResponsePlan(
+        id="replacement-plan",
+        incident_id=incident.id,
+        incident_version=5,
+        plan_version=2,
+        status=ResponsePlanStatus.RECOMMENDED,
+        resource_ids_json=["resource-a"],
+        routes_json=[
+            {
+                "resource_id": "resource-a",
+                "geometry": {
+                    "type": "LineString",
+                    "coordinates": [[31.305, 30.0], [31.32, 30.0]],
+                },
+            }
+        ],
+        metrics_json={"replan": {"active_plan_id": active.id}},
+        score_breakdown_json={},
+    )
+    resource = EmergencyResource(
+        id="resource-a",
+        version=3,
+        name="On-scene ambulance",
+        resource_type=ResourceType.AMBULANCE,
+        capability_tags_json=[],
+        status=ResourceStatus.ON_SCENE,
+        latitude=30.0,
+        longitude=31.305,
+        assigned_incident_id=incident.id,
+        provenance_json={},
+    )
+    db_session.add_all([incident, active, replacement, resource])
+    db_session.commit()
+
+    response = TestClient(app).post(
+        "/api/v1/plans/replacement-plan/approve",
+        json={
+            "expected_incident_version": 5,
+            "expected_plan_version": 2,
+            "operator_reference": "operator-on-scene",
+        },
+    )
+
+    assert response.status_code == 409
+    db_session.expire_all()
+    saved_incident = db_session.get(Incident, incident.id)
+    saved_plan = db_session.get(ResponsePlan, replacement.id)
+    saved_resource = db_session.get(EmergencyResource, resource.id)
+    assert saved_incident is not None
+    assert saved_plan is not None
+    assert saved_resource is not None
+    assert saved_incident.current_plan_id == active.id
+    assert saved_incident.pending_replan_plan_id == replacement.id
+    assert saved_plan.status is ResponsePlanStatus.RECOMMENDED
+    assert saved_resource.status is ResourceStatus.ON_SCENE
+
+
+def test_replacement_approval_supersedes_old_route_derived_state(
+    isolated_engine: Engine,
+    db_session: Session,
+) -> None:
+    init_db(isolated_engine)
+    incident = Incident(
+        id=str(uuid.uuid4()),
+        version=5,
+        incident_type="traffic_collision",
+        severity=Severity.HIGH,
+        confidence_level=ConfidenceLevel.HIGH,
+        status=IncidentStatus.RESPONSE_ACTIVE,
+        latitude=30.0,
+        longitude=31.32,
+        current_plan_id="approved-plan",
+        pending_replan_plan_id="replacement-plan",
+    )
+    old_geometry = {
+        "type": "LineString",
+        "coordinates": [[31.30, 30.0], [31.31, 30.0]],
+    }
+    new_geometry = {
+        "type": "LineString",
+        "coordinates": [[31.305, 30.0], [31.32, 30.0]],
+    }
+    active = ResponsePlan(
+        id="approved-plan",
+        incident_id=incident.id,
+        incident_version=4,
+        plan_version=1,
+        status=ResponsePlanStatus.APPROVED,
+        resource_ids_json=["resource-a"],
+        routes_json=[{"resource_id": "resource-a", "geometry": old_geometry}],
+        metrics_json={},
+        score_breakdown_json={},
+    )
+    replacement = ResponsePlan(
+        id="replacement-plan",
+        incident_id=incident.id,
+        incident_version=5,
+        plan_version=2,
+        status=ResponsePlanStatus.RECOMMENDED,
+        resource_ids_json=["resource-a"],
+        routes_json=[
+            {
+                "resource_id": "resource-a",
+                "geometry": new_geometry,
+                "eta_seconds": 180.0,
+            }
+        ],
+        metrics_json={"replan": {"active_plan_id": active.id}},
+        score_breakdown_json={},
+    )
+    resource = EmergencyResource(
+        id="resource-a",
+        version=3,
+        name="En-route ambulance",
+        resource_type=ResourceType.AMBULANCE,
+        capability_tags_json=[],
+        status=ResourceStatus.EN_ROUTE,
+        latitude=30.0,
+        longitude=31.305,
+        assigned_incident_id=incident.id,
+        provenance_json={
+            "movement": {
+                "incident_id": incident.id,
+                "plan_id": active.id,
+                "route_id": f"{active.id}:resource-a",
+                "route_progress": 0.5,
+            }
+        },
+    )
+    old_corridor = CorridorState(
+        id="corridor-old",
+        incident_id=incident.id,
+        plan_id=active.id,
+        route_reference=f"{active.id}:resource-a",
+        route_geometry_json=old_geometry,
+        signals_json=[],
+        state="PRIORITY_ACTIVE",
+        safety_lead_time_seconds=30,
+        version=1,
+        data_reality=DataReality.REAL_DERIVED,
+        provenance_json={"source": "test"},
+    )
+    old_alert = DriverAlert(
+        id="alert-old",
+        incident_id=incident.id,
+        plan_id=active.id,
+        resource_id=resource.id,
+        route_reference=f"{active.id}:resource-a",
+        route_progress=0.5,
+        geometry_json={"type": "Polygon", "coordinates": []},
+        created_at=datetime.now(timezone.utc),
+        expires_at=datetime.now(timezone.utc) + timedelta(seconds=120),
+        status="ACTIVE",
+        version=1,
+        data_reality=DataReality.SIMULATED,
+        provenance_json={"data_reality": DataReality.SIMULATED.value},
+    )
+    db_session.add_all([incident, active, replacement, resource, old_corridor, old_alert])
+    db_session.commit()
+
+    response = TestClient(app).post(
+        "/api/v1/plans/replacement-plan/approve",
+        json={
+            "expected_incident_version": 5,
+            "expected_plan_version": 2,
+            "operator_reference": "operator-derived-state",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    db_session.expire_all()
+    saved_corridor = db_session.get(CorridorState, old_corridor.id)
+    saved_alert = db_session.get(DriverAlert, old_alert.id)
+    new_corridor = db_session.scalar(
+        select(CorridorState).where(CorridorState.plan_id == replacement.id)
+    )
+    new_alert = db_session.scalar(
+        select(DriverAlert).where(DriverAlert.plan_id == replacement.id)
+    )
+    assert saved_corridor is not None
+    assert saved_alert is not None
+    assert saved_corridor.provenance_json["status"] == "SUPERSEDED"
+    assert saved_corridor.provenance_json["superseded_by_plan_id"] == replacement.id
+    assert saved_alert.status == "EXPIRED"
+    assert new_corridor is not None
+    assert new_alert is not None
+    assert new_alert.route_progress == 0.0
 
 
 def test_replan_route_origin_uses_current_en_route_coordinate_from_active_route() -> None:
