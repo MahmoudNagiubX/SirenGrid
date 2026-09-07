@@ -615,3 +615,121 @@ then manual operator transcript. Structured extraction infrastructure is
 implemented but provider selection is not selected/default-enabled; manual
 structured intake is the required fallback. Vision remains disabled by
 default even if a benchmark candidate passes.
+
+## PD-039 - Phase 07 Active and Pending Plans
+
+**Date:** 2026-09-08  
+**Status:** Approved  
+**Owner:** Project owner
+
+After an approved response plan exists, `Incident.current_plan_id` remains the
+active approved operational plan. A separate pending-replan pointer identifies
+the current replacement recommendation. The old approved plan remains active
+while the replacement awaits approval. Replacement approval atomically switches
+the active pointer, clears the pending pointer, and preserves the old plan's
+history.
+
+## PD-040 - Phase 07 Replan Materiality V1
+
+**Date:** 2026-09-08  
+**Status:** Approved  
+**Owner:** Project owner
+
+Policy version: `SIRENGRID_REPLAN_MATERIALITY_V1`. Confirmed active-route
+closures, unreachable routes, required responder unavailability or conflict,
+material requirement changes, unavailable/unreachable selected hospitals, and
+multi-incident loss of a required resource are always material. Unknown state
+alone is not material. ETA deterioration is material when the increase is at
+least 60 seconds or 15 percent. Improvements alone are not material. Route
+edge overlap below 0.80 is material; exactly 0.80 is not, unless an active
+route closure applies. Coverage is material when a previously jointly covered
+zone becomes undercovered or joint coverage drops by at least 0.05. These are
+prototype safety parameters, not emergency-service standards.
+
+## PD-041 - Phase 07 Freshness Outside TomTom
+
+**Date:** 2026-09-08  
+**Status:** Approved  
+**Owner:** Project owner
+
+TomTom retains the Phase 02 60/120-second policy. Other inputs use provider
+freshness where available and preserve explicit update timestamps. Inputs with
+no approved TTL, including simulated resource GPS, hospital state, evidence,
+corridor, and driver-alert state, remain visibly `UNKNOWN`; unknown freshness
+alone never triggers replanning.
+
+## PD-042 - Phase 07 Trigger Coalescing
+
+**Date:** 2026-09-08  
+**Status:** Approved  
+**Owner:** Project owner
+
+Use a five-second per-incident debounce window. Qualifying events merge pending
+replan reasons and retain the latest coherent input references. No scheduler,
+polling loop, or background worker is introduced. An explicit evaluation/flush
+operation is always available. A deterministic repeat of the same active-plan
+inputs and trigger facts is idempotent and creates no new plan version.
+
+## PD-043 - Old Plan While Replacement Waits
+
+**Date:** 2026-09-08  
+**Status:** Approved  
+**Owner:** Project owner
+
+The old approved plan remains fully operational while a replacement is pending.
+Recommendation-time evaluation never mutates assignments, positions,
+route-progress, approved route, hospital, pre-alert, corridor, or driver-alert
+state.
+
+## PD-044 - Active Responder Replacement
+
+**Date:** 2026-09-08  
+**Status:** Approved  
+**Owner:** Project owner
+
+Reserved/assigned resources may be released and replaced atomically at
+replacement approval when availability, version, and locking checks pass.
+`EN_ROUTE`, `ON_SCENE`, and `TRANSPORTING` responders are not silently
+substituted. An `EN_ROUTE` responder may retain the same physical resource and
+receive an approved replacement route calculated from its current modeled
+coordinate; the new route starts at progress `0.0`, with old route history
+preserved. `ON_SCENE` responders are not generically rerouted and transporting
+responders follow hospital-specific rules.
+
+## PD-045 - Phase 07 Hospital Invalidation
+
+**Date:** 2026-09-08  
+**Status:** Approved  
+**Owner:** Project owner
+
+A confirmed selected-hospital `NOT_ACCEPTING` or unreachable state invalidates
+the destination, preserves old pre-alert history, generates new options, and
+requires explicit operator selection. No automatic redirect occurs. A new
+simulated pre-alert requires approval of the new destination. Unknown state
+does not trigger this exception.
+
+## PD-046 - Phase 07 Pending Sets and Concurrency
+
+**Date:** 2026-09-08  
+**Status:** Approved  
+**Owner:** Project owner
+
+Only one pending replacement candidate set may exist per incident and active
+approved plan. Raw trigger recording and no-material-change evaluation do not
+increment incident version. Creating or superseding a pending set increments
+it exactly once; replacement approval increments it exactly once through the
+existing approval transaction. SQLite `BEGIN IMMEDIATE` serializes writers;
+stale competing evaluations return `409`, while identical deterministic
+repeats return `200` idempotent/no-op.
+
+## PD-047 - Phase 07 Multi-Incident Contention
+
+**Date:** 2026-09-08  
+**Status:** Approved  
+**Owner:** Project owner
+
+Committed resources are never preempted or stolen. New incidents plan only
+against remaining resources and fail visibly/require review when insufficient.
+New commitments may invalidate an unapproved pending recommendation, but never
+silently alter an approved assignment. No global optimizer or priority doctrine
+is introduced.
