@@ -57,7 +57,7 @@ def get_incident_operational_state(
             .where(
                 HospitalDestination.incident_id == incident.id,
                 HospitalDestination.plan_id == plan.id,
-                HospitalDestination.status == "SELECTED",
+                HospitalDestination.status.in_(("SELECTED", "INVALIDATED")),
             )
             .order_by(HospitalDestination.selected_at.desc(), HospitalDestination.id.desc())
         ).first()

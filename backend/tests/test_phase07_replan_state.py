@@ -656,7 +656,10 @@ def test_selected_hospital_not_accepting_records_replan_trigger(
             ReplanEvaluation.status == "PENDING",
         )
     )
+    saved_destination = db_session.get(HospitalDestination, destination.id)
     assert pending is not None
+    assert saved_destination is not None
+    assert saved_destination.status == "INVALIDATED"
     assert pending.trigger_reasons_json == ["HOSPITAL_STATE_CHANGED"]
     assert pending.input_references_json == {
         "hospital_id": "osm:('node', 443368255)",

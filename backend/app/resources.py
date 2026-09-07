@@ -494,7 +494,16 @@ def patch_resource_state(
         raise
 
     db.refresh(resource)
-    if incident is not None and target_status == ResourceStatus.OUT_OF_SERVICE:
+    active_plan = None
+    if incident is not None and incident.current_plan_id:
+        active_plan = db.get(ResponsePlan, incident.current_plan_id)
+    if (
+        incident is not None
+        and target_status == ResourceStatus.OUT_OF_SERVICE
+        and active_plan is not None
+        and active_plan.status == ResponsePlanStatus.APPROVED
+        and resource.id in (active_plan.resource_ids_json or [])
+    ):
         # Import locally to keep the resource/planning module dependency graph
         # acyclic while recording the post-commit domain trigger.
         from app.replanning import record_replan_trigger
