@@ -37,8 +37,12 @@ from app.models import (
     ResponsePlan,
     TimelineEvent,
 )
-from app.incidents import ensure_incident_actionable, serialize_incident
-from app.resources import interpolate_route_progress, is_planner_eligible, serialize_resource
+from app.incidents import (
+    ensure_incident_actionable,
+    ensure_incident_located,
+    serialize_incident,
+)
+from app.resources import interpolate_route_progress, serialize_resource
 from app.response_requirements import (
     ResponseRequirement,
     ResponseRequirementsUnavailableError,
@@ -47,10 +51,6 @@ from app.response_requirements import (
 from app.traffic.runtime import traffic_runtime
 from app.websocket import publish_operations_event
 from app.routing import (
-    RouteNotFoundError,
-    RouteResult,
-    RoutingPointOutsideGraphError,
-    compute_route_on_graph,
     load_routing_graph,
 )
 from app.schemas import (
@@ -184,6 +184,7 @@ def generate_canonical_candidate_set(
             detail=f"Incident '{incident_id}' not found",
         )
     ensure_incident_actionable(incident, "generate response plans")
+    ensure_incident_located(incident, "generate response plans")
     if incident.current_plan_id:
         active_plan = db.get(ResponsePlan, incident.current_plan_id)
         if active_plan is not None and active_plan.status == ResponsePlanStatus.APPROVED:

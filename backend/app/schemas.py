@@ -240,7 +240,8 @@ class ManualIncidentCreate(BaseModel):
     incident_type: str
     severity: Severity
     confidence_level: ConfidenceLevel = ConfidenceLevel.HIGH
-    location: Coordinate
+    # Exact coordinates may be unresolved during immediate activation.
+    location: Coordinate | None = None
     location_text: str | None = None
     casualty_count: int | None = Field(default=None, ge=0)
     casualty_range: str | None = None
@@ -305,9 +306,9 @@ class IncidentRead(BaseModel):
     incident_type: str
     severity: Severity
     confidence_level: ConfidenceLevel
-    location: Coordinate
-    latitude: float
-    longitude: float
+    location: Coordinate | None = None
+    latitude: float | None = None
+    longitude: float | None = None
     location_text: str | None = None
     casualty_count: int | None = None
     casualty_range: str | None = None

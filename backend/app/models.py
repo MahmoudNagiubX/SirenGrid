@@ -76,8 +76,10 @@ class Incident(Base):
             values_callable=lambda obj: [e.value for e in obj],
         )
     )
-    latitude: Mapped[float] = mapped_column(Float)
-    longitude: Mapped[float] = mapped_column(Float)
+    # A credible incident may be activated before its exact location is
+    # confirmed. NULL is the only unresolved-location representation.
+    latitude: Mapped[float | None] = mapped_column(Float, nullable=True, default=None)
+    longitude: Mapped[float | None] = mapped_column(Float, nullable=True, default=None)
     location_text: Mapped[str | None] = mapped_column(
         String,
         nullable=True,

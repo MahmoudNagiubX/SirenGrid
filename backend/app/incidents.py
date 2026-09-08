@@ -49,6 +49,8 @@ __all__ = [
     "NON_ACTIONABLE_INCIDENT_STATUSES",
     "is_incident_actionable",
     "ensure_incident_actionable",
+    "ensure_incident_located",
+    "committed_response_blockers",
     "LOCKED_FORWARD_TRANSITIONS",
     "PLANNING_INPUT_FACT_FIELDS",
 ]
@@ -105,10 +107,11 @@ def serialize_incident(incident: Incident) -> dict[str, Any]:
         "incident_type": incident.incident_type,
         "severity": severity_str,
         "confidence_level": confidence_str,
-        "location": {
-            "lat": incident.latitude,
-            "lon": incident.longitude,
-        },
+        "location": (
+            {"lat": incident.latitude, "lon": incident.longitude}
+            if incident.latitude is not None and incident.longitude is not None
+            else None
+        ),
         "latitude": incident.latitude,
         "longitude": incident.longitude,
         "location_text": incident.location_text,
@@ -204,6 +207,19 @@ def committed_response_blockers(db: Session, incident: Incident) -> list[str]:
         if resource.status in COMMITTED_RESOURCE_STATUSES:
             blockers.append(f"resource '{resource.id}' is {resource_status}")
     return blockers
+
+
+def ensure_incident_located(incident: Incident, action: str) -> None:
+    """Reject coordinate-dependent work while an incident location is unknown."""
+    if incident.latitude is not None and incident.longitude is not None:
+        return
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail=(
+            f"INCIDENT_LOCATION_REQUIRED: cannot {action} until the incident "
+            "location is confirmed by an operator correction"
+        ),
+    )
 
 
 def _acquire_write_lock(db: Session) -> None:
@@ -313,6 +329,7 @@ def create_manual_incident(
         "data_reality": DataReality.SIMULATED.value,
         "freshness_status": FreshnessStatus.FRESH.value,
         "last_updated": now_utc.isoformat(),
+        "location_resolved": payload.location is not None,
         "source_reference": payload.operator_reference,
     }
 
@@ -324,8 +341,8 @@ def create_manual_incident(
         severity=payload.severity,
         confidence_level=payload.confidence_level,
         status=IncidentStatus.ACTIVE_UNCONFIRMED,
-        latitude=payload.location.lat,
-        longitude=payload.location.lon,
+        latitude=payload.location.lat if payload.location else None,
+        longitude=payload.location.lon if payload.location else None,
         location_text=payload.location_text,
         casualty_count=payload.casualty_count,
         casualty_range=payload.casualty_range,
@@ -349,6 +366,7 @@ def create_manual_incident(
             "operator_reference": payload.operator_reference,
             "status": IncidentStatus.ACTIVE_UNCONFIRMED.value,
             "source": "operator_manual_entry",
+            "location_resolved": payload.location is not None,
         },
         created_at=now_utc,
     )
@@ -898,9 +916,19 @@ def patch_incident_facts(
                 old_values[field] = old_val
                 new_values[field] = new_val
         elif field == "location":
-            old_val = {"lat": incident.latitude, "lon": incident.longitude}
+            has_old_location = (
+                incident.latitude is not None and incident.longitude is not None
+            )
+            old_val = (
+                {"lat": incident.latitude, "lon": incident.longitude}
+                if has_old_location
+                else None
+            )
             new_val = {"lat": payload.location.lat, "lon": payload.location.lon}
-            if abs(incident.latitude - payload.location.lat) > 1e-7 or abs(incident.longitude - payload.location.lon) > 1e-7:
+            if not has_old_location or (
+                abs(incident.latitude - payload.location.lat) > 1e-7
+                or abs(incident.longitude - payload.location.lon) > 1e-7
+            ):
                 changed_fields.append(field)
                 old_values[field] = old_val
                 new_values[field] = new_val
