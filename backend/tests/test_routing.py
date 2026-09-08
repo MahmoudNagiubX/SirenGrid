@@ -346,3 +346,117 @@ def test_graph_fingerprint_is_memoized_without_serving_a_stale_hash() -> None:
     twin.add_edge("b", "c", key="0", length=100.0, travel_time=10.0)
     assert graph_fingerprint(twin) == with_edge
     clear_graph_fingerprint_cache()
+
+
+def test_snap_coordinate_to_graph_memoizes_repeated_calls() -> None:
+    """Repeated calls with same graph and coordinate return identical results and use cache."""
+    clear_routing_graph_cache()
+    from app.routing import _GRAPH_SNAP_CACHE
+
+    graph = nx.MultiDiGraph()
+    graph.add_node("A", x=31.300, y=30.000)
+    coord = Coordinate(lat=30.000, lon=31.300)
+
+    first_node, first_dist = snap_coordinate_to_graph(graph, coord, max_distance_m=500.0)
+    assert first_node == "A"
+    assert first_dist == pytest.approx(0.0)
+
+    # Check that cache has been populated for this graph
+    cache_key = (float(coord.lat), float(coord.lon), 500.0)
+    assert graph in _GRAPH_SNAP_CACHE
+    assert _GRAPH_SNAP_CACHE[graph][cache_key] == (first_node, first_dist)
+
+    # Second call returns identical result
+    second_node, second_dist = snap_coordinate_to_graph(graph, coord, max_distance_m=500.0)
+    assert second_node == first_node
+    assert second_dist == first_dist
+    clear_routing_graph_cache()
+
+
+def test_snap_coordinate_cache_key_includes_max_distance() -> None:
+    """Cache key includes max_distance_m so permissive snaps don't leak into strict ones."""
+    clear_routing_graph_cache()
+    graph = nx.MultiDiGraph()
+    graph.add_node("A", x=31.300, y=30.000)
+    # Coordinate ~111m away
+    coord = Coordinate(lat=30.001, lon=31.300)
+
+    node, dist = snap_coordinate_to_graph(graph, coord, max_distance_m=500.0)
+    assert node == "A"
+    assert dist > 10.0
+
+    # A subsequent call with a tighter threshold that dist exceeds MUST raise
+    with pytest.raises(RoutingPointOutsideGraphError, match="exceeding max snap distance"):
+        snap_coordinate_to_graph(graph, coord, max_distance_m=10.0)
+    clear_routing_graph_cache()
+
+
+def test_snap_coordinate_cache_isolated_per_graph_instance() -> None:
+    """Two different graph objects cannot share a snap result."""
+    clear_routing_graph_cache()
+    from app.routing import _GRAPH_SNAP_CACHE
+
+    g1 = nx.MultiDiGraph()
+    g1.add_node("N1", x=31.300, y=30.000)
+
+    g2 = nx.MultiDiGraph()
+    g2.add_node("N2", x=31.300, y=30.000)
+
+    coord = Coordinate(lat=30.000, lon=31.300)
+
+    node1, _ = snap_coordinate_to_graph(g1, coord, max_distance_m=500.0)
+    assert node1 == "N1"
+
+    node2, _ = snap_coordinate_to_graph(g2, coord, max_distance_m=500.0)
+    assert node2 == "N2"
+
+    assert g1 in _GRAPH_SNAP_CACHE
+    assert g2 in _GRAPH_SNAP_CACHE
+    assert _GRAPH_SNAP_CACHE[g1] != _GRAPH_SNAP_CACHE[g2]
+    clear_routing_graph_cache()
+
+
+def test_clear_routing_graph_cache_drops_snap_cache() -> None:
+    """Explicit cache clear removes cached snaps."""
+    clear_routing_graph_cache()
+    from app.routing import _GRAPH_SNAP_CACHE
+
+    graph = nx.MultiDiGraph()
+    graph.add_node("A", x=31.300, y=30.000)
+    coord = Coordinate(lat=30.000, lon=31.300)
+
+    snap_coordinate_to_graph(graph, coord, max_distance_m=500.0)
+    assert graph in _GRAPH_SNAP_CACHE
+    assert len(_GRAPH_SNAP_CACHE[graph]) > 0
+
+    clear_routing_graph_cache()
+    assert graph not in _GRAPH_SNAP_CACHE
+    assert len(_GRAPH_SNAP_CACHE) == 0
+
+
+def test_same_node_route_remains_zero_distance_and_valid_with_snap_cache() -> None:
+    """Same-node route remains zero-distance/zero-ETA and valid with coordinate snapping."""
+    clear_routing_graph_cache()
+    graph = nx.MultiDiGraph()
+    graph.add_node("A", x=31.300, y=30.000)
+    graph.add_node("B", x=31.310, y=30.010)
+    graph.add_edge("A", "B", key="0", length=1000.0, travel_time=60.0)
+
+    # Both coords snap to node "A"
+    origin = Coordinate(lat=30.00001, lon=31.30001)
+    destination = Coordinate(lat=30.00002, lon=31.30002)
+
+    result = compute_route_on_graph(graph, origin, destination)
+    assert result.nodes == ["A"]
+    assert result.distance_m == 0.0
+    assert result.eta_seconds == 0.0
+    assert result.geometry["type"] == "LineString"
+    assert len(result.geometry["coordinates"]) == 2
+    assert result.geometry["coordinates"][0] == result.geometry["coordinates"][1]
+
+    # Repeat call exercises cached coordinate snaps
+    repeat_result = compute_route_on_graph(graph, origin, destination)
+    assert repeat_result.nodes == ["A"]
+    assert repeat_result.distance_m == 0.0
+    assert repeat_result.eta_seconds == 0.0
+    clear_routing_graph_cache()

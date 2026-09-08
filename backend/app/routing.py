@@ -3,7 +3,9 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from pathlib import Path
+from threading import RLock
 from typing import Any, Callable
+from weakref import WeakKeyDictionary
 
 import networkx as nx
 from pydantic import BaseModel, Field
@@ -21,6 +23,7 @@ __all__ = [
     "SingleSourceTravelTimes",
     "haversine_distance_m",
     "load_routing_graph",
+    "clear_routing_graph_cache",
     "snap_coordinate_to_graph",
     "compute_route_on_graph",
     "compute_traffic_aware_route",
@@ -207,12 +210,18 @@ def _edge_travel_time_weight(u: Any, v: Any, edge_data: Any) -> float:
     return float("inf")
 
 
+_GRAPH_CACHE_LOCK = RLock()
 _GRAPH_CACHE: dict[str, tuple[int, int, nx.MultiDiGraph]] = {}
+_GRAPH_SNAP_CACHE: WeakKeyDictionary[
+    nx.Graph, dict[tuple[float, float, float], tuple[Any, float]]
+] = WeakKeyDictionary()
 
 
 def clear_routing_graph_cache() -> None:
-    """Drop the cached graph. Intended for tests and asset refreshes."""
-    _GRAPH_CACHE.clear()
+    """Drop the cached graph and coordinate snaps. Intended for tests and asset refreshes."""
+    with _GRAPH_CACHE_LOCK:
+        _GRAPH_CACHE.clear()
+        _GRAPH_SNAP_CACHE.clear()
 
 
 def load_routing_graph(graph_path: Path | str | None = None) -> nx.MultiDiGraph:
@@ -237,14 +246,21 @@ def load_routing_graph(graph_path: Path | str | None = None) -> nx.MultiDiGraph:
 
     stats = target_path.stat()
     cache_key = str(target_path.resolve())
-    cached = _GRAPH_CACHE.get(cache_key)
-    if cached is not None:
-        mtime_ns, size, graph = cached
-        if mtime_ns == stats.st_mtime_ns and size == stats.st_size:
-            return graph
+    with _GRAPH_CACHE_LOCK:
+        cached = _GRAPH_CACHE.get(cache_key)
+        if cached is not None:
+            mtime_ns, size, graph = cached
+            if mtime_ns == stats.st_mtime_ns and size == stats.st_size:
+                return graph
 
     graph = nx.read_graphml(target_path)
-    _GRAPH_CACHE[cache_key] = (stats.st_mtime_ns, stats.st_size, graph)
+    refreshed_stats = target_path.stat()
+    with _GRAPH_CACHE_LOCK:
+        _GRAPH_CACHE[cache_key] = (
+            refreshed_stats.st_mtime_ns,
+            refreshed_stats.st_size,
+            graph,
+        )
     return graph
 
 
@@ -257,6 +273,12 @@ def snap_coordinate_to_graph(
 
     Rejects points farther than max_distance_m with RoutingPointOutsideGraphError.
     """
+    cache_key = (float(coordinate.lat), float(coordinate.lon), float(max_distance_m))
+    with _GRAPH_CACHE_LOCK:
+        cached = _GRAPH_SNAP_CACHE.setdefault(graph, {}).get(cache_key)
+    if cached is not None:
+        return cached
+
     if graph.number_of_nodes() == 0:
         raise RoutingPointOutsideGraphError("Routing graph contains no nodes")
 
@@ -288,7 +310,10 @@ def snap_coordinate_to_graph(
             f"exceeding max snap distance {max_distance_m:.1f}m"
         )
 
-    return best_node, min_dist
+    result = (best_node, min_dist)
+    with _GRAPH_CACHE_LOCK:
+        _GRAPH_SNAP_CACHE.setdefault(graph, {})[cache_key] = result
+    return result
 
 
 def _edge_key(u: Any, v: Any, key: Any) -> EdgeKey:
