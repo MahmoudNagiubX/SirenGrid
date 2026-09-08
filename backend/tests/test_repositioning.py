@@ -509,3 +509,45 @@ def test_reposition_proposal_selection_uses_eta_then_distance_then_ids() -> None
 
 def test_reposition_proposal_selection_returns_none_for_no_valid_proposals() -> None:
     assert select_reposition_proposal(()) is None
+
+
+def test_repositioning_route_to_staging_requests_skip_route_alternatives(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reposition route calculation requests include_alternatives=False."""
+    from app import repositioning
+
+    called_kwargs: list[dict[str, object]] = []
+    original_compute = repositioning.compute_traffic_aware_route
+
+    def spy_compute(*args: object, **kwargs: object):
+        called_kwargs.append(kwargs)
+        return original_compute(*args, **kwargs)
+
+    monkeypatch.setattr(repositioning, "compute_traffic_aware_route", spy_compute)
+
+    graph = nx.MultiDiGraph()
+    graph.add_node("r1", x=31.300, y=30.000)
+    graph.add_node("s1", x=31.305, y=30.005)
+    graph.add_edge("r1", "s1", key="0", length=100.0, travel_time=10.0, base_travel_time_s=10.0)
+
+    res = CandidateResource(
+        resource_id="amb-1",
+        resource_type=ResourceType.AMBULANCE,
+        capability_tags=(),
+        status=ResourceStatus.AVAILABLE,
+        assigned_incident_id=None,
+        coordinate=Coordinate(lat=30.000, lon=31.300),
+        data_reality=DataReality.SIMULATED,
+        source="phase03_simulated_resource",
+    )
+    stg = CoverageZone(
+        zone_id="zone-1",
+        centroid=Coordinate(lat=30.005, lon=31.305),
+        population=100.0,
+        geometry={"type": "Polygon", "coordinates": []},
+    )
+
+    repositioning._route_to_staging(graph, res, stg, None)
+    assert len(called_kwargs) == 1
+    assert called_kwargs[0].get("include_alternatives") is False

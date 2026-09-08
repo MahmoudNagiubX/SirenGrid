@@ -188,6 +188,7 @@ def _route_to_staging(
             resource.coordinate,
             staging_zone.centroid,
             traffic_snapshot,
+            include_alternatives=False,
         )
     except (RouteNotFoundError, RoutingPointOutsideGraphError, ValueError):
         return None

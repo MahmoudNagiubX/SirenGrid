@@ -157,6 +157,7 @@ def generate_candidate_combinations(
                         resource.coordinate,
                         incident_coordinate,
                         traffic_snapshot,
+                        include_alternatives=False,
                     )
                 except (RouteNotFoundError, RoutingPointOutsideGraphError, ValueError):
                     route = None

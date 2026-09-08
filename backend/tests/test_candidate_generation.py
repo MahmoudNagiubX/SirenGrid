@@ -83,6 +83,7 @@ def test_candidate_generation_applies_hard_constraints_top_five_and_deterministi
         origin: Coordinate,
         _destination: Coordinate,
         _snapshot: object,
+        **_kwargs: object,
     ) -> TrafficAwareRouteResult:
         route_key = round((origin.lat - 30.0) * 10_000)
         if route_key == 99:
@@ -162,3 +163,50 @@ def test_candidate_generation_applies_hard_constraints_top_five_and_deterministi
         combo.resource_ids for combo in reversed_result.combinations
     ]
     assert resources == original_resources
+
+
+def test_candidate_generation_requests_skip_route_alternatives(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Candidate generation must request include_alternatives=False."""
+    from app import candidate_generation
+
+    called_kwargs: list[dict[str, object]] = []
+    original_compute = candidate_generation.compute_traffic_aware_route
+
+    def spy_compute(*args: object, **kwargs: object):
+        called_kwargs.append(kwargs)
+        return original_compute(*args, **kwargs)
+
+    monkeypatch.setattr(candidate_generation, "compute_traffic_aware_route", spy_compute)
+
+    graph = nx.MultiDiGraph()
+    graph.add_node("res", x=31.300, y=30.000)
+    graph.add_node("inc", x=31.310, y=30.010)
+    graph.add_edge("res", "inc", key="0", length=100.0, travel_time=10.0, base_travel_time_s=10.0)
+
+    resource = CandidateResource(
+        resource_id="amb-1",
+        resource_type=ResourceType.AMBULANCE,
+        capability_tags=("als",),
+        status=ResourceStatus.AVAILABLE,
+        assigned_incident_id=None,
+        coordinate=Coordinate(lat=30.000, lon=31.300),
+        data_reality=DataReality.SIMULATED,
+        source="phase03_simulated_resource",
+    )
+    requirements = (
+        ResponseRequirement(ResourceType.AMBULANCE, 1, ("als",)),
+    )
+    incident_coord = Coordinate(lat=30.010, lon=31.310)
+
+    candidate_generation.generate_candidate_combinations(
+        graph=graph,
+        incident_coordinate=incident_coord,
+        resources=[resource],
+        requirements=requirements,
+        traffic_snapshot=None,
+    )
+    assert len(called_kwargs) > 0
+    for kw in called_kwargs:
+        assert kw.get("include_alternatives") is False

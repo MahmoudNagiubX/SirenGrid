@@ -656,6 +656,7 @@ def compute_traffic_aware_route(
     destination: Coordinate,
     snapshot: TrafficSnapshot | None,
     max_snap_distance_m: float | None = None,
+    include_alternatives: bool = True,
 ) -> TrafficAwareRouteResult:
     """Compare immutable OSM routing with one captured, validated traffic overlay."""
     origin_node, destination_node, origin_distance, destination_distance = (
@@ -732,8 +733,12 @@ def compute_traffic_aware_route(
         else 0.0
     )
     active_overlay = overlay if fallback_reason is None else None
-    alternatives = _edge_disjoint_alternative(
-        graph, selected_route, origin_node, destination_node, active_overlay
+    alternatives = (
+        _edge_disjoint_alternative(
+            graph, selected_route, origin_node, destination_node, active_overlay
+        )
+        if include_alternatives
+        else []
     )
 
     return TrafficAwareRouteResult(

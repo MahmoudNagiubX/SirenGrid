@@ -460,3 +460,122 @@ def test_same_node_route_remains_zero_distance_and_valid_with_snap_cache() -> No
     assert repeat_result.distance_m == 0.0
     assert repeat_result.eta_seconds == 0.0
     clear_routing_graph_cache()
+
+
+def test_compute_traffic_aware_route_calculates_alternatives_by_default() -> None:
+    """Default call to compute_traffic_aware_route calculates alternatives."""
+    from app.routing import compute_traffic_aware_route
+
+    graph = nx.MultiDiGraph()
+    graph.add_node("A", x=31.300, y=30.000)
+    graph.add_node("B", x=31.305, y=30.005)
+    graph.add_node("C", x=31.305, y=29.995)
+    graph.add_node("D", x=31.310, y=30.000)
+    graph.add_edge("A", "B", key="0", length=100.0, travel_time=10.0, base_travel_time_s=10.0)
+    graph.add_edge("B", "D", key="0", length=100.0, travel_time=10.0, base_travel_time_s=10.0)
+    graph.add_edge("A", "C", key="0", length=120.0, travel_time=15.0, base_travel_time_s=15.0)
+    graph.add_edge("C", "D", key="0", length=120.0, travel_time=15.0, base_travel_time_s=15.0)
+
+    origin = Coordinate(lat=30.000, lon=31.300)
+    destination = Coordinate(lat=30.000, lon=31.310)
+
+    result = compute_traffic_aware_route(graph, origin, destination, None)
+    assert len(result.alternatives) == 1
+    assert result.alternatives[0].nodes == ["A", "C", "D"]
+
+
+def test_compute_traffic_aware_route_skips_alternatives_when_false(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When include_alternatives=False, skip _edge_disjoint_alternative and return empty alternatives."""
+    from app import routing
+    from app.routing import compute_traffic_aware_route
+
+    graph = nx.MultiDiGraph()
+    graph.add_node("A", x=31.300, y=30.000)
+    graph.add_node("B", x=31.305, y=30.005)
+    graph.add_node("C", x=31.305, y=29.995)
+    graph.add_node("D", x=31.310, y=30.000)
+    graph.add_edge("A", "B", key="0", length=100.0, travel_time=10.0, base_travel_time_s=10.0)
+    graph.add_edge("B", "D", key="0", length=100.0, travel_time=10.0, base_travel_time_s=10.0)
+    graph.add_edge("A", "C", key="0", length=120.0, travel_time=15.0, base_travel_time_s=15.0)
+    graph.add_edge("C", "D", key="0", length=120.0, travel_time=15.0, base_travel_time_s=15.0)
+
+    called = False
+
+    def fail_if_called(*_args: object, **_kwargs: object):
+        nonlocal called
+        called = True
+        return []
+
+    monkeypatch.setattr(routing, "_edge_disjoint_alternative", fail_if_called)
+
+    origin = Coordinate(lat=30.000, lon=31.300)
+    destination = Coordinate(lat=30.000, lon=31.310)
+
+    result = compute_traffic_aware_route(graph, origin, destination, None, include_alternatives=False)
+    assert result.alternatives == []
+    assert not called
+
+
+def test_compute_traffic_aware_route_primary_route_facts_match() -> None:
+    """Primary route facts match identically whether include_alternatives is True or False."""
+    from app.routing import compute_traffic_aware_route
+
+    graph = nx.MultiDiGraph()
+    graph.add_node("A", x=31.300, y=30.000)
+    graph.add_node("B", x=31.305, y=30.005)
+    graph.add_node("C", x=31.305, y=29.995)
+    graph.add_node("D", x=31.310, y=30.000)
+    graph.add_edge("A", "B", key="0", length=100.0, travel_time=10.0, base_travel_time_s=10.0)
+    graph.add_edge("B", "D", key="0", length=100.0, travel_time=10.0, base_travel_time_s=10.0)
+    graph.add_edge("A", "C", key="0", length=120.0, travel_time=15.0, base_travel_time_s=15.0)
+    graph.add_edge("C", "D", key="0", length=120.0, travel_time=15.0, base_travel_time_s=15.0)
+
+    origin = Coordinate(lat=30.000, lon=31.300)
+    destination = Coordinate(lat=30.000, lon=31.310)
+
+    with_alt = compute_traffic_aware_route(graph, origin, destination, None, include_alternatives=True)
+    without_alt = compute_traffic_aware_route(graph, origin, destination, None, include_alternatives=False)
+
+    assert without_alt.nodes == with_alt.nodes
+    assert without_alt.edge_keys == with_alt.edge_keys
+    assert without_alt.geometry == with_alt.geometry
+    assert without_alt.distance_m == with_alt.distance_m
+    assert without_alt.eta_seconds == with_alt.eta_seconds
+    assert without_alt.base_eta == with_alt.base_eta
+    assert without_alt.effective_eta == with_alt.effective_eta
+    assert without_alt.traffic_selected_path_base_eta == with_alt.traffic_selected_path_base_eta
+    assert without_alt.origin_snap_distance_m == with_alt.origin_snap_distance_m
+    assert without_alt.destination_snap_distance_m == with_alt.destination_snap_distance_m
+    assert without_alt.routing_source == with_alt.routing_source
+    assert without_alt.traffic_snapshot_id == with_alt.traffic_snapshot_id
+    assert without_alt.traffic_snapshot_version == with_alt.traffic_snapshot_version
+    assert without_alt.traffic_freshness_status == with_alt.traffic_freshness_status
+    assert without_alt.matched_traversed_edge_count == with_alt.matched_traversed_edge_count
+    assert without_alt.total_traversed_edge_count == with_alt.total_traversed_edge_count
+    assert without_alt.traffic_coverage_ratio == with_alt.traffic_coverage_ratio
+    assert without_alt.traffic_weight_affected_path_selection == with_alt.traffic_weight_affected_path_selection
+    assert without_alt.traffic_closure_affected_path_selection == with_alt.traffic_closure_affected_path_selection
+    assert without_alt.traffic_fallback_reason == with_alt.traffic_fallback_reason
+    assert without_alt.alternatives == []
+    assert len(with_alt.alternatives) > 0
+
+
+def test_compute_traffic_aware_route_same_node_works_with_default_and_false() -> None:
+    """Same-node route works identically with default (True) and include_alternatives=False."""
+    from app.routing import compute_traffic_aware_route
+
+    graph = nx.MultiDiGraph()
+    graph.add_node("A", x=31.300, y=30.000)
+    origin = Coordinate(lat=30.000, lon=31.300)
+    destination = Coordinate(lat=30.0001, lon=31.3001)
+
+    default_result = compute_traffic_aware_route(graph, origin, destination, None)
+    assert default_result.distance_m == 0.0
+    assert default_result.eta_seconds == 0.0
+    assert default_result.alternatives == []
+
+    false_result = compute_traffic_aware_route(graph, origin, destination, None, include_alternatives=False)
+    assert false_result.distance_m == 0.0
+    assert false_result.eta_seconds == 0.0
+    assert false_result.alternatives == []
+    assert false_result.nodes == default_result.nodes
