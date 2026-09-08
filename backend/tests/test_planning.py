@@ -1,24 +1,26 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
 from typing import Any
+import concurrent.futures
+import threading
 import uuid
 
 from fastapi.testclient import TestClient
+import networkx as nx
 import pytest
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 
 import app.models as _models  # noqa: F401
+from app import planning
+from app.coverage import CoverageZone
 from app.db import init_db
 from app.main import app
 from app.models import EmergencyResource, Incident, ResponsePlan, TimelineEvent
-from app.routing import (
-    RouteNotFoundError,
-    RouteResult,
-    RoutingPointOutsideGraphError,
-)
 from app.schemas import (
     ConfidenceLevel,
+    Coordinate,
     IncidentStatus,
     ResourceStatus,
     ResourceType,
@@ -26,6 +28,9 @@ from app.schemas import (
     Severity,
 )
 from app.seed import seed_resources
+
+INCIDENT_LAT = 30.0561
+INCIDENT_LON = 31.3452
 
 
 @pytest.fixture(autouse=True)
@@ -101,22 +106,67 @@ def create_test_resource(
     return res
 
 
-def make_mock_route_result(
-    distance_m: float,
-    eta_seconds: float,
-    routing_source: str = "OSM_BASE_TRAVEL_TIME",
-) -> RouteResult:
-    return RouteResult(
-        nodes=[101, 102],
-        geometry={
-            "type": "LineString",
-            "coordinates": [[31.3300, 30.0500], [31.3452, 30.0561]],
-        },
-        distance_m=distance_m,
-        eta_seconds=eta_seconds,
-        origin_snap_distance_m=10.5,
-        destination_snap_distance_m=12.2,
-        routing_source=routing_source,
+def planner_graph(
+    responders: Iterable[tuple[str, float, float, float | None]],
+) -> Callable[[], nx.MultiDiGraph]:
+    """Return a loader for a deterministic star graph around the incident.
+
+    Each entry is ``(node_name, lat, lon, travel_time_seconds)``. Travel time
+    becomes the route ETA, so a test expresses intent as an ETA directly. A
+    ``None`` travel time adds the node with no edge to the incident, which
+    makes that responder genuinely unroutable on the real routing engine.
+
+    The canonical planner routes on this graph, so these tests exercise the
+    production routing/coverage/scoring path instead of a mocked route.
+    """
+
+    def _load() -> nx.MultiDiGraph:
+        graph = nx.MultiDiGraph()
+        graph.add_node("incident", x=INCIDENT_LON, y=INCIDENT_LAT)
+        for name, lat, lon, travel_time in responders:
+            graph.add_node(name, x=lon, y=lat)
+            if travel_time is None:
+                continue
+            for source, target in (("incident", name), (name, "incident")):
+                graph.add_edge(
+                    source,
+                    target,
+                    key="0",
+                    length=travel_time * 10.0,
+                    travel_time=travel_time,
+                    base_travel_time_s=travel_time,
+                )
+        return graph
+
+    return _load
+
+
+def configure_canonical_planner(
+    monkeypatch: pytest.MonkeyPatch,
+    graph_loader: Callable[[], nx.MultiDiGraph],
+) -> None:
+    """Point the canonical planner at a small deterministic world.
+
+    Only the immutable geospatial inputs are substituted. Response-requirement
+    resolution, candidate generation, coverage, scoring, ranking, persistence,
+    and the concurrency guard all run as they do in production.
+    """
+    monkeypatch.setattr(planning, "load_routing_graph", graph_loader)
+    monkeypatch.setattr(
+        planning,
+        "load_population_zones",
+        lambda _path: (
+            CoverageZone(
+                zone_id="zone-1",
+                centroid=Coordinate(lat=INCIDENT_LAT, lon=INCIDENT_LON),
+                population=100.0,
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        planning.traffic_runtime,
+        "capture_snapshot",
+        lambda *_args, **_kwargs: None,
     )
 
 
@@ -160,14 +210,15 @@ def test_generate_plan_chooses_lower_eta_available_resource(
         lon=31.3420,
     )
 
-    # Mock routing based on candidate resource coordinates
-    def mock_compute(graph: Any, origin: Any, destination: Any) -> RouteResult:
-        if abs(origin.lat - 30.0620) < 1e-4:
-            return make_mock_route_result(distance_m=2000.0, eta_seconds=120.0)
-        return make_mock_route_result(distance_m=1500.0, eta_seconds=300.0)
-
-    monkeypatch.setattr("app.planning.load_routing_graph", lambda: None)
-    monkeypatch.setattr("app.planning.compute_route_on_graph", mock_compute)
+    configure_canonical_planner(
+        monkeypatch,
+        planner_graph(
+            [
+                ("res-amb-slow", 30.0610, 31.3410, 300.0),
+                ("res-amb-fast", 30.0620, 31.3420, 120.0),
+            ]
+        ),
+    )
 
     response = client.post(f"/api/v1/incidents/{incident.id}/plans/generate")
     assert response.status_code == 201, response.text
@@ -237,11 +288,19 @@ def test_generate_plan_ignores_closer_unavailable_or_assigned_resources(
         lon=31.3500,
     )
 
-    def mock_compute(graph: Any, origin: Any, destination: Any) -> RouteResult:
-        return make_mock_route_result(distance_m=1000.0, eta_seconds=250.0)
-
-    monkeypatch.setattr("app.planning.load_routing_graph", lambda: None)
-    monkeypatch.setattr("app.planning.compute_route_on_graph", mock_compute)
+    # The ineligible responders are deliberately the fastest on the graph, so
+    # selecting the slower eligible one proves eligibility beats proximity.
+    configure_canonical_planner(
+        monkeypatch,
+        planner_graph(
+            [
+                ("res-amb-assigned-avail", 30.0570, 31.3460, 50.0),
+                ("res-amb-assigned-status", 30.0580, 31.3470, 60.0),
+                ("res-amb-oos", 30.0590, 31.3480, 70.0),
+                ("res-amb-eligible", 30.0650, 31.3500, 250.0),
+            ]
+        ),
+    )
 
     response = client.post(f"/api/v1/incidents/{incident.id}/plans/generate")
     assert response.status_code == 201, response.text
@@ -272,20 +331,18 @@ def test_generate_plan_respects_resource_type_and_count_and_never_reuses_resourc
     create_test_resource(db_session, "fire-1", "Fire 1", ResourceType.FIRE_RESCUE, lat=30.04)
     create_test_resource(db_session, "fire-2", "Fire 2", ResourceType.FIRE_RESCUE, lat=30.05)
 
-    eta_map = {
-        30.01: 300.0,
-        30.02: 100.0,
-        30.03: 200.0,
-        30.04: 150.0,
-        30.05: 250.0,
-    }
-
-    def mock_compute(graph: Any, origin: Any, destination: Any) -> RouteResult:
-        eta = eta_map.get(round(origin.lat, 2), 500.0)
-        return make_mock_route_result(distance_m=eta * 10, eta_seconds=eta)
-
-    monkeypatch.setattr("app.planning.load_routing_graph", lambda: None)
-    monkeypatch.setattr("app.planning.compute_route_on_graph", mock_compute)
+    configure_canonical_planner(
+        monkeypatch,
+        planner_graph(
+            [
+                ("amb-1", 30.01, 31.3400, 300.0),
+                ("amb-2", 30.02, 31.3400, 100.0),
+                ("amb-3", 30.03, 31.3400, 200.0),
+                ("fire-1", 30.04, 31.3400, 150.0),
+                ("fire-2", 30.05, 31.3400, 250.0),
+            ]
+        ),
+    )
 
     response = client.post(f"/api/v1/incidents/{incident.id}/plans/generate")
     assert response.status_code == 201, response.text
@@ -320,16 +377,15 @@ def test_generate_plan_insufficient_eligible_resources_fails_without_mutation(
         status=ResourceStatus.AVAILABLE,
     )
 
-    def mock_compute(graph: Any, origin: Any, destination: Any) -> RouteResult:
-        return make_mock_route_result(distance_m=1000.0, eta_seconds=180.0)
-
-    monkeypatch.setattr("app.planning.load_routing_graph", lambda: None)
-    monkeypatch.setattr("app.planning.compute_route_on_graph", mock_compute)
+    configure_canonical_planner(
+        monkeypatch,
+        planner_graph([("fire-lone", 30.0600, 31.3400, 180.0)]),
+    )
 
     response = client.post(f"/api/v1/incidents/{incident.id}/plans/generate")
     assert response.status_code in (409, 422), response.text
     detail = response.json()["detail"].lower()
-    assert "insufficient" in detail or "eligible" in detail or "resource" in detail
+    assert "insufficient" in detail or "eligible" in detail or "resource" in detail or "feasible" in detail
 
     # Verify incident was NOT mutated
     db_session.expire_all()
@@ -372,11 +428,12 @@ def test_generate_plan_route_failure_makes_candidate_infeasible_and_fails_if_no_
         status=ResourceStatus.AVAILABLE,
     )
 
-    def mock_compute(graph: Any, origin: Any, destination: Any) -> RouteResult:
-        raise RouteNotFoundError("No path exists between nodes")
-
-    monkeypatch.setattr("app.planning.load_routing_graph", lambda: None)
-    monkeypatch.setattr("app.planning.compute_route_on_graph", mock_compute)
+    # The only ambulance has no edge to the incident, so it is genuinely
+    # unroutable on the real routing engine rather than a mocked failure.
+    configure_canonical_planner(
+        monkeypatch,
+        planner_graph([("amb-unrouteable", 30.0600, 31.3400, None)]),
+    )
 
     response = client.post(f"/api/v1/incidents/{incident.id}/plans/generate")
     assert response.status_code in (409, 422), response.text
@@ -419,13 +476,15 @@ def test_generate_plan_route_failure_falls_back_to_other_routeable_candidate(
         lon=31.3600,
     )
 
-    def mock_compute(graph: Any, origin: Any, destination: Any) -> RouteResult:
-        if abs(origin.lat - 30.0700) < 1e-4:
-            raise RoutingPointOutsideGraphError("Coordinate too far from graph")
-        return make_mock_route_result(distance_m=1200.0, eta_seconds=160.0)
-
-    monkeypatch.setattr("app.planning.load_routing_graph", lambda: None)
-    monkeypatch.setattr("app.planning.compute_route_on_graph", mock_compute)
+    configure_canonical_planner(
+        monkeypatch,
+        planner_graph(
+            [
+                ("amb-broken", 30.0700, 31.3500, None),
+                ("amb-working", 30.0800, 31.3600, 160.0),
+            ]
+        ),
+    )
 
     response = client.post(f"/api/v1/incidents/{incident.id}/plans/generate")
     assert response.status_code == 201, response.text
@@ -467,13 +526,15 @@ def test_generate_plan_metrics_score_breakdown_routes_and_timeline_contracts(
         lon=31.3420,
     )
 
-    def mock_compute(graph: Any, origin: Any, destination: Any) -> RouteResult:
-        if abs(origin.lat - 30.0610) < 1e-4:
-            return make_mock_route_result(distance_m=1000.0, eta_seconds=100.0)
-        return make_mock_route_result(distance_m=2000.0, eta_seconds=200.0)
-
-    monkeypatch.setattr("app.planning.load_routing_graph", lambda: None)
-    monkeypatch.setattr("app.planning.compute_route_on_graph", mock_compute)
+    configure_canonical_planner(
+        monkeypatch,
+        planner_graph(
+            [
+                ("res-amb-01", 30.0610, 31.3410, 100.0),
+                ("res-fire-01", 30.0620, 31.3420, 200.0),
+            ]
+        ),
+    )
 
     response = client.post(f"/api/v1/incidents/{incident.id}/plans/generate")
     assert response.status_code == 201, response.text
@@ -493,31 +554,48 @@ def test_generate_plan_metrics_score_breakdown_routes_and_timeline_contracts(
     assert metrics["selected_resource_count"] == 2
     assert metrics["routing_source"] == "OSM_BASE_TRAVEL_TIME"
 
-    # Score breakdown JSON verification
-    expected_score = {
-        "algorithm": "MIN_BASE_ROUTE_ETA_WITH_HARD_AVAILABILITY_CONSTRAINTS",
-        "coverage_considered": False,
-        "traffic_source": "OSM_BASE_TRAVEL_TIME",
-        "note": "Phase 01 minimal plan. Coverage-aware optimization arrives in Phase 04.",
+    # Score breakdown must be the canonical transparent prototype score, not
+    # the removed Phase 01 stub. The legacy endpoint is a facade over the
+    # canonical planner, so coverage is genuinely considered.
+    score = data["score_breakdown"]
+    assert score["policy_version"] == "SIRENGRID_PROTOTYPE_PLAN_SCORE_V1"
+    assert score["convention"] == "LOWER_IS_BETTER"
+    assert score["weights"] == {
+        "eta": 0.35,
+        "coverage": 0.40,
+        "reserve": 0.20,
+        "reposition": 0.05,
+        "hospital": 0.00,
     }
-    assert data["score_breakdown"] == expected_score
+    for term in (
+        "normalized_eta_term",
+        "coverage_penalty",
+        "reserve_penalty",
+        "reposition_penalty",
+        "hospital_penalty",
+        "final_score",
+    ):
+        assert isinstance(score[term], (int, float)), term
+    assert score["max_incident_eta_seconds"] == 200.0
+    assert score["hospital_penalty"] == 0.0
 
     # Routes JSON verification
     assert len(data["routes"]) == 2
     for r in data["routes"]:
         assert r["resource_id"] in ["res-amb-01", "res-fire-01"]
         assert r["resource_type"] in ["AMBULANCE", "FIRE_RESCUE"]
-        assert r["resource_name"] in ["Ambulance Alpha", "Fire Rescue Bravo"]
         assert r["origin"]["lat"] > 0
-        assert r["destination"]["lat"] == incident.latitude
-        assert r["destination"]["lon"] == incident.longitude
-        assert r["route_geometry"]["type"] == "LineString"
-        assert len(r["route_geometry"]["coordinates"]) >= 2
+        assert r["geometry"]["type"] == "LineString"
+        assert len(r["geometry"]["coordinates"]) >= 2
         assert r["distance_m"] > 0
         assert r["eta_seconds"] > 0
         assert r["origin_snap_distance_m"] >= 0
         assert r["destination_snap_distance_m"] >= 0
         assert r["routing_source"] == "OSM_BASE_TRAVEL_TIME"
+        # Canonical route records carry responder provenance that the removed
+        # Phase 01 planner never recorded.
+        assert r["data_reality"] == "SIMULATED"
+        assert r["source"]
 
     # DB Incident state verification
     db_session.expire_all()
@@ -536,9 +614,12 @@ def test_generate_plan_metrics_score_breakdown_routes_and_timeline_contracts(
     ).all()
     assert len(events) == 1
     event = events[0]
-    assert event.details_json["plan_id"] == data["id"]
-    assert event.details_json["selected_resource_count"] == 2
-    assert event.details_json["routing_source"] == "OSM_BASE_TRAVEL_TIME"
+    # The canonical planner audits the whole candidate set, not a single plan.
+    assert event.details_json["action"] == "CANDIDATE_SET_GENERATED"
+    assert event.details_json["recommended_plan_id"] == data["id"]
+    assert data["id"] in event.details_json["candidate_plan_ids"]
+    assert event.details_json["incident_version"] == 2
+    assert event.details_json["resource_ids_by_plan"][data["id"]] == data["resource_ids"]
 
 
 def test_generate_plan_repeated_generation_increments_plan_version(
@@ -560,11 +641,10 @@ def test_generate_plan_repeated_generation_increments_plan_version(
         status=ResourceStatus.AVAILABLE,
     )
 
-    def mock_compute(graph: Any, origin: Any, destination: Any) -> RouteResult:
-        return make_mock_route_result(distance_m=1000.0, eta_seconds=120.0)
-
-    monkeypatch.setattr("app.planning.load_routing_graph", lambda: None)
-    monkeypatch.setattr("app.planning.compute_route_on_graph", mock_compute)
+    configure_canonical_planner(
+        monkeypatch,
+        planner_graph([("amb-repeat", 30.0600, 31.3400, 120.0)]),
+    )
 
     # First generation
     resp1 = client.post(f"/api/v1/incidents/{incident.id}/plans/generate")
@@ -599,6 +679,146 @@ def test_generate_plan_repeated_generation_increments_plan_version(
     reloaded_p1 = db_session.get(ResponsePlan, plan1["id"])
     assert reloaded_p1 is not None
     assert reloaded_p1.status == ResponsePlanStatus.SUPERSEDED
+
+
+def test_legacy_and_candidate_endpoints_share_one_canonical_planner(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both planning entry points must resolve to the same canonical engine.
+
+    The legacy endpoint is a facade, so from identical state it must select the
+    same responders and produce the same canonical score as the candidate
+    endpoint's RECOMMENDED plan.
+    """
+    responders = [
+        ("amb-near", 30.0610, 31.3410, 100.0),
+        ("amb-far", 30.0620, 31.3420, 400.0),
+    ]
+    configure_canonical_planner(monkeypatch, planner_graph(responders))
+
+    legacy_incident = create_test_incident(
+        db=db_session,
+        required_resources=[{"resource_type": "AMBULANCE", "count": 1}],
+    )
+    candidate_incident = create_test_incident(
+        db=db_session,
+        required_resources=[{"resource_type": "AMBULANCE", "count": 1}],
+    )
+    for resource_id, lat, lon, _travel in responders:
+        create_test_resource(
+            db=db_session,
+            resource_id=resource_id,
+            name=resource_id,
+            resource_type=ResourceType.AMBULANCE,
+            status=ResourceStatus.AVAILABLE,
+            lat=lat,
+            lon=lon,
+        )
+
+    legacy = client.post(f"/api/v1/incidents/{legacy_incident.id}/plans/generate")
+    assert legacy.status_code == 201, legacy.text
+    legacy_plan = legacy.json()
+
+    candidates = client.post(
+        f"/api/v1/incidents/{candidate_incident.id}/plans/generate-candidates"
+    )
+    assert candidates.status_code == 201, candidates.text
+    recommended = [
+        plan
+        for plan in candidates.json()
+        if plan["status"] == ResponsePlanStatus.RECOMMENDED.value
+    ]
+    assert len(recommended) == 1
+
+    assert legacy_plan["resource_ids"] == recommended[0]["resource_ids"] == ["amb-near"]
+    assert (
+        legacy_plan["score_breakdown"]["policy_version"]
+        == recommended[0]["score_breakdown"]["policy_version"]
+        == "SIRENGRID_PROTOTYPE_PLAN_SCORE_V1"
+    )
+    assert (
+        legacy_plan["score_breakdown"]["final_score"]
+        == recommended[0]["score_breakdown"]["final_score"]
+    )
+    # The legacy response stays a single plan even though a set was persisted.
+    assert isinstance(legacy_plan, dict)
+    assert legacy_plan["status"] == ResponsePlanStatus.RECOMMENDED.value
+
+
+def test_concurrent_legacy_generation_yields_one_authoritative_candidate_set(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Concurrent legacy generation must not persist duplicate current plans.
+
+    Before the canonical facade this endpoint held no write lock and derived
+    plan_version from a stale read, so racing requests all returned 201 and
+    persisted several RECOMMENDED plans with duplicate versions.
+    """
+    configure_canonical_planner(
+        monkeypatch,
+        planner_graph(
+            [
+                ("amb-race-1", 30.0610, 31.3410, 100.0),
+                ("amb-race-2", 30.0620, 31.3420, 200.0),
+            ]
+        ),
+    )
+    incident = create_test_incident(
+        db=db_session,
+        required_resources=[{"resource_type": "AMBULANCE", "count": 1}],
+    )
+    for resource_id, lat, lon in (
+        ("amb-race-1", 30.0610, 31.3410),
+        ("amb-race-2", 30.0620, 31.3420),
+    ):
+        create_test_resource(
+            db=db_session,
+            resource_id=resource_id,
+            name=resource_id,
+            resource_type=ResourceType.AMBULANCE,
+            status=ResourceStatus.AVAILABLE,
+            lat=lat,
+            lon=lon,
+        )
+
+    worker_count = 3
+    start_barrier = threading.Barrier(worker_count)
+
+    def generate(_worker: int) -> int:
+        with TestClient(app) as worker_client:
+            start_barrier.wait(timeout=30.0)
+            return worker_client.post(
+                f"/api/v1/incidents/{incident.id}/plans/generate"
+            ).status_code
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=worker_count) as executor:
+        codes = sorted(
+            future.result(timeout=120.0)
+            for future in [executor.submit(generate, i) for i in range(worker_count)]
+        )
+
+    assert codes.count(201) == 1, codes
+    assert codes.count(409) == worker_count - 1, codes
+    assert 500 not in codes, codes
+
+    db_session.expire_all()
+    plans = db_session.scalars(
+        select(ResponsePlan).where(ResponsePlan.incident_id == incident.id)
+    ).all()
+    recommended = [
+        plan for plan in plans if plan.status == ResponsePlanStatus.RECOMMENDED
+    ]
+    assert len(recommended) == 1
+    plan_versions = [plan.plan_version for plan in plans]
+    assert len(plan_versions) == len(set(plan_versions)), plan_versions
+
+    reloaded = db_session.get(Incident, incident.id)
+    assert reloaded is not None
+    assert reloaded.version == 2
+    assert reloaded.current_plan_id == recommended[0].id
 
 
 def test_generate_plan_real_osm_routing_integration(

@@ -1038,7 +1038,20 @@ def test_no_unavailable_resource_fallback_in_planning(
     # Attempt candidate response planning
     plan_resp = client.post(f"/api/v1/incidents/{target_inc.id}/plans/generate")
     assert plan_resp.status_code == 409
-    assert "insufficient eligible" in plan_resp.json().get("detail", "").lower()
+    detail = plan_resp.json().get("detail", "").lower()
+    assert "insufficient" in detail or "feasible" in detail, detail
+
+    # The safety property under test: planning must never fall back to an
+    # unavailable or already-committed responder.
+    db_session.expire_all()
+    plans = db_session.scalars(
+        select(ResponsePlan).where(ResponsePlan.incident_id == target_inc.id)
+    ).all()
+    assert plans == []
+    reloaded = db_session.get(EmergencyResource, last_amb.id)
+    assert reloaded is not None
+    assert reloaded.status == ResourceStatus.OUT_OF_SERVICE
+    assert reloaded.assigned_incident_id is None
 
 
 def _create_test_approved_plan(

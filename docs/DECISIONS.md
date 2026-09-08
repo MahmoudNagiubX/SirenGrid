@@ -946,3 +946,50 @@ any WorldPop entry recorded there.
 `provenance.json` continues to describe only the Phase 02 OSM acquisition and
 its semantics are unchanged. Population values and geospatial outputs are
 unchanged. A rebuild republishes both the artifact and its manifest.
+
+## PD-063 - Single Canonical Response Planner
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner (post-audit hardening mission, HD-001/HD-002)
+
+### Decision
+
+The Phase 04 planning engine is SirenGrid's only response planner. All
+planning entry points call one shared orchestration function,
+`planning.generate_canonical_candidate_set()`, which resolves response
+requirements, routes on the real graph with captured traffic, generates
+bounded candidate combinations, computes joint required-cohort coverage,
+evaluates hypothetical repositioning, scores and ranks transparently, and
+persists the candidate set under the optimistic capture/revalidate guard.
+
+`POST /api/v1/incidents/{incident_id}/plans/generate` is retained as a
+backward-compatible facade. It returns only the current `RECOMMENDED` plan so
+existing single-plan clients keep working; callers that need alternatives use
+`POST /api/v1/incidents/{incident_id}/plans/generate-candidates`.
+
+### Reason
+
+The legacy endpoint previously ran its own nearest-by-ETA selection. It
+bypassed traffic-aware routing, joint coverage, candidate comparison,
+repositioning, and the planning concurrency guard, so the Golden Flow's
+primary planning step did not exercise the approved Phase 04 policy.
+
+It also held no write lock and derived `plan_version` from a stale read.
+Concurrent generation therefore returned `201` to every caller and persisted
+several current `RECOMMENDED` plans with duplicate `plan_version` values while
+incrementing the incident version only once. Routing both entry points through
+one engine removes the second algorithm and the race together.
+
+### Impact
+
+Plans returned by the legacy endpoint now carry the canonical
+`SIRENGRID_PROTOTYPE_PLAN_SCORE_V1` score breakdown and joint-coverage metrics
+instead of the removed Phase 01 stub, and its route records carry responder
+`data_reality`/`source` provenance. The route records no longer include the
+`resource_name` display field; `resource_id` remains the authoritative
+identifier. Scoring weights, the 600-second coverage target, candidate caps,
+and the approval boundary are unchanged.
+
+Concurrent generation now yields exactly one persisted candidate set; stale
+losers receive `409` rather than silently persisting duplicates.

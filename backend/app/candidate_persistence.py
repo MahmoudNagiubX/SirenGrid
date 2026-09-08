@@ -53,6 +53,13 @@ def _route_record(candidate: EvaluatedCandidate) -> list[dict[str, Any]]:
                 "source": responder.resource.source,
             }
         )
+        # ``route_geometry`` is the established plan-route contract key that
+        # corridor, driver-alert, movement, and replacement-route consumers
+        # look for first. Publish it alongside ``geometry`` so canonical plans
+        # satisfy that contract directly instead of relying on every consumer
+        # remembering to fall back.
+        if "geometry" in route:
+            route["route_geometry"] = route["geometry"]
         records.append(route)
     return records
 

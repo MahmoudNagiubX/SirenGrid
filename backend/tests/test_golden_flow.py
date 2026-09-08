@@ -172,9 +172,15 @@ def test_phase01_golden_flow(client: TestClient, db_session: Session) -> None:
     assert plan_data["metrics"]["selected_resource_count"] == 2
     assert plan_data["metrics"]["max_arrival_eta_seconds"] > 0
     assert plan_data["metrics"]["mean_arrival_eta_seconds"] > 0
-    assert plan_data["score_breakdown"]["algorithm"] == (
-        "MIN_BASE_ROUTE_ETA_WITH_HARD_AVAILABILITY_CONSTRAINTS"
+    # The Golden Flow's planning step runs the canonical planner, so the plan
+    # carries the transparent prototype score rather than the removed Phase 01
+    # stub, and coverage is genuinely considered.
+    assert plan_data["score_breakdown"]["policy_version"] == (
+        "SIRENGRID_PROTOTYPE_PLAN_SCORE_V1"
     )
+    assert plan_data["score_breakdown"]["convention"] == "LOWER_IS_BETTER"
+    assert isinstance(plan_data["score_breakdown"]["coverage_penalty"], (int, float))
+    assert isinstance(plan_data["score_breakdown"]["final_score"], (int, float))
 
     # 6. GET incident and assert status AWAITING_APPROVAL, version 2, current_plan_id equals plan ID
     inc_get_res = client.get(f"/api/v1/incidents/{incident_id}")
@@ -230,8 +236,23 @@ def test_phase01_golden_flow(client: TestClient, db_session: Session) -> None:
     assert list_plans_res.status_code == 200
     plans_list = list_plans_res.json()
     assert any(p["id"] == plan_id for p in plans_list)
-    assert len(plans_list) == 1
-    assert plans_list[0]["status"] == ResponsePlanStatus.APPROVED.value
+    # The canonical planner persists one comparison candidate set, so the
+    # incident retains the approved plan plus its alternatives. The invariant
+    # that matters is that exactly one plan is approved and none is left
+    # dangling as a competing current recommendation.
+    approved = [
+        p for p in plans_list if p["status"] == ResponsePlanStatus.APPROVED.value
+    ]
+    assert len(approved) == 1
+    assert approved[0]["id"] == plan_id
+    assert not [
+        p for p in plans_list if p["status"] == ResponsePlanStatus.RECOMMENDED.value
+    ]
+    assert {p["status"] for p in plans_list} <= {
+        ResponsePlanStatus.APPROVED.value,
+        ResponsePlanStatus.ALTERNATIVE.value,
+        ResponsePlanStatus.SUPERSEDED.value,
+    }
 
     timeline_stmt = (
         select(TimelineEvent)
