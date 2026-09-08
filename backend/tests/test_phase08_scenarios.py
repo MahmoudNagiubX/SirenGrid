@@ -334,3 +334,71 @@ def test_coverage_cache_identity_includes_traffic_overlay_contents(
 
     assert call_count == 2
     assert fast.zones[0].eta_seconds < slow.zones[0].eta_seconds
+
+
+def test_phase08_manifest_diversity_contracts() -> None:
+    """The official fixture stays broad enough to exercise distinct behavior."""
+    manifest = load_scenario_manifest()
+
+    assert len(manifest.scenarios) == 36
+    ids = [scenario.id for scenario in manifest.scenarios]
+    assert len(ids) == len(set(ids))
+    t_cases = [scenario for scenario in manifest.scenarios if scenario.master_plan_case]
+    assert len(t_cases) == 15
+    assert {scenario.master_plan_case for scenario in t_cases} == {
+        f"T{index:02d}" for index in range(1, 16)
+    }
+    coordinates = {
+        (scenario.incident.coordinate.lat, scenario.incident.coordinate.lon)
+        for scenario in manifest.scenarios
+    }
+    assert len(coordinates) >= 8
+    requirement_shapes = {
+        tuple(
+            (requirement.resource_type.value, requirement.minimum_count)
+            for requirement in scenario.incident.requirements
+        )
+        for scenario in manifest.scenarios
+    }
+    assert len(requirement_shapes) >= 3
+    assert {scenario.traffic_fixture.mode for scenario in manifest.scenarios} >= {
+        "FALLBACK",
+        "CLOSURE",
+        "STALE",
+        "CONGESTION",
+    }
+    override_patterns = {
+        tuple(
+            (override.resource_id, override.status.value if override.status else None)
+            for override in scenario.resource_overrides
+        )
+        for scenario in manifest.scenarios
+    }
+    assert len(override_patterns) >= 3
+    assert sum(
+        any(event.event_type == "SECOND_INCIDENT" for event in scenario.events)
+        for scenario in manifest.scenarios
+    ) >= 1
+
+
+def test_phase08_route_impacting_closure_and_congestion() -> None:
+    """Closure and congestion fixtures exercise their intended route gates."""
+    manifest = load_scenario_manifest()
+    runner = Phase08ScenarioRunner()
+
+    for scenario_id in ("T04_blocked_road", "X07_valid_closure"):
+        result = runner.run_scenario(next(s for s in manifest.scenarios if s.id == scenario_id))
+        assert result["sirengrid"]["outcome"] == "PLAN_GENERATED"
+        assert any(
+            route.get("traffic_closure_affected_path_selection") is True
+            for route in result["sirengrid"]["routes"]
+        )
+
+    result = runner.run_scenario(
+        next(s for s in manifest.scenarios if s.id == "X15_material_eta_replan")
+    )
+    assert result["sirengrid"]["outcome"] == "PLAN_GENERATED"
+    assert any(
+        route.get("traffic_weight_affected_path_selection") is True
+        for route in result["sirengrid"]["routes"]
+    )

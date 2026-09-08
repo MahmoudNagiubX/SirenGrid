@@ -40,6 +40,7 @@ backend/.runtime/
 data/raw/
 *.sqlite
 *.sqlite3
+*.db
 
 # Generated artifacts
 artifacts/
