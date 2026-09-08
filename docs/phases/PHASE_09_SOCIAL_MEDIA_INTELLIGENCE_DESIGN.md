@@ -24,8 +24,10 @@ not silently relabel synthetic content as Bluesky content.
 Normalized social signals are persisted as standalone Phase 06-compatible
 `Report` rows (`incident_id = NULL`) with `source_type = social_media`,
 minimal provider provenance, safe bounded metadata, location clues, and
-`UNVERIFIED_SIGNAL` processing status. Provider post IDs make refresh
-idempotent. No media download or profile-history storage occurs.
+an unverified social-signal review state (`POTENTIALLY_RELEVANT`,
+`INSUFFICIENT_CONTEXT`, `IRRELEVANT`, or an operator review state). Provider
+post IDs make refresh idempotent. No media download or profile-history storage
+occurs.
 
 Deterministic filtering emits inspectable states such as `POTENTIALLY_RELEVANT`,
 `INSUFFICIENT_CONTEXT`, and `IRRELEVANT`. Explicit provider coordinates are

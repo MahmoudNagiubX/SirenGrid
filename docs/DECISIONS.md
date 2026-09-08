@@ -925,7 +925,7 @@ Phase 09 uses the unauthenticated Bluesky Public API as its primary public
 provider and a deterministic synthetic provider for repeatable demo and test
 operation. The optional X adapter remains disabled without `X_BEARER_TOKEN`
 and is not required for Phase 09. No private-content access, browser
-scraping, login-cookie automation, or other social provider is approved.
+scraping, login-cookie automation, or unapproved social provider is allowed.
 Social results are unverified external intelligence and cannot independently
 activate dispatch or mutate operational decisions.
 
