@@ -5,6 +5,7 @@ import sqlite3
 
 from sqlalchemy import Engine, create_engine, event, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+from sqlalchemy.schema import CreateTable
 
 from app.config import settings
 
@@ -51,6 +52,46 @@ def init_db(target_engine: Engine | None = None) -> None:
     Base.metadata.create_all(bind=target)
     if target.dialect.name == "sqlite":
         _ensure_sqlite_phase07_columns(target)
+        _ensure_sqlite_nullable_incident_location(target)
+
+
+def _ensure_sqlite_nullable_incident_location(target: Engine) -> None:
+    """Allow an existing local database to hold unresolved incident locations.
+
+    Incident coordinates became nullable so a credible incident can be
+    activated before its location is confirmed. SQLite cannot relax a column's
+    NOT NULL constraint in place, so an older database is rebuilt through the
+    standard rename/copy/drop sequence. Every existing row is preserved and the
+    whole rebuild runs in one transaction, so a failure leaves the original
+    table untouched.
+    """
+    inspector = inspect(target)
+    if "incidents" not in inspector.get_table_names():
+        return
+    columns = {column["name"]: column for column in inspector.get_columns("incidents")}
+    latitude = columns.get("latitude")
+    if latitude is None or latitude.get("nullable", True):
+        return
+
+    table = Base.metadata.tables.get("incidents")
+    if table is None:  # pragma: no cover - models are imported before init_db
+        return
+    create_sql = str(CreateTable(table).compile(target))
+    shared_columns = [
+        column.name for column in table.columns if column.name in columns
+    ]
+    column_list = ", ".join(f'"{name}"' for name in shared_columns)
+
+    with target.begin() as connection:
+        connection.execute(text("ALTER TABLE incidents RENAME TO incidents_legacy"))
+        connection.execute(text(create_sql))
+        connection.execute(
+            text(
+                f"INSERT INTO incidents ({column_list}) "
+                f"SELECT {column_list} FROM incidents_legacy"
+            )
+        )
+        connection.execute(text("DROP TABLE incidents_legacy"))
 
 
 def _ensure_sqlite_phase07_columns(target: Engine) -> None:

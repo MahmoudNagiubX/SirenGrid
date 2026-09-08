@@ -59,6 +59,7 @@ __all__ = [
     "NON_ACTIONABLE_INCIDENT_STATUSES",
     "is_incident_actionable",
     "ensure_incident_actionable",
+    "ensure_incident_located",
 ]
 
 router = APIRouter(tags=["incidents"])
@@ -88,10 +89,12 @@ def serialize_incident(incident: Incident) -> dict[str, Any]:
         "incident_type": incident.incident_type,
         "severity": severity_str,
         "confidence_level": confidence_str,
-        "location": {
-            "lat": incident.latitude,
-            "lon": incident.longitude,
-        },
+        # Unresolved coordinates serialize as null rather than a sentinel.
+        "location": (
+            {"lat": incident.latitude, "lon": incident.longitude}
+            if incident.latitude is not None and incident.longitude is not None
+            else None
+        ),
         "latitude": incident.latitude,
         "longitude": incident.longitude,
         "location_text": incident.location_text,
@@ -235,6 +238,25 @@ def committed_response_blockers(db: Session, incident: Incident) -> list[str]:
     return blockers
 
 
+def ensure_incident_located(incident: Incident, action: str) -> None:
+    """Reject a coordinate-dependent action while the location is unresolved.
+
+    An incident may be activated before its coordinates are known. Routing,
+    planning, hospital ranking, and corridor derivation all need a real
+    coordinate, so they fail visibly and recoverably until an operator
+    correction supplies one. No sentinel coordinate is ever substituted.
+    """
+    if incident.latitude is not None and incident.longitude is not None:
+        return
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail=(
+            f"INCIDENT_LOCATION_REQUIRED: cannot {action} until the incident "
+            "location is confirmed by an operator correction"
+        ),
+    )
+
+
 def _acquire_write_lock(db: Session) -> None:
     """Execute BEGIN IMMEDIATE on SQLite to serialize concurrent operations in one process."""
     bind = db.get_bind()
@@ -342,6 +364,9 @@ def create_manual_incident(
         "data_reality": DataReality.SIMULATED.value,
         "freshness_status": FreshnessStatus.FRESH.value,
         "last_updated": now_utc.isoformat(),
+        # Makes an unresolved location visible to the operator rather than
+        # leaving a missing coordinate to be inferred from a null field.
+        "location_resolved": payload.location is not None,
         "source_reference": payload.operator_reference,
     }
 
@@ -353,8 +378,8 @@ def create_manual_incident(
         severity=payload.severity,
         confidence_level=payload.confidence_level,
         status=IncidentStatus.ACTIVE_UNCONFIRMED,
-        latitude=payload.location.lat,
-        longitude=payload.location.lon,
+        latitude=payload.location.lat if payload.location else None,
+        longitude=payload.location.lon if payload.location else None,
         location_text=payload.location_text,
         casualty_count=payload.casualty_count,
         casualty_range=payload.casualty_range,
@@ -378,6 +403,7 @@ def create_manual_incident(
             "operator_reference": payload.operator_reference,
             "status": IncidentStatus.ACTIVE_UNCONFIRMED.value,
             "source": "operator_manual_entry",
+            "location_resolved": payload.location is not None,
         },
         created_at=now_utc,
     )
@@ -948,9 +974,20 @@ def patch_incident_facts(
                 old_values[field] = old_val
                 new_values[field] = new_val
         elif field == "location":
-            old_val = {"lat": incident.latitude, "lon": incident.longitude}
+            had_coordinates = (
+                incident.latitude is not None and incident.longitude is not None
+            )
+            old_val = (
+                {"lat": incident.latitude, "lon": incident.longitude}
+                if had_coordinates
+                else None
+            )
             new_val = {"lat": payload.location.lat, "lon": payload.location.lon}
-            if abs(incident.latitude - payload.location.lat) > 1e-7 or abs(incident.longitude - payload.location.lon) > 1e-7:
+            # Resolving previously unknown coordinates is always a change.
+            if not had_coordinates or (
+                abs(incident.latitude - payload.location.lat) > 1e-7
+                or abs(incident.longitude - payload.location.lon) > 1e-7
+            ):
                 changed_fields.append(field)
                 old_values[field] = old_val
                 new_values[field] = new_val

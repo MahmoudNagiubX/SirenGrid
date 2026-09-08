@@ -7,7 +7,7 @@ import uuid
 
 from fastapi.testclient import TestClient
 import pytest
-from sqlalchemy import Engine
+from sqlalchemy import Engine, create_engine, select, text
 from sqlalchemy.orm import Session
 
 import app.models as _models  # noqa: F401 - ensure all ORM models are registered
@@ -263,6 +263,188 @@ def test_no_ai_or_provider_call_involved(client: TestClient) -> None:
         response = client.post("/api/v1/intake/manual", json=payload)
         assert response.status_code == 201
         assert mock_url.call_count == 0
+
+
+def test_incident_can_be_activated_before_its_location_is_known(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    """A credible urgent report activates even when coordinates are unknown."""
+    response = client.post(
+        "/api/v1/intake/manual",
+        json={
+            "incident_type": "traffic_collision",
+            "severity": "HIGH",
+            "confidence_level": "MEDIUM",
+            "location_text": "somewhere on Abbas El-Akkad, exact point unclear",
+            "required_resources": [{"resource_type": "AMBULANCE", "count": 1}],
+            "operator_reference": "dispatcher-op-01",
+        },
+    )
+    assert response.status_code == 201, response.text
+    body = response.json()
+
+    # Unresolved location is null, never a sentinel coordinate.
+    assert body["location"] is None
+    assert body["latitude"] is None
+    assert body["longitude"] is None
+    assert body["location_text"] == "somewhere on Abbas El-Akkad, exact point unclear"
+    assert body["status"] == IncidentStatus.ACTIVE_UNCONFIRMED.value
+    assert body["provenance"]["location_resolved"] is False
+
+    stored = db_session.get(Incident, body["id"])
+    assert stored is not None
+    assert stored.latitude is None and stored.longitude is None
+
+
+def test_planning_blocked_until_location_is_confirmed(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    """Coordinate-dependent work fails visibly, then unlocks after correction."""
+    created = client.post(
+        "/api/v1/intake/manual",
+        json={
+            "incident_type": "traffic_collision",
+            "severity": "HIGH",
+            "confidence_level": "MEDIUM",
+            "location_text": "unclear",
+            "required_resources": [{"resource_type": "AMBULANCE", "count": 1}],
+            "operator_reference": "dispatcher-op-01",
+        },
+    )
+    incident_id = created.json()["id"]
+
+    blocked = client.post(f"/api/v1/incidents/{incident_id}/plans/generate")
+    assert blocked.status_code == 422, blocked.text
+    assert "INCIDENT_LOCATION_REQUIRED" in blocked.json()["detail"]
+
+    # An operator correction resolves the location and bumps the version once.
+    patched = client.patch(
+        f"/api/v1/incidents/{incident_id}/facts",
+        json={
+            "expected_incident_version": 1,
+            "operator_reference": "dispatcher-op-01",
+            "location": {"lat": 30.0561, "lon": 31.3452},
+        },
+    )
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["changed_fields"] == ["location"]
+    assert patched.json()["incident"]["version"] == 2
+    assert patched.json()["incident"]["location"] == {"lat": 30.0561, "lon": 31.3452}
+    assert patched.json()["downstream_inputs_dirty"] is True
+
+    db_session.expire_all()
+    stored = db_session.get(Incident, incident_id)
+    assert stored is not None
+    assert stored.latitude == 30.0561
+    assert stored.longitude == 31.3452
+
+    correction = db_session.scalars(
+        select(TimelineEvent).where(
+            TimelineEvent.incident_id == incident_id,
+            TimelineEvent.event_type == "FACTS_CORRECTED",
+        )
+    ).all()
+    assert len(correction) == 1
+    assert correction[0].details_json["changes"]["location"]["old"] is None
+
+
+def test_existing_database_with_not_null_location_is_migrated_without_data_loss(
+    tmp_path,
+) -> None:
+    """An older local database keeps its rows when coordinates become nullable."""
+    database_path = tmp_path / "legacy.db"
+    engine = create_engine(f"sqlite:///{database_path}")
+    try:
+        # The pre-change schema, matching what SQLAlchemy emitted before
+        # coordinates became nullable: latitude/longitude declared NOT NULL
+        # alongside the other required columns.
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "CREATE TABLE incidents ("
+                    "id VARCHAR(36) NOT NULL PRIMARY KEY, "
+                    "version INTEGER NOT NULL, "
+                    "incident_type VARCHAR NOT NULL, "
+                    "severity VARCHAR(8) NOT NULL, "
+                    "confidence_level VARCHAR(6) NOT NULL, "
+                    "status VARCHAR(22) NOT NULL, "
+                    "latitude FLOAT NOT NULL, longitude FLOAT NOT NULL, "
+                    "location_text VARCHAR, casualty_count INTEGER, "
+                    "casualty_range VARCHAR, trapped_person BOOLEAN, "
+                    "road_blockage BOOLEAN, transport_required BOOLEAN, "
+                    "required_hospital_capabilities_json JSON NOT NULL, "
+                    "required_resources_json JSON NOT NULL, "
+                    "current_plan_id VARCHAR(36), "
+                    "pending_replan_plan_id VARCHAR(36), "
+                    "created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL, "
+                    "provenance_json JSON NOT NULL)"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO incidents (id, version, incident_type, severity, "
+                    "confidence_level, status, latitude, longitude, "
+                    "location_text, required_hospital_capabilities_json, "
+                    "required_resources_json, created_at, updated_at, "
+                    "provenance_json) VALUES "
+                    "('legacy-1', 3, 'traffic_collision', 'HIGH', 'HIGH', "
+                    "'RESPONSE_ACTIVE', 30.0561, 31.3452, 'El-Nasr Road', "
+                    "'[]', '[]', '2026-09-07 10:00:00', '2026-09-07 10:00:00', "
+                    "'{}')"
+                )
+            )
+
+        init_db(engine)
+
+        with engine.begin() as connection:
+            rows = connection.execute(
+                text(
+                    "SELECT id, version, latitude, longitude, status, location_text "
+                    "FROM incidents"
+                )
+            ).all()
+            nullable = {
+                row[1]: not row[3]
+                for row in connection.execute(
+                    text("PRAGMA table_info(incidents)")
+                ).all()
+            }
+
+        # The pre-existing row survives verbatim and the constraint is relaxed.
+        assert rows == [
+            ("legacy-1", 3, 30.0561, 31.3452, "RESPONSE_ACTIVE", "El-Nasr Road")
+        ]
+        assert nullable["latitude"] is True
+        assert nullable["longitude"] is True
+
+        # And an unresolved location can now be stored.
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO incidents (id, version, incident_type, severity, "
+                    "confidence_level, status, "
+                    "required_hospital_capabilities_json, required_resources_json, "
+                    "created_at, updated_at, provenance_json) VALUES "
+                    "('legacy-2', 1, 'traffic_collision', 'HIGH', 'HIGH', "
+                    "'ACTIVE_UNCONFIRMED', '[]', '[]', "
+                    "'2026-09-07 10:00:00', '2026-09-07 10:00:00', '{}')"
+                )
+            )
+            stored = connection.execute(
+                text("SELECT latitude, longitude FROM incidents WHERE id='legacy-2'")
+            ).one()
+        assert stored == (None, None)
+
+        # Re-running init_db must be a no-op once the schema is current.
+        init_db(engine)
+        with engine.begin() as connection:
+            assert (
+                connection.execute(text("SELECT COUNT(*) FROM incidents")).scalar() == 2
+            )
+    finally:
+        engine.dispose()
 
 
 def _transition(

@@ -1205,3 +1205,47 @@ had no entry or exit at all, leaving the approved review hold unusable.
 No extra database write is introduced to visit `RESPONSE_PROPOSED`. The review
 hold is now usable and, being non-actionable under PD-065, stops automated
 planning until the operator resolves it.
+
+## PD-069 - Unresolved Incident Location
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner (post-audit hardening mission, HD-007)
+
+### Decision
+
+Incident coordinates are optional. A credible urgent report activates an
+incident even when its exact location is not yet known.
+
+- `Incident.latitude` and `Incident.longitude` are nullable. There is no
+  sentinel coordinate; unresolved means `NULL`.
+- Manual intake accepts `location_text` without `location`.
+- Serialization returns `location: null` when either coordinate is missing,
+  and intake provenance records `location_resolved`.
+- Operations that genuinely need a coordinate fail visibly with HTTP 422
+  `INCIDENT_LOCATION_REQUIRED` until an operator correction supplies one.
+  Response-plan generation is guarded directly; hospital, corridor, and
+  driver-alert operations are guarded transitively because they require an
+  approved plan.
+- `PATCH /incidents/{id}/facts` resolves the coordinates, increments the
+  incident version exactly once, and records the correction with an `old`
+  value of `null`.
+- Duplicate fusion treats an incident without coordinates as having no trusted
+  coordinate, so association falls back to review rather than a distance gate.
+
+AI still cannot make coordinates authoritative; only explicit source metadata,
+operator input, or deterministic resolution can.
+
+### Reason
+
+Master Plan section 26.1 requires that an emergency with no reliable location
+is marked missing rather than pretending routing is possible, but the schema
+forced non-null coordinates, so such an incident could not be represented at
+all.
+
+### Impact
+
+Existing local databases are migrated in place. SQLite cannot relax a NOT NULL
+constraint, so `init_db` rebuilds the incidents table through a
+rename/copy/drop sequence inside one transaction, preserving every row. The
+migration is skipped once the column is already nullable.

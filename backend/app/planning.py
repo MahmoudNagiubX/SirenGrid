@@ -38,7 +38,11 @@ from app.models import (
     TimelineEvent,
     new_timeline_event_id,
 )
-from app.incidents import ensure_incident_actionable, serialize_incident
+from app.incidents import (
+    ensure_incident_actionable,
+    ensure_incident_located,
+    serialize_incident,
+)
 from app.resources import interpolate_route_progress, serialize_resource
 from app.response_requirements import (
     ResponseRequirement,
@@ -452,6 +456,7 @@ def generate_canonical_candidate_set(
             detail=f"Incident '{incident_id}' not found",
         )
     ensure_incident_actionable(incident, "generate response plans")
+    ensure_incident_located(incident, "generate response plans")
     if incident.current_plan_id:
         active_plan = db.get(ResponsePlan, incident.current_plan_id)
         if active_plan is not None and active_plan.status == ResponsePlanStatus.APPROVED:

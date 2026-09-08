@@ -141,7 +141,11 @@ def _incident_fusion_view(incident: Incident) -> FusionReport:
         category=incident.incident_type,
         latitude=incident.latitude,
         longitude=incident.longitude,
-        coordinates_trusted=True,
+        # An incident with an unresolved location has no trusted coordinate,
+        # so association falls back to review rather than a distance gate.
+        coordinates_trusted=(
+            incident.latitude is not None and incident.longitude is not None
+        ),
         received_at=_utc(incident.created_at),
         location_phrase=incident.location_text,
         source_reference=(incident.provenance_json or {}).get("source_reference"),

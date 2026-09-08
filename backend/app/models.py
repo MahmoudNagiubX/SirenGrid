@@ -122,8 +122,10 @@ class Incident(Base):
             values_callable=lambda obj: [e.value for e in obj],
         )
     )
-    latitude: Mapped[float] = mapped_column(Float)
-    longitude: Mapped[float] = mapped_column(Float)
+    # Nullable: an incident may be activated before its coordinates are
+    # confirmed. There is no sentinel coordinate; unresolved means NULL.
+    latitude: Mapped[float | None] = mapped_column(Float, nullable=True, default=None)
+    longitude: Mapped[float | None] = mapped_column(Float, nullable=True, default=None)
     location_text: Mapped[str | None] = mapped_column(
         String,
         nullable=True,

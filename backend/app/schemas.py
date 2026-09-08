@@ -250,7 +250,10 @@ class ManualIncidentCreate(BaseModel):
     incident_type: str
     severity: Severity
     confidence_level: ConfidenceLevel = ConfidenceLevel.HIGH
-    location: Coordinate
+    # Optional: the control room may activate a credible incident before the
+    # exact coordinates are known. Operations needing coordinates fail visibly
+    # until an operator correction supplies them.
+    location: Coordinate | None = None
     location_text: str | None = None
     casualty_count: int | None = Field(default=None, ge=0)
     casualty_range: str | None = None
@@ -315,9 +318,10 @@ class IncidentRead(BaseModel):
     incident_type: str
     severity: Severity
     confidence_level: ConfidenceLevel
-    location: Coordinate
-    latitude: float
-    longitude: float
+    # A credible incident may exist before its coordinates are confirmed.
+    location: Coordinate | None = None
+    latitude: float | None = None
+    longitude: float | None = None
     location_text: str | None = None
     casualty_count: int | None = None
     casualty_range: str | None = None
