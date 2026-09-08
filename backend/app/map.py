@@ -280,24 +280,18 @@ def preview_route(request: RoutePreviewRequest) -> RoutePreviewResponse:
             detail=f"Failed to load routing graph: {exc}",
         ) from exc
 
-    # 1. Snap coordinates to graph with threshold
+    # 1. Validate both endpoints are inside the routable area. The routing
+    #    engine owns the resulting snapped nodes.
     try:
-        origin_node, _ = snap_coordinate_to_graph(graph, request.origin)
-        dest_node, _ = snap_coordinate_to_graph(graph, request.destination)
+        snap_coordinate_to_graph(graph, request.origin)
+        snap_coordinate_to_graph(graph, request.destination)
     except RoutingPointOutsideGraphError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Coordinate outside routable area: {exc}",
         ) from exc
 
-    # 2. Same snapped node check -> 422
-    if origin_node == dest_node:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Origin and destination snapped to the same graph node ({origin_node})",
-        )
-
-    # 3. Capture one immutable traffic snapshot and compute independent routes.
+    # 2. Capture one immutable traffic snapshot and compute independent routes.
     now = datetime.now(timezone.utc)
     try:
         snapshot = traffic_runtime.capture_snapshot(

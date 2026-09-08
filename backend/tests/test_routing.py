@@ -148,7 +148,7 @@ def test_no_path_raises_route_not_found_error():
         compute_route_on_graph(g, origin, destination)
 
 
-def test_same_snapped_node_raises_route_not_found_error():
+def test_same_snapped_node_yields_a_valid_zero_travel_route():
     g = nx.DiGraph()
     g.add_node(1, x=31.300, y=30.000)
     g.add_node(2, x=31.310, y=30.010)
@@ -158,8 +158,58 @@ def test_same_snapped_node_raises_route_not_found_error():
     origin = Coordinate(lat=30.000, lon=31.300)
     destination = Coordinate(lat=30.0001, lon=31.3001)
 
-    with pytest.raises(RouteNotFoundError, match="same.*node"):
-        compute_route_on_graph(g, origin, destination)
+    result = compute_route_on_graph(g, origin, destination)
+
+    assert result.nodes == [1]
+    assert result.distance_m == 0.0
+    assert result.eta_seconds == 0.0
+    assert result.geometry == {
+        "type": "LineString",
+        "coordinates": [[31.3, 30.0], [31.3, 30.0]],
+    }
+
+
+def test_same_snapped_node_traffic_aware_route_is_unaffected_by_overlay():
+    from app.routing import compute_traffic_aware_route
+    from app.traffic.models import TrafficOverlay, TrafficSnapshot
+    from app.schemas import DataReality, FreshnessStatus
+    from datetime import datetime, timezone
+
+    g = nx.DiGraph()
+    g.add_node(1, x=31.300, y=30.000)
+    g.add_edge(1, 1, length=100.0, travel_time=10.0)
+    origin = Coordinate(lat=30.000, lon=31.300)
+    snapshot = TrafficSnapshot(
+        snapshot_id="snapshot-same-node",
+        version=1,
+        graph_fingerprint=graph_fingerprint(g),
+        sample_points_fingerprint="points",
+        provider_state="AVAILABLE",
+        refresh_attempted_at=datetime.now(timezone.utc),
+        retrieved_at=datetime.now(timezone.utc),
+        freshness_status=FreshnessStatus.LIVE,
+        data_reality=DataReality.REAL_LIVE,
+        source="TomTom",
+        source_reference="test",
+        flow_style="absolute",
+        flow_zoom=22,
+        units="kmph",
+        overlay=TrafficOverlay(
+            snapshot_id="snapshot-same-node",
+            graph_fingerprint=graph_fingerprint(g),
+            entries=(),
+        ),
+    )
+
+    result = compute_traffic_aware_route(g, origin, origin, snapshot)
+
+    assert result.distance_m == 0.0
+    assert result.eta_seconds == 0.0
+    assert result.base_eta == 0.0
+    assert result.effective_eta == 0.0
+    assert result.edge_keys == []
+    assert result.total_traversed_edge_count == 0
+    assert result.traffic_coverage_ratio == 0.0
 
 
 def test_too_far_coordinate_raises_routing_point_outside_graph_error():

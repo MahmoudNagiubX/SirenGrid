@@ -1129,11 +1129,10 @@ def test_interpolate_route_progress_pure_helper() -> None:
     with pytest.raises(ValueError, match="at least 2 points"):
         interpolate_route_progress([[31.34, 30.05]], 0.5)
 
-    with pytest.raises(ValueError, match="positive length"):
-        interpolate_route_progress(
-            [[31.34, 30.05], [31.34, 30.05]],
-            0.5,
-        )
+    assert interpolate_route_progress(
+        [[31.34, 30.05], [31.34, 30.05]],
+        0.5,
+    ) == (31.34, 30.05)
 
 
 def test_resource_movement_success_full_lifecycle(client: TestClient, db_session: Session) -> None:

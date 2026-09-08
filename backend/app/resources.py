@@ -121,7 +121,7 @@ def interpolate_route_progress(
 
     total_distance = sum(segment_lengths)
     if total_distance <= 0.0:
-        raise ValueError("Route geometry must have positive length")
+        return normalized_coordinates[0]
 
     if progress == 0.0:
         return normalized_coordinates[0]

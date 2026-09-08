@@ -53,8 +53,8 @@ class RouteResult(BaseModel):
 
     nodes: list[Any]
     geometry: dict[str, Any]
-    distance_m: float = Field(gt=0)
-    eta_seconds: float = Field(gt=0)
+    distance_m: float = Field(ge=0)
+    eta_seconds: float = Field(ge=0)
     origin_snap_distance_m: float = Field(ge=0)
     destination_snap_distance_m: float = Field(ge=0)
     routing_source: str = ROUTING_SOURCE_OSM_BASE_TRAVEL_TIME
@@ -80,11 +80,11 @@ class TrafficAwareRouteResult(BaseModel):
     nodes: list[Any]
     edge_keys: list[EdgeKey]
     geometry: dict[str, Any]
-    distance_m: float = Field(gt=0)
-    eta_seconds: float = Field(gt=0)
-    base_eta: float = Field(gt=0)
-    effective_eta: float = Field(gt=0)
-    traffic_selected_path_base_eta: float = Field(gt=0)
+    distance_m: float = Field(ge=0)
+    eta_seconds: float = Field(ge=0)
+    base_eta: float = Field(ge=0)
+    effective_eta: float = Field(ge=0)
+    traffic_selected_path_base_eta: float = Field(ge=0)
     origin_snap_distance_m: float = Field(ge=0)
     destination_snap_distance_m: float = Field(ge=0)
     routing_source: str = ROUTING_SOURCE_OSM_BASE_TRAVEL_TIME
@@ -92,7 +92,7 @@ class TrafficAwareRouteResult(BaseModel):
     traffic_snapshot_version: int | None = None
     traffic_freshness_status: FreshnessStatus | None = None
     matched_traversed_edge_count: int = Field(ge=0)
-    total_traversed_edge_count: int = Field(ge=1)
+    total_traversed_edge_count: int = Field(ge=0)
     traffic_coverage_ratio: float = Field(ge=0, le=1)
     traffic_weight_affected_path_selection: bool = False
     traffic_closure_affected_path_selection: bool = False
@@ -398,6 +398,17 @@ def _calculate_path(
     destination_node: Any,
     overlay: TrafficOverlay | None = None,
 ) -> _CalculatedPath:
+    if origin_node == destination_node:
+        longitude, latitude = _get_node_coords(graph, origin_node)
+        point = [longitude, latitude]
+        return _CalculatedPath(
+            nodes=[origin_node],
+            edges=[],
+            geometry={"type": "LineString", "coordinates": [point, point.copy()]},
+            distance_m=0.0,
+            effective_eta=0.0,
+            base_eta=0.0,
+        )
     try:
         path = nx.shortest_path(
             graph,
@@ -486,10 +497,6 @@ def _snap_route_endpoints(
     destination_node, destination_distance = snap_coordinate_to_graph(
         graph, destination, threshold
     )
-    if origin_node == destination_node:
-        raise RouteNotFoundError(
-            f"Origin and destination snapped to the same graph node ({origin_node})"
-        )
     return origin_node, destination_node, origin_distance, destination_distance
 
 
@@ -591,6 +598,8 @@ def _edge_disjoint_alternative(
     destination_node: Any,
     overlay: TrafficOverlay | None,
 ) -> list[RouteAlternative]:
+    if origin_node == destination_node:
+        return []
     candidate_graph = graph.copy()
     for edge in route.edges:
         if candidate_graph.is_multigraph():
@@ -682,7 +691,11 @@ def compute_traffic_aware_route(
         edge for edge in selected_route.edges if edge.public_key in traversed_entries
     ]
     covered_length = sum(edge.length_m for edge in covered_edges)
-    coverage = covered_length / selected_route.distance_m
+    coverage = (
+        covered_length / selected_route.distance_m
+        if selected_route.distance_m > 0
+        else 0.0
+    )
     active_overlay = overlay if fallback_reason is None else None
     alternatives = (
         _edge_disjoint_alternative(

@@ -246,16 +246,22 @@ def test_route_preview_destination_outside_graph_returns_422():
     assert response.status_code == 422
 
 
-def test_route_preview_same_node_returns_422():
+def test_route_preview_same_node_returns_zero_travel_route():
     # Points identical or so close they snap to identical node
     payload = {
         "origin": {"lat": 30.0687969, "lon": 31.3411596},
         "destination": {"lat": 30.0687969, "lon": 31.3411596},
     }
     response = client.post("/api/v1/routes/preview", json=payload)
-    assert response.status_code == 422
-    detail = response.json().get("detail", "")
-    assert "same" in detail.lower() and "node" in detail.lower()
+    assert response.status_code == 200
+    data = response.json()
+    assert data["distance_m"] == 0.0
+    assert data["eta_seconds"] == 0.0
+    assert data["base_eta"] == 0.0
+    assert data["effective_eta"] == 0.0
+    assert data["edge_keys"] == []
+    assert data["total_traversed_edge_count"] == 0
+    assert data["traffic_coverage_ratio"] == 0.0
 
 
 def test_route_preview_no_path_returns_409(monkeypatch: pytest.MonkeyPatch):
