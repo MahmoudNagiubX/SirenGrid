@@ -765,21 +765,22 @@ class RoutePreviewResponse(BaseModel):
     origin: Coordinate
     destination: Coordinate
     geometry: dict[str, Any]
-    distance_m: float = Field(gt=0)
-    eta_seconds: float = Field(gt=0)
+    # ``ge=0``: co-located origin and destination yield a real zero route.
+    distance_m: float = Field(ge=0)
+    eta_seconds: float = Field(ge=0)
     origin_snap_distance_m: float = Field(ge=0)
     destination_snap_distance_m: float = Field(ge=0)
     nodes: list[Any]
     edge_keys: list[tuple[str, str, str]]
     routing_source: str = "OSM_BASE_TRAVEL_TIME"
-    base_eta: float = Field(gt=0)
-    effective_eta: float = Field(gt=0)
-    traffic_selected_path_base_eta: float = Field(gt=0)
+    base_eta: float = Field(ge=0)
+    effective_eta: float = Field(ge=0)
+    traffic_selected_path_base_eta: float = Field(ge=0)
     traffic_snapshot_id: str | None = None
     traffic_snapshot_version: int | None = None
     traffic_freshness_status: FreshnessStatus | None = None
     matched_traversed_edge_count: int = Field(ge=0)
-    total_traversed_edge_count: int = Field(ge=1)
+    total_traversed_edge_count: int = Field(ge=0)
     traffic_coverage_ratio: float = Field(ge=0, le=1)
     traffic_weight_affected_path_selection: bool = False
     traffic_closure_affected_path_selection: bool = False

@@ -1249,3 +1249,42 @@ Existing local databases are migrated in place. SQLite cannot relax a NOT NULL
 constraint, so `init_db` rebuilds the incidents table through a
 rename/copy/drop sequence inside one transaction, preserving every row. The
 migration is skipped once the column is already nullable.
+
+## PD-070 - Co-Located Responder Routing
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner (post-audit hardening mission, HD-008)
+
+### Decision
+
+A responder whose origin snaps to the same routable graph node as the
+destination is treated as effectively on location, not as a routing failure.
+It yields a valid route with distance 0, ETA 0, and a geometry that repeats the
+node coordinate so it stays a structurally valid GeoJSON LineString.
+
+Route metric bounds relax from `> 0` to `>= 0` on `RouteResult`,
+`TrafficAwareRouteResult`, and `RoutePreviewResponse`. A zero-length route
+traverses no edge, so its traffic coverage ratio is 0 and no overlay or
+closure can change it. Route preview returns the zero route instead of 422.
+
+Movement over a zero-length route resolves to the single occupied point at any
+progress value rather than raising.
+
+### Reason
+
+Routing raised `RouteNotFoundError` for a same-node snap, and planning treated
+that as an unroutable candidate. The closest possible responder, one already
+standing at the incident, was therefore silently excluded and planning could
+report insufficient resources while a unit was on scene.
+
+Route preview additionally duplicated the same-node policy with its own 422
+before routing was called, which is exactly the kind of drift a single
+canonical implementation removes.
+
+### Impact
+
+No straight-line or otherwise fabricated travel is introduced; a zero route is
+a real measurement of zero distance. Malformed stored geometry, such as
+non-numeric or out-of-bounds coordinates, is still rejected visibly. Only the
+zero-length case, which is now legitimate, became valid.

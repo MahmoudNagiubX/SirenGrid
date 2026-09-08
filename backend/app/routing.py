@@ -44,8 +44,9 @@ class RouteResult(BaseModel):
 
     nodes: list[Any]
     geometry: dict[str, Any]
-    distance_m: float = Field(gt=0)
-    eta_seconds: float = Field(gt=0)
+    # ``ge=0``: a responder already at the destination has a real zero route.
+    distance_m: float = Field(ge=0)
+    eta_seconds: float = Field(ge=0)
     origin_snap_distance_m: float = Field(ge=0)
     destination_snap_distance_m: float = Field(ge=0)
     routing_source: str = ROUTING_SOURCE_OSM_BASE_TRAVEL_TIME
@@ -71,11 +72,13 @@ class TrafficAwareRouteResult(BaseModel):
     nodes: list[Any]
     edge_keys: list[EdgeKey]
     geometry: dict[str, Any]
-    distance_m: float = Field(gt=0)
-    eta_seconds: float = Field(gt=0)
-    base_eta: float = Field(gt=0)
-    effective_eta: float = Field(gt=0)
-    traffic_selected_path_base_eta: float = Field(gt=0)
+    # ``ge=0``: a responder already at the destination traverses no edge, so
+    # every travel metric is a real zero rather than a fabricated minimum.
+    distance_m: float = Field(ge=0)
+    eta_seconds: float = Field(ge=0)
+    base_eta: float = Field(ge=0)
+    effective_eta: float = Field(ge=0)
+    traffic_selected_path_base_eta: float = Field(ge=0)
     origin_snap_distance_m: float = Field(ge=0)
     destination_snap_distance_m: float = Field(ge=0)
     routing_source: str = ROUTING_SOURCE_OSM_BASE_TRAVEL_TIME
@@ -83,7 +86,7 @@ class TrafficAwareRouteResult(BaseModel):
     traffic_snapshot_version: int | None = None
     traffic_freshness_status: FreshnessStatus | None = None
     matched_traversed_edge_count: int = Field(ge=0)
-    total_traversed_edge_count: int = Field(ge=1)
+    total_traversed_edge_count: int = Field(ge=0)
     traffic_coverage_ratio: float = Field(ge=0, le=1)
     traffic_weight_affected_path_selection: bool = False
     traffic_closure_affected_path_selection: bool = False
@@ -470,11 +473,30 @@ def _snap_route_endpoints(
     destination_node, destination_distance = snap_coordinate_to_graph(
         graph, destination, threshold
     )
-    if origin_node == destination_node:
-        raise RouteNotFoundError(
-            f"Origin and destination snapped to the same graph node ({origin_node})"
-        )
     return origin_node, destination_node, origin_distance, destination_distance
+
+
+def colocated_path(graph: nx.Graph, node: Any) -> _CalculatedPath:
+    """Return the zero-travel path for a responder already at the destination.
+
+    Snapping origin and destination to the same routable node means the
+    responder is effectively on location. That is a valid, and in fact ideal,
+    dispatch outcome, so it yields a real zero-distance, zero-ETA route rather
+    than an error that would drop the closest responder from planning.
+
+    The geometry repeats the node coordinate so it stays a structurally valid
+    GeoJSON LineString for map and corridor consumers. No travel is fabricated.
+    """
+    longitude, latitude = _get_node_coords(graph, node)
+    point = [longitude, latitude]
+    return _CalculatedPath(
+        nodes=[node],
+        edges=[],
+        geometry={"type": "LineString", "coordinates": [list(point), list(point)]},
+        distance_m=0.0,
+        effective_eta=0.0,
+        base_eta=0.0,
+    )
 
 
 def compute_route_on_graph(
@@ -487,7 +509,11 @@ def compute_route_on_graph(
     origin_node, destination_node, origin_distance, destination_distance = (
         _snap_route_endpoints(graph, origin, destination, max_snap_distance_m)
     )
-    route = _calculate_path(graph, origin_node, destination_node)
+    route = (
+        colocated_path(graph, origin_node)
+        if origin_node == destination_node
+        else _calculate_path(graph, origin_node, destination_node)
+    )
     return RouteResult(
         nodes=route.nodes,
         geometry=route.geometry,
@@ -610,9 +636,18 @@ def compute_traffic_aware_route(
     origin_node, destination_node, origin_distance, destination_distance = (
         _snap_route_endpoints(graph, origin, destination, max_snap_distance_m)
     )
-    base_route = _calculate_path(graph, origin_node, destination_node)
-    overlay, fallback_reason = _usable_overlay(graph, snapshot)
-    if overlay is None:
+    if origin_node == destination_node:
+        # Already on location: no edge can be traversed, so no overlay or
+        # closure can change the outcome.
+        base_route = colocated_path(graph, origin_node)
+        overlay, fallback_reason = _usable_overlay(graph, snapshot)
+        selected_route = base_route
+        colocated = True
+    else:
+        colocated = False
+        base_route = _calculate_path(graph, origin_node, destination_node)
+        overlay, fallback_reason = _usable_overlay(graph, snapshot)
+    if colocated or overlay is None:
         selected_route = base_route
     else:
         try:
@@ -665,7 +700,12 @@ def compute_traffic_aware_route(
         edge for edge in selected_route.edges if edge.public_key in traversed_entries
     ]
     covered_length = sum(edge.length_m for edge in covered_edges)
-    coverage = covered_length / selected_route.distance_m
+    # A zero-length co-located route traverses nothing, so no traffic can apply.
+    coverage = (
+        covered_length / selected_route.distance_m
+        if selected_route.distance_m > 0
+        else 0.0
+    )
     active_overlay = overlay if fallback_reason is None else None
     alternatives = _edge_disjoint_alternative(
         graph, selected_route, origin_node, destination_node, active_overlay

@@ -1142,11 +1142,11 @@ def test_interpolate_route_progress_pure_helper() -> None:
     with pytest.raises(ValueError, match="at least 2 points"):
         interpolate_route_progress([[31.34, 30.05]], 0.5)
 
-    with pytest.raises(ValueError, match="positive length"):
-        interpolate_route_progress(
-            [[31.34, 30.05], [31.34, 30.05]],
-            0.5,
-        )
+    # A zero-length route belongs to a responder already on location. Every
+    # progress value resolves to the single point it occupies.
+    colocated = [[31.34, 30.05], [31.34, 30.05]]
+    for progress in (0.0, 0.5, 1.0):
+        assert interpolate_route_progress(colocated, progress) == (31.34, 30.05)
 
 
 def test_resource_movement_success_full_lifecycle(client: TestClient, db_session: Session) -> None:
@@ -1767,7 +1767,6 @@ def test_release_and_reassignment_clear_previous_movement_state(
 @pytest.mark.parametrize(
     "coordinates",
     [
-        [[31.34, 30.05], [31.34, 30.05]],
         [[31.34, 30.05], ["invalid", 30.06]],
         [[31.34, 30.05], [181.0, 30.06]],
     ],

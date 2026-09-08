@@ -148,18 +148,64 @@ def test_no_path_raises_route_not_found_error():
         compute_route_on_graph(g, origin, destination)
 
 
-def test_same_snapped_node_raises_route_not_found_error():
+def test_same_snapped_node_yields_a_valid_zero_travel_route():
+    """A responder already at the destination is the ideal dispatch outcome.
+
+    It must produce a real zero route rather than an error that would drop the
+    closest responder from planning.
+    """
     g = nx.DiGraph()
     g.add_node(1, x=31.300, y=30.000)
     g.add_node(2, x=31.310, y=30.010)
     g.add_edge(1, 2, length=100.0, travel_time=10.0)
 
-    # Origin and destination snap to node 1
+    # Origin and destination both snap to node 1.
     origin = Coordinate(lat=30.000, lon=31.300)
     destination = Coordinate(lat=30.0001, lon=31.3001)
 
-    with pytest.raises(RouteNotFoundError, match="same.*node"):
-        compute_route_on_graph(g, origin, destination)
+    result = compute_route_on_graph(g, origin, destination)
+
+    assert result.distance_m == 0.0
+    assert result.eta_seconds == 0.0
+    assert result.nodes == [1]
+    assert result.routing_source == "OSM_BASE_TRAVEL_TIME"
+
+    # Geometry stays a structurally valid LineString at the node itself; no
+    # straight-line travel is fabricated.
+    assert result.geometry["type"] == "LineString"
+    assert result.geometry["coordinates"] == [[31.300, 30.000], [31.300, 30.000]]
+
+    # Serialization round-trips for map and plan consumers.
+    as_dict = result.to_dict()
+    assert as_dict["distance_m"] == 0.0
+    assert as_dict["eta_seconds"] == 0.0
+
+
+def test_same_snapped_node_traffic_aware_route_is_unaffected_by_overlay():
+    """No overlay or closure can change a route that traverses no edge."""
+    from app.routing import compute_traffic_aware_route
+
+    g = nx.MultiDiGraph()
+    g.add_node(1, x=31.300, y=30.000)
+    g.add_node(2, x=31.310, y=30.010)
+    g.add_edge(1, 2, key="0", length=100.0, travel_time=10.0, base_travel_time_s=10.0)
+
+    origin = Coordinate(lat=30.000, lon=31.300)
+    destination = Coordinate(lat=30.0001, lon=31.3001)
+
+    result = compute_traffic_aware_route(g, origin, destination, None)
+
+    assert result.distance_m == 0.0
+    assert result.eta_seconds == 0.0
+    assert result.base_eta == 0.0
+    assert result.effective_eta == 0.0
+    assert result.edge_keys == []
+    assert result.total_traversed_edge_count == 0
+    assert result.matched_traversed_edge_count == 0
+    assert result.traffic_coverage_ratio == 0.0
+    assert result.routing_source == "OSM_BASE_TRAVEL_TIME"
+    assert result.traffic_weight_affected_path_selection is False
+    assert result.traffic_closure_affected_path_selection is False
 
 
 def test_too_far_coordinate_raises_routing_point_outside_graph_error():

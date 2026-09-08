@@ -976,6 +976,88 @@ def test_generate_plan_real_osm_routing_integration(
         assert len(r["route_geometry"]["coordinates"]) >= 2
 
 
+def test_colocated_responder_stays_eligible_through_planning_and_approval(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A responder already at the incident must not be dropped from planning.
+
+    Before, its origin and destination snapped to the same graph node and
+    routing raised, so the closest possible responder was excluded and planning
+    could report insufficient resources with a unit standing on scene.
+    """
+    graph = planner_graph([("amb-far", 30.0700, 31.3500, 400.0)])
+
+    def colocated_graph() -> nx.MultiDiGraph:
+        # The co-located responder shares the incident node exactly.
+        built = graph()
+        built.add_node("amb-onscene", x=INCIDENT_LON, y=INCIDENT_LAT)
+        return built
+
+    configure_canonical_planner(monkeypatch, colocated_graph)
+    incident = create_test_incident(
+        db=db_session,
+        required_resources=[{"resource_type": "AMBULANCE", "count": 1}],
+    )
+    create_test_resource(
+        db=db_session,
+        resource_id="amb-onscene",
+        name="On Scene Ambulance",
+        resource_type=ResourceType.AMBULANCE,
+        status=ResourceStatus.AVAILABLE,
+        lat=INCIDENT_LAT,
+        lon=INCIDENT_LON,
+    )
+    create_test_resource(
+        db=db_session,
+        resource_id="amb-far",
+        name="Far Ambulance",
+        resource_type=ResourceType.AMBULANCE,
+        status=ResourceStatus.AVAILABLE,
+        lat=30.0700,
+        lon=31.3500,
+    )
+
+    response = client.post(f"/api/v1/incidents/{incident.id}/plans/generate")
+    assert response.status_code == 201, response.text
+    plan = response.json()
+
+    # Zero ETA wins over the 400s alternative.
+    assert plan["resource_ids"] == ["amb-onscene"]
+    route = plan["routes"][0]
+    assert route["eta_seconds"] == 0.0
+    assert route["distance_m"] == 0.0
+    assert route["geometry"]["type"] == "LineString"
+    assert plan["metrics"]["max_arrival_eta_seconds"] == 0.0
+
+    # The zero route approves and assigns like any other.
+    approval = client.post(
+        f"/api/v1/plans/{plan['id']}/approve",
+        json={
+            "expected_incident_version": plan["incident_version"],
+            "expected_plan_version": plan["plan_version"],
+            "operator_reference": "dispatcher-colocated",
+        },
+    )
+    assert approval.status_code == 200, approval.text
+
+    # Movement over a zero-length route is a safe no-op at the single point.
+    movement = client.patch(
+        f"/api/v1/incidents/{incident.id}/resources/amb-onscene/movement",
+        json={
+            "route_progress": 1.0,
+            "expected_resource_version": 2,
+            "operator_reference": "dispatcher-colocated",
+        },
+    )
+    assert movement.status_code in (200, 404), movement.text
+    if movement.status_code == 200:
+        body = movement.json()
+        assert body["latitude"] == INCIDENT_LAT
+        assert body["longitude"] == INCIDENT_LON
+
+
 def _cancel(client: TestClient, incident_id: str, version: int) -> Any:
     return client.post(
         f"/api/v1/incidents/{incident_id}/cancel",

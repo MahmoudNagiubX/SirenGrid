@@ -246,16 +246,24 @@ def test_route_preview_destination_outside_graph_returns_422():
     assert response.status_code == 422
 
 
-def test_route_preview_same_node_returns_422():
-    # Points identical or so close they snap to identical node
+def test_route_preview_same_node_returns_zero_travel_route():
+    """Identical points are co-located, which is a valid zero-travel result."""
     payload = {
         "origin": {"lat": 30.0687969, "lon": 31.3411596},
         "destination": {"lat": 30.0687969, "lon": 31.3411596},
     }
     response = client.post("/api/v1/routes/preview", json=payload)
-    assert response.status_code == 422
-    detail = response.json().get("detail", "")
-    assert "same" in detail.lower() and "node" in detail.lower()
+    assert response.status_code == 200, response.text
+    data = response.json()
+
+    assert data["distance_m"] == 0.0
+    assert data["eta_seconds"] == 0.0
+    assert data["base_eta"] == 0.0
+    assert data["effective_eta"] == 0.0
+    assert data["geometry"]["type"] == "LineString"
+    assert len(data["geometry"]["coordinates"]) == 2
+    assert data["geometry"]["coordinates"][0] == data["geometry"]["coordinates"][1]
+    assert data["routing_source"] == "OSM_BASE_TRAVEL_TIME"
 
 
 def test_route_preview_no_path_returns_409(monkeypatch: pytest.MonkeyPatch):

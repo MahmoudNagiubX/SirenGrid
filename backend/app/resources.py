@@ -115,7 +115,10 @@ def interpolate_route_progress(
 
     total_distance = sum(segment_lengths)
     if total_distance <= 0.0:
-        raise ValueError("Route geometry must have positive length")
+        # A responder already on location has a zero-length route. Every
+        # progress value resolves to the single point it occupies, which is
+        # the truthful answer rather than fabricated travel.
+        return normalized_coordinates[0]
 
     if progress == 0.0:
         return normalized_coordinates[0]

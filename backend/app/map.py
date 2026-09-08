@@ -290,12 +290,9 @@ def preview_route(request: RoutePreviewRequest) -> RoutePreviewResponse:
             detail=f"Coordinate outside routable area: {exc}",
         ) from exc
 
-    # 2. Same snapped node check -> 422
-    if origin_node == dest_node:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Origin and destination snapped to the same graph node ({origin_node})",
-        )
+    # Origin and destination snapping to the same node means the two points
+    # are already co-located. The routing engine returns a real zero-travel
+    # route for that, so preview no longer rejects it here.
 
     # 3. Capture one immutable traffic snapshot and compute independent routes.
     now = datetime.now(timezone.utc)
