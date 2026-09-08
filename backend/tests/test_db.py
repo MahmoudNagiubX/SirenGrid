@@ -66,6 +66,24 @@ def test_sqlite_pragmas_enabled(isolated_engine: Engine) -> None:
             conn.commit()
 
 
+def test_sqlite_busy_timeout_is_explicit_when_driver_default_is_disabled(
+    tmp_path: Path,
+) -> None:
+    target_engine = db_module.create_engine(
+        f"sqlite:///{tmp_path / 'busy-timeout.db'}",
+        connect_args={"timeout": 0},
+    )
+    try:
+        with target_engine.connect() as conn:
+            assert conn.execute(text("PRAGMA busy_timeout;")).scalar() == 5000
+    finally:
+        target_engine.dispose()
+
+
+def test_non_sqlite_database_url_has_no_sqlite_connect_args() -> None:
+    assert db_module._connect_args_for_database_url("postgresql://db/test") == {}
+
+
 def test_isolated_temporary_db(isolated_engine: Engine, tmp_db_file: Path) -> None:
     """Verify tests run against an isolated temporary database, not a persistent repo DB."""
     repo_root = Path(__file__).resolve().parents[2]
