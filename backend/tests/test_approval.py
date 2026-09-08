@@ -5,6 +5,7 @@ import threading
 from typing import Any
 import uuid
 
+import networkx as nx
 from fastapi.testclient import TestClient
 import pytest
 from sqlalchemy import Engine, select
@@ -14,9 +15,10 @@ import app.models as _models  # noqa: F401
 from app.db import init_db
 from app.main import app
 from app.models import Approval, EmergencyResource, Incident, ResponsePlan, TimelineEvent
-from app.routing import RouteResult
+from app.coverage import CoverageZone
 from app.schemas import (
     ConfidenceLevel,
+    Coordinate,
     IncidentStatus,
     ResourceStatus,
     ResourceType,
@@ -788,19 +790,33 @@ def test_approval_rejects_superseded_plan_even_with_current_incident_version(
         version=1,
     )
 
-    def mock_compute(graph: Any, origin: Any, destination: Any) -> RouteResult:
-        return RouteResult(
-            nodes=[101, 102],
-            geometry={"type": "LineString", "coordinates": [[31.3460, 30.0570], [31.3452, 30.0561]]},
-            distance_m=1000.0,
-            eta_seconds=120.0,
-            origin_snap_distance_m=5.0,
-            destination_snap_distance_m=5.0,
-            routing_source="OSM_BASE_TRAVEL_TIME",
+    graph = nx.MultiDiGraph()
+    graph.add_node("incident", x=incident.longitude, y=incident.latitude)
+    graph.add_node(res.id, x=res.longitude, y=res.latitude)
+    for source, target in ((res.id, "incident"), ("incident", res.id)):
+        graph.add_edge(
+            source,
+            target,
+            key="0",
+            length=1000.0,
+            travel_time=120.0,
+            base_travel_time_s=120.0,
         )
-
-    monkeypatch.setattr("app.planning.load_routing_graph", lambda: None)
-    monkeypatch.setattr("app.planning.compute_route_on_graph", mock_compute)
+    monkeypatch.setattr("app.planning.load_routing_graph", lambda: graph)
+    monkeypatch.setattr(
+        "app.planning.load_population_zones",
+        lambda _path: (
+            CoverageZone(
+                zone_id="zone-1",
+                centroid=Coordinate(lat=incident.latitude, lon=incident.longitude),
+                population=100.0,
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        "app.planning.traffic_runtime.capture_snapshot",
+        lambda *_args, **_kwargs: None,
+    )
 
     # 1. Generate Plan v1
     resp1 = client.post(f"/api/v1/incidents/{incident.id}/plans/generate")
