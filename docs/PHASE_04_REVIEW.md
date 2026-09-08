@@ -52,6 +52,18 @@ and atomic so failed refreshes preserve the prior validated artifact.
 - Artifact SHA-256:
   `d7f9a46642608a1cbae8796ff90b95183e214f59c2a6162215d8e3f6e8c471d9`.
 
+> **Errata (post-audit hardening, FX-001).** The artifact SHA-256 recorded above
+> does not match the artifact committed to this branch, whose canonical UTF-8/LF
+> SHA-256 is
+> `687ad07b25df21de91556f04c550812c0d78dd2860215e533b1bc78668562884`.
+> All population values, zone count, NoData count, conservation error, and
+> source metadata recorded above are unchanged and still match the committed
+> artifact; only the recorded digest was stale. The artifact digest is now
+> committed in `data/processed/nasr_city/worldpop_provenance.json` and enforced
+> by `test_phase_04_worldpop_artifact_provenance_and_hash_match`, so it can no
+> longer drift from documentation. This note records the correction; the
+> original review text above is retained as historical evidence.
+
 No synthetic, equal-per-zone, random, donor-zero, or other fabricated
 population fallback is used.
 

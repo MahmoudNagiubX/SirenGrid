@@ -1,0 +1,29 @@
+{
+  "artifacts": {
+    "nasr_city_zone_population_worldpop_2025.geojson": {
+      "acquired_at": "2026-09-07T15:36:31.876732+00:00",
+      "allocation_crs": "EPSG:6933",
+      "byte_count": 363658,
+      "conservation_error": -5.82e-10,
+      "data_reality": "REAL_DERIVED",
+      "doi": "10.5258/SOTON/WP00803",
+      "freshness_status": "STATIC",
+      "nodata_cell_count": 945,
+      "raster_url": "https://data.worldpop.org/GIS/Population/Global_2015_2030/R2024B/2025/EGY/v1/100m/constrained/egy_pop_2025_CN_100m_R2024B_v1.tif",
+      "record_count": 416,
+      "release": "R2024B",
+      "sha256": "687ad07b25df21de91556f04c550812c0d78dd2860215e533b1bc78668562884",
+      "source": "WorldPop Egypt constrained population counts",
+      "source_filename": "egy_pop_2025_CN_100m_R2024B_v1.tif",
+      "source_reference": "https://hub.worldpop.org/geodata/summary?id=56914",
+      "source_sha256": "75ea54bea9667335858cc5be88735c467f165403d5020d794fa52d2a7cfdf1e6",
+      "total_modeled_population": 743827.6942895878,
+      "version": "v1"
+    }
+  },
+  "data_reality": "REAL_DERIVED",
+  "generated_by": "backend/scripts/build_worldpop_zone_population.py",
+  "hash_encoding": "canonical UTF-8 bytes with LF line endings",
+  "phase": "PHASE_04_COVERAGE_AND_RESPONSE_PLANNING",
+  "underlying_data_reality": "REAL_PUBLIC"
+}

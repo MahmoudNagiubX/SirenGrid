@@ -15,7 +15,9 @@ REQUIRED_FILES = [
     "nasr_city_emergency_facilities.geojson",
     "nasr_city_traffic_signals.geojson",
     "nasr_city_traffic_sample_points.geojson",
+    "nasr_city_zone_population_worldpop_2025.geojson",
     "provenance.json",
+    "worldpop_provenance.json",
 ]
 
 REQUIRED_GEOJSON_LAYERS = [
@@ -88,6 +90,10 @@ def test_phase_02_provenance_metadata_and_hashes_match():
         canonical_bytes = path.read_bytes().replace(b"\r\n", b"\n")
         assert metadata["sha256"] == hashlib.sha256(canonical_bytes).hexdigest()
 
+    # The WorldPop-derived coverage artifact is produced by a different phase and
+    # script, so it carries its own manifest and must not appear here.
+    assert "nasr_city_zone_population_worldpop_2025.geojson" not in artifacts
+
     retained = provenance["retained_artifacts"]
     for filename in ("nasr_city_boundary.geojson", "nasr_city_grid_500m.geojson"):
         assert retained[filename]["source_repo"] == (
@@ -96,6 +102,49 @@ def test_phase_02_provenance_metadata_and_hashes_match():
         assert retained[filename]["source_commit"] == (
             "93ca9e90e2fc52c914dd5ccbe42bdc84ce745d3d"
         )
+
+
+def test_phase_04_worldpop_artifact_provenance_and_hash_match():
+    """The coverage engine's only population input must be integrity-locked.
+
+    The WorldPop zone artifact is produced by the Phase 04 build script rather
+    than the Phase 02 OSM refresh, so it carries a dedicated manifest that a
+    geospatial refresh cannot overwrite.
+    """
+    manifest_path = NASR_CITY_ASSETS_DIR / "worldpop_provenance.json"
+    assert manifest_path.is_file(), "worldpop_provenance.json does not exist"
+
+    with open(manifest_path, "r", encoding="utf-8") as f:
+        manifest = json.load(f)
+
+    assert manifest["phase"] == "PHASE_04_COVERAGE_AND_RESPONSE_PLANNING"
+    assert manifest["data_reality"] == "REAL_DERIVED"
+    assert manifest["underlying_data_reality"] == "REAL_PUBLIC"
+
+    artifact_name = "nasr_city_zone_population_worldpop_2025.geojson"
+    record = manifest["artifacts"][artifact_name]
+    artifact_path = NASR_CITY_ASSETS_DIR / artifact_name
+    assert artifact_path.is_file(), f"{artifact_name} does not exist"
+
+    # The build script emits canonical UTF-8/LF bytes. Git on Windows may
+    # materialize tracked text assets with CRLF, so normalize only line endings.
+    canonical_bytes = artifact_path.read_bytes().replace(b"\r\n", b"\n")
+    assert record["sha256"] == hashlib.sha256(canonical_bytes).hexdigest()
+
+    with open(artifact_path, "r", encoding="utf-8") as f:
+        artifact = json.load(f)
+    validation = artifact["properties"]["validation"]
+    source_metadata = artifact["properties"]["source_metadata"]
+
+    # The manifest must describe the artifact it locks, not a different build.
+    assert record["record_count"] == validation["zone_count"] == len(artifact["features"])
+    assert record["total_modeled_population"] == validation["total_modeled_population"]
+    assert record["source_sha256"] == source_metadata["source_sha256"]
+    assert record["source_reference"] == source_metadata["source_reference"]
+    assert record["release"] == source_metadata["release"]
+    assert record["version"] == source_metadata["version"]
+    assert record["doi"] == source_metadata["doi"]
+    assert record["freshness_status"] == "STATIC"
 
 
 def test_graphml_parsable_by_networkx():
