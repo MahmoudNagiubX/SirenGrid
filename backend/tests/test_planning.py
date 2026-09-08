@@ -188,6 +188,33 @@ def test_generate_plan_missing_incident_returns_404(client: TestClient) -> None:
     assert "not found" in response.json()["detail"].lower()
 
 
+@pytest.mark.parametrize(
+    "status_value",
+    [
+        IncidentStatus.CLOSED,
+        IncidentStatus.CANCELLED_FALSE_REPORT,
+        IncidentStatus.DUPLICATE_MERGED,
+        IncidentStatus.REQUIRES_REVIEW,
+    ],
+)
+def test_both_planning_endpoints_fence_non_actionable_incidents(
+    client: TestClient,
+    db_session: Session,
+    status_value: IncidentStatus,
+) -> None:
+    incident = create_test_incident(db=db_session, status=status_value)
+
+    legacy = client.post(f"/api/v1/incidents/{incident.id}/plans/generate")
+    candidates = client.post(
+        f"/api/v1/incidents/{incident.id}/plans/generate-candidates"
+    )
+
+    assert legacy.status_code == 409
+    assert candidates.status_code == 409
+    assert "not actionable" in legacy.json()["detail"].lower()
+    assert "not actionable" in candidates.json()["detail"].lower()
+
+
 def test_generate_plan_chooses_lower_eta_available_resource(
     client: TestClient,
     db_session: Session,

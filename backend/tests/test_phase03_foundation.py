@@ -264,6 +264,31 @@ def test_full_forward_lifecycle_transport_flow(client: TestClient, db_session: S
     assert events[-1].details_json["to_status"] == IncidentStatus.CLOSED.value
 
 
+def test_active_unconfirmed_can_transition_directly_to_awaiting_approval(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    inc = create_test_incident(
+        db_session,
+        status=IncidentStatus.ACTIVE_UNCONFIRMED,
+        version=1,
+    )
+
+    response = client.post(
+        f"/api/v1/incidents/{inc.id}/transition",
+        json={
+            "target_status": IncidentStatus.AWAITING_APPROVAL.value,
+            "expected_incident_version": 1,
+            "operator_reference": "dispatcher-01",
+            "reason": "Canonical planner produced an actionable candidate",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == IncidentStatus.AWAITING_APPROVAL.value
+    assert response.json()["version"] == 2
+
+
 def test_forward_lifecycle_non_transport_flow(client: TestClient, db_session: Session) -> None:
     """Non-transport incidents transition ON_SCENE -> HANDOVER -> CLOSED."""
     inc = create_test_incident(db_session, status=IncidentStatus.ON_SCENE, version=4)
@@ -437,7 +462,7 @@ def test_exceptional_states_rejected_with_409(client: TestClient, db_session: Se
         )
         assert res.status_code == 409, f"Expected 409 for {exceptional.value}"
 
-    # Also verify transition out of exceptional state is rejected
+    # Review resolution is the one explicit path out of REQUIRES_REVIEW.
     inc_review = create_test_incident(db_session, status=IncidentStatus.REQUIRES_REVIEW, version=2)
     res_out = client.post(
         f"/api/v1/incidents/{inc_review.id}/transition",
@@ -445,9 +470,12 @@ def test_exceptional_states_rejected_with_409(client: TestClient, db_session: Se
             "target_status": IncidentStatus.ACTIVE_UNCONFIRMED.value,
             "expected_incident_version": 2,
             "operator_reference": "dispatcher-01",
+            "reason": "Operator reviewed the evidence and restored the incident",
         },
     )
-    assert res_out.status_code == 409
+    assert res_out.status_code == 200, res_out.text
+    assert res_out.json()["status"] == IncidentStatus.ACTIVE_UNCONFIRMED.value
+    assert res_out.json()["version"] == 3
 
 
 def test_incident_close_endpoint_contract(client: TestClient, db_session: Session) -> None:

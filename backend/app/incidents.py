@@ -42,6 +42,9 @@ __all__ = [
     "get_report",
     "transition_incident_lifecycle",
     "close_incident",
+    "NON_ACTIONABLE_INCIDENT_STATUSES",
+    "is_incident_actionable",
+    "ensure_incident_actionable",
     "LOCKED_FORWARD_TRANSITIONS",
     "PLANNING_INPUT_FACT_FIELDS",
 ]
@@ -100,7 +103,10 @@ def serialize_incident(incident: Incident) -> dict[str, Any]:
 LOCKED_FORWARD_TRANSITIONS: dict[IncidentStatus, set[IncidentStatus]] = {
     IncidentStatus.RECEIVED: {IncidentStatus.INTERPRETING},
     IncidentStatus.INTERPRETING: {IncidentStatus.ACTIVE_UNCONFIRMED},
-    IncidentStatus.ACTIVE_UNCONFIRMED: {IncidentStatus.RESPONSE_PROPOSED},
+    IncidentStatus.ACTIVE_UNCONFIRMED: {
+        IncidentStatus.RESPONSE_PROPOSED,
+        IncidentStatus.AWAITING_APPROVAL,
+    },
     IncidentStatus.RESPONSE_PROPOSED: {IncidentStatus.AWAITING_APPROVAL},
     IncidentStatus.AWAITING_APPROVAL: {IncidentStatus.RESPONSE_ACTIVE},
     IncidentStatus.RESPONSE_ACTIVE: {IncidentStatus.EN_ROUTE},
@@ -109,10 +115,41 @@ LOCKED_FORWARD_TRANSITIONS: dict[IncidentStatus, set[IncidentStatus]] = {
     IncidentStatus.TRANSPORT_ACTIVE: {IncidentStatus.HANDOVER},
     IncidentStatus.HANDOVER: {IncidentStatus.CLOSED},
     IncidentStatus.CLOSED: set(),
-    IncidentStatus.REQUIRES_REVIEW: set(),
+    IncidentStatus.REQUIRES_REVIEW: {IncidentStatus.ACTIVE_UNCONFIRMED},
     IncidentStatus.DUPLICATE_MERGED: set(),
     IncidentStatus.CANCELLED_FALSE_REPORT: set(),
 }
+
+NON_ACTIONABLE_INCIDENT_STATUSES: frozenset[IncidentStatus] = frozenset(
+    {
+        IncidentStatus.CLOSED,
+        IncidentStatus.CANCELLED_FALSE_REPORT,
+        IncidentStatus.DUPLICATE_MERGED,
+        IncidentStatus.REQUIRES_REVIEW,
+    }
+)
+
+
+def is_incident_actionable(incident: Incident) -> bool:
+    """Return whether an incident may receive a new operational plan/action."""
+    return incident.status not in NON_ACTIONABLE_INCIDENT_STATUSES
+
+
+def ensure_incident_actionable(incident: Incident, action: str) -> None:
+    """Raise a conflict when an incident is terminal or awaiting review."""
+    if is_incident_actionable(incident):
+        return
+    status_value = (
+        incident.status.value
+        if hasattr(incident.status, "value")
+        else str(incident.status)
+    )
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=(
+            f"Cannot {action}: incident status '{status_value}' is not actionable"
+        ),
+    )
 
 
 def _acquire_write_lock(db: Session) -> None:

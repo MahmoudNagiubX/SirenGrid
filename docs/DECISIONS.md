@@ -1000,3 +1000,31 @@ The hackathon demo prefers a valid current TomTom snapshot when
 behavior remains mandatory, tests must not depend on live TomTom, and fallback
 must never be labeled `REAL_LIVE`. Phase 09 may only verify or minimally fix
 this existing Phase 02 behavior; it must not redesign the traffic subsystem.
+
+## PD-069 - False-Report Cancellation
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner
+
+An explicit operator command may cancel a false report only before any
+committed operational response exists. The command is transactional and
+version-safe, increments the incident version exactly once, supersedes
+unapproved candidate plans, clears safe candidate pointers, and appends an
+audit timeline event. It must reject incidents with an approved committed
+response, committed responders, or an equivalent active response lifecycle;
+committed resources are never released automatically. Stale, repeated, and
+competing commands resolve as conflicts with exactly one concurrent winner.
+
+## PD-070 - Incident Lifecycle Reconciliation
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner
+
+The canonical lifecycle permits `ACTIVE_UNCONFIRMED` to transition directly
+to `AWAITING_APPROVAL`. An explicit, version-safe operator review-resolution
+action may transition `REQUIRES_REVIEW` back to `ACTIVE_UNCONFIRMED`. Terminal
+states remain terminal and cannot be reopened; no automatic review resolution
+or artificial `RESPONSE_PROPOSED` persistence is required for canonical
+planning.

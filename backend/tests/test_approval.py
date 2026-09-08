@@ -554,7 +554,41 @@ def test_missing_plan_returns_404(client: TestClient) -> None:
     }
     response = client.post(f"/api/v1/plans/{random_id}/approve", json=payload)
     assert response.status_code == 404
-    assert "not found" in response.json()["detail"].lower()
+
+
+def test_approval_is_fenced_when_incident_becomes_non_actionable(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    incident = create_test_incident(
+        db=db_session,
+        version=2,
+        status=IncidentStatus.AWAITING_APPROVAL,
+    )
+    plan = create_test_plan(
+        db=db_session,
+        incident_id=incident.id,
+        incident_version=2,
+        status=ResponsePlanStatus.RECOMMENDED,
+        resource_ids=[],
+    )
+    incident.status = IncidentStatus.REQUIRES_REVIEW
+    db_session.commit()
+
+    response = client.post(
+        f"/api/v1/plans/{plan.id}/approve",
+        json={
+            "operator_reference": "dispatcher-01",
+            "expected_incident_version": 2,
+            "expected_plan_version": 1,
+        },
+    )
+
+    assert response.status_code == 409
+    assert "not actionable" in response.json()["detail"].lower()
+    db_session.expire_all()
+    assert db_session.get(ResponsePlan, plan.id).status == ResponsePlanStatus.RECOMMENDED
+    assert db_session.get(Incident, incident.id).version == 2
 
 
 def test_missing_referenced_incident_returns_404(client: TestClient, db_session: Session) -> None:
