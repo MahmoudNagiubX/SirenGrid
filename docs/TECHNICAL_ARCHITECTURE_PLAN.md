@@ -2477,3 +2477,40 @@ Key changes:
 25. Deployment made local-first; cloud/containerization deferred until needed.
 
 **Review result:** No remaining architecture blocker was identified that requires redesign before implementation. Remaining open items are intentional implementation-time choices (frontend owner stack, exact prototype rule values/score weights/thresholds, and benchmark-selected model/checkpoint roles) and are explicitly bounded so agents must not invent them.
+
+---
+
+# 52. Post-Audit Hardened Operational Runtime Contracts
+
+Following comprehensive adversarial auditing and post-audit hardening across Phase 00–08, the following operational contracts are strictly locked:
+
+## 52.1 Database Concurrency & Referential Integrity
+
+- **SQLite Busy Timeout:** SQLite engine connections are configured with `PRAGMA busy_timeout = 5000` (5 seconds) to eliminate transient database lock failures under concurrent load.
+- **Write Serialization:** Mutating database transactions execute `BEGIN IMMEDIATE` on SQLite backends, serializing concurrent writes in the single-worker process.
+- **Referential Integrity Truth:** While SQLite `PRAGMA foreign_keys = ON` is enabled on connections, system-wide referential integrity is primarily enforced by application domain logic, lifecycle fences, and service-layer validations rather than relying entirely on relational schema constraints.
+
+## 52.2 Operations WebSocket Stream
+
+- **Non-Blocking Delivery:** `OperationsConnectionManager.publish()` schedules broadcasts on the event loop and returns immediately without waiting for client socket I/O.
+- **Dead Connection Pruning:** Stalled or disconnected client sockets are pruned asynchronously upon delivery failure, preventing client lag from degrading backend throughput.
+- **REST as Canonical Recovery:** WebSockets serve strictly as an invalidation/notification channel. State mutations commit before socket broadcast; failed delivery never rolls back committed transactions. REST endpoints remain the canonical recovery path for clients.
+
+## 52.3 Security & Ingestion Safeguards
+
+- **Strict Credentialed CORS:** In accordance with browser security standards, wildcard origins (`*`) are prohibited when `allow_credentials=True`. Allowed origins must be explicitly enumerated in `CORS_ORIGINS`.
+- **Media Signature Verification:** Ingestion endpoints for multimodal assets (audio, images) inspect magic byte signatures to prevent spoofed file extensions.
+- **Clock-Skew Degradation:** Future-dated traffic observations degrade gracefully to maintain deterministic routing without rejecting valid operational flows.
+
+## 52.4 Two-Layer Evaluation Architecture
+
+- **Layer A (Comparative Benchmark):** Exactly 36 deterministic planning and coverage scenarios executed via `Phase08ScenarioRunner` against fixed road, population, and traffic fixtures. Metrics are multi-dimensional (ETA, coverage preservation, reserve resilience, hospital outcomes, replan response, failure handling) and failure-aware; no misleading single composite score is calculated.
+- **Layer B (Production Acceptance):** Exactly 10 end-to-end integration scenarios executed via FastAPI HTTP test clients against isolated SQLite databases, exercising real version progression, schema validation, timeline audits, and domain invariants.
+- **Performance Profiling:** Evaluated on a 10-scenario subset with 1 discarded warmup and 3 isolated measured repetitions per engine, serving as benchmark timing evidence rather than a production SLA claim.
+
+## 52.5 Minimal Gated Simulation Demo Controls
+
+- **Endpoint Surface:** `/api/v1/simulation/reset`, `/api/v1/simulation/load/{scenario_id}`, `/api/v1/simulation/events`, and `/api/v1/simulation/status`.
+- **Gating Configuration:** Gated by `SIMULATION_CONTROLS_ENABLED` (default: `false`). Disabled POST requests return `403 SIMULATION_DISABLED`; status reports `enabled=false`.
+- **Zero Background Tasks:** Contains no background timers, schedulers, worker threads, or cron jobs. Events execute only upon explicit HTTP requests.
+- **Reality Labeling:** All simulation responses are strictly labeled `SYNTHETIC` or `SIMULATED` to prevent confusion with real public or live data.

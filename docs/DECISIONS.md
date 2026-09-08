@@ -1433,3 +1433,88 @@ increments under the manager lock before any scheduling. Ordering per socket
 is preserved by the loop's FIFO task order. `test_publish_does_not_block_on_a_stalled_client`
 bounds publication response time deterministically, and
 `test_publish_prunes_a_socket_that_fails_delivery` pins the pruning behaviour.
+
+## PD-075 — SQLite Busy Timeout and Serialized Write Locking
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner (post-audit hardening mission, RC-03)
+
+### Decision
+SQLite connections are configured with an explicit `busy_timeout=5000` ms pragma, and concurrent write operations execute `BEGIN IMMEDIATE` on SQLite backends to serialize mutating transactions in the single-worker process.
+
+### Reason
+Under concurrent requests, uncoordinated deferred transactions on SQLite can result in immediate `database is locked` OperationalErrors if two connections attempt to upgrade read locks to write locks simultaneously.
+
+### Impact
+FastAPI endpoints performing state mutations serialize safely with up to a 5-second wait window, eliminating transient lock errors while preserving the single-worker architecture.
+
+## PD-076 — Explicit Credentialed CORS Allowlist
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner (post-audit hardening mission, RC-04)
+
+### Decision
+The CORS configuration rejects wildcard `*` when `allow_credentials=True`. Origins must be explicitly enumerated in `CORS_ORIGINS` (defaulting to standard local development origins `http://localhost:5173`, `http://127.0.0.1:5173`, `http://localhost:3000`, `http://127.0.0.1:3000`).
+
+### Reason
+Browser CORS security policies disallow wildcard `Access-Control-Allow-Origin: *` when credentials are supported. Attempting to combine them produces browser-side rejection and security vulnerabilities.
+
+### Impact
+Validation at configuration load time rejects `*` if credentials are enabled, ensuring compliant, predictable cross-origin resource sharing.
+
+## PD-077 — Two-Layer Evaluation Architecture and Multi-Dimensional Benchmark Metrics
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner (post-audit hardening mission, AG-RC-06 / AG-RC-07)
+
+### Decision
+Phase 08 evaluation is partitioned into two distinct, truthful layers:
+- **Layer A (Comparative Benchmark):** Exactly 36 deterministic planning and coverage comparative scenarios executed via `Phase08ScenarioRunner` against fixed road, population, and traffic fixtures. Metrics are multi-dimensional (ETA, coverage, reserve resilience, hospital outcomes, replanning, latency, failure handling) and failure-aware; no misleading single composite score is calculated.
+- **Layer B (Production Acceptance):** Exactly 10 end-to-end integration scenarios executed via FastAPI HTTP test clients against isolated SQLite databases, exercising real version progression, schema validation, timeline audits, and domain invariants.
+
+Performance profiling is restricted to a 10-scenario subset with 1 discarded warmup and 3 isolated measured repetitions per engine, serving as benchmark timing evidence rather than a production SLA claim.
+
+### Reason
+Layer A evaluates algorithmic planning quality under synthetic/deterministic constraints without touching the database or live network. Layer B verifies production runtime software correctness. Mixing them led to confusing benchmark failures with runtime bugs.
+
+### Impact
+Both layers run independently in CI/CD and verification suites with clear truthful boundaries.
+
+## PD-078 — Minimal Gated Simulation Demo Controls
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner (post-audit hardening mission, AG-RC-08)
+
+### Decision
+Local demonstration and evaluation controls are provided under `/api/v1/simulation`:
+- `POST /api/v1/simulation/reset`
+- `POST /api/v1/simulation/load/{scenario_id}`
+- `POST /api/v1/simulation/events`
+- `GET  /api/v1/simulation/status`
+
+These endpoints are disabled by default (`SIMULATION_CONTROLS_ENABLED=false`). When disabled, POST endpoints return 403 `SIMULATION_DISABLED`, and GET status reports `enabled=false`. The endpoints are strictly local/demo-only, contain no background timers, schedulers, or threads, and explicitly label all outputs as `SYNTHETIC` or `SIMULATED`.
+
+### Reason
+Demonstrators and benchmark runners require an explicit seam to load deterministic scenarios and post simulated state updates without running an uncoordinated background simulator or exposing production control systems.
+
+### Impact
+Safe demo operation without risk of autonomous background side effects or unverified public claims.
+
+## PD-079 — Referential Integrity and Application Foreign-Key Enforcement
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner (post-audit hardening mission)
+
+### Decision
+While SQLite `PRAGMA foreign_keys = ON` may be enabled on connections, system-wide referential integrity is predominantly enforced by application domain logic, lifecycle fences, and service-layer validations rather than relying purely on database schema constraints.
+
+### Reason
+The MVP schema evolved iteratively across phases; several tables maintain logical associations via string IDs without formal DDL foreign-key constraints. Claiming full database-enforced relational cascades would be factually inaccurate.
+
+### Impact
+Application code maintains strict explicit validation for all entity relationships (e.g. incident ownership, resource assignment, plan linkages) before persisting state transitions.

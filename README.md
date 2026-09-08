@@ -47,6 +47,27 @@ The AI can understand, correlate, simulate, compare, recommend, and explain. Cri
 
 Government dispatch systems, physical traffic-light control, live hospital-capacity systems, and citywide public alerts are treated as **simulated integrations** unless a real authorized connection is available.
 
+## Architecture & Operational Hardening
+
+- **Single-Worker FastAPI Backend:** Local in-memory graph state and WebSocket coordination are owned by a single-process runtime.
+- **SQLite Concurrency Safeguards:** Explicit 5000ms busy timeout and `BEGIN IMMEDIATE` write serialization prevent lock contention under concurrent operations.
+- **Referential Integrity:** Domain relationships and state transitions are strictly enforced via application validations and lifecycle guards.
+- **Non-Blocking Operations Stream:** WebSocket broadcasts are fire-and-forget; stalled client sockets never block API transactions, and REST serves as the canonical state recovery path.
+- **Strict Security Fences:** Explicit credentialed CORS allowlists (wildcards rejected) and media file signature validation.
+
+## Evaluation Architecture
+
+The system features a decoupled, two-layer evaluation suite:
+- **Layer A (Comparative Benchmark):** 36 deterministic scenarios comparing greedy baseline dispatch against SirenGrid's joint coverage-aware optimization. Evaluated across multi-dimensional metrics (ETA, coverage preservation, reserve resilience, hospital outcomes, replan response, failure handling).
+- **Layer B (Production Acceptance):** 10 end-to-end integration scenarios verifying REST API lifecycle transitions, optimistic concurrency versioning, and database persistence.
+
+## Gated Simulation Controls
+
+For demonstration and testing, minimal gated controls exist under `/api/v1/simulation` (`/reset`, `/load/{scenario_id}`, `/events`, `/status`).
+- Disabled by default via `SIMULATION_CONTROLS_ENABLED=false` (returns `403 SIMULATION_DISABLED` when disabled).
+- Local demo use only; contains no background scheduler, worker loop, or external side effects.
+- All simulation outputs are explicitly labeled `SYNTHETIC` or `SIMULATED`.
+
 ## Repository Structure
 
 ```text
