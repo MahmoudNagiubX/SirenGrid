@@ -1329,3 +1329,37 @@ A deterministic fixture can now show a farther hospital winning because it
 carries the required burn-care capability, is accepting, and has a lighter
 modeled load, with the explanation naming the simulated source. Existing local
 databases receive the column through the additive migration path.
+
+## PD-072 - Conservative Fusion Context Gate
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner (post-audit hardening mission, HD-010)
+
+### Decision
+
+The additional deterministic context match required for automatic association
+(PD-033) is strengthened. Location phrases are Unicode NFKC normalized and
+casefolded, then reduced to significant tokens by dropping fragments shorter
+than three characters and a small explicit set of generic road and place words
+in English and Arabic.
+
+Overlap-only association now requires at least two shared significant tokens.
+An exact normalized significant-phrase match and an identical trusted source
+reference remain sufficient on their own. No embeddings or external model are
+introduced.
+
+### Reason
+
+The gate accepted any single shared token. Two genuinely separate collisions
+400 metres apart, in the same category and ten minutes apart, automatically
+associated purely because both phrases contained the word "street"; the same
+held in Arabic for "شارع". A false merge attaches one real incident's evidence
+to another and is more dangerous than a missed automatic merge.
+
+### Impact
+
+Ambiguous pairs fall back to `REQUIRES_REVIEW` rather than merging. Genuine
+corroboration is unaffected: an exact phrase match, two or more shared
+significant tokens, or a shared trusted source reference still auto-associate.
+Fusion remains a non-activation gate.

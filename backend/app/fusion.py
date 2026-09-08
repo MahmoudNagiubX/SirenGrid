@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import re
+import unicodedata
 from datetime import datetime
 from enum import Enum
 from typing import Any
@@ -70,22 +71,97 @@ def _distance_meters(first: FusionReport, second: FusionReport) -> float | None:
     return radius * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
+# Generic road and place words carry no identifying information: two different
+# streets in the same district share them routinely. They are excluded from the
+# overlap signal so they cannot, on their own, associate distinct incidents.
+GENERIC_LOCATION_TOKENS = frozenset(
+    {
+        # English
+        "street",
+        "road",
+        "avenue",
+        "square",
+        "district",
+        "area",
+        "zone",
+        "city",
+        "region",
+        "near",
+        "next",
+        "opposite",
+        "front",
+        "behind",
+        "beside",
+        "main",
+        "north",
+        "south",
+        "east",
+        "west",
+        "cairo",
+        "egypt",
+        "nasr",
+        # Arabic
+        "شارع",
+        "طريق",
+        "ميدان",
+        "منطقة",
+        "حي",
+        "مدينة",
+        "القاهرة",
+        "مصر",
+        "امام",
+        "أمام",
+        "بجوار",
+        "خلف",
+        "قرب",
+        "بالقرب",
+        "شمال",
+        "جنوب",
+        "شرق",
+        "غرب",
+        "نصر",
+    }
+)
+MINIMUM_SIGNIFICANT_TOKEN_LENGTH = 3
+MINIMUM_SHARED_SIGNIFICANT_TOKENS = 2
+
+
 def _tokens(value: str | None) -> set[str]:
+    """Return normalized word tokens from a free-text location phrase."""
     if not value:
         return set()
-    return set(re.findall(r"\w+", value.casefold(), flags=re.UNICODE))
+    normalized = unicodedata.normalize("NFKC", value).casefold()
+    return set(re.findall(r"\w+", normalized, flags=re.UNICODE))
+
+
+def _significant_tokens(value: str | None) -> set[str]:
+    """Return only tokens that can actually identify a specific place.
+
+    Very short fragments and generic road/place words are dropped, because a
+    shared "street" says nothing about whether two reports describe one event.
+    """
+    return {
+        token
+        for token in _tokens(value)
+        if len(token) >= MINIMUM_SIGNIFICANT_TOKEN_LENGTH
+        and token not in GENERIC_LOCATION_TOKENS
+    }
 
 
 def _context_matches(first: FusionReport, second: FusionReport) -> tuple[bool, bool, bool]:
-    first_phrase = _tokens(first.location_phrase)
-    second_phrase = _tokens(second.location_phrase)
+    first_phrase = _significant_tokens(first.location_phrase)
+    second_phrase = _significant_tokens(second.location_phrase)
     location_match = bool(first_phrase and first_phrase == second_phrase)
     source_match = bool(
         first.source_reference
         and second.source_reference
         and first.source_reference == second.source_reference
     )
-    token_match = bool(first_phrase and second_phrase and first_phrase & second_phrase)
+    # A single shared word is not corroboration. Overlap-only association needs
+    # at least two shared significant tokens; a false merge is more dangerous
+    # than a missed automatic one.
+    shared = first_phrase & second_phrase
+    token_match = len(shared) >= MINIMUM_SHARED_SIGNIFICANT_TOKENS
     return location_match, source_match, token_match
 
 
