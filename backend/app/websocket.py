@@ -82,35 +82,38 @@ class OperationsConnectionManager:
         if not conns or loop is None:
             return envelope
 
-        dead: list[WebSocket] = []
         for ws in conns:
-            coro = ws.send_json(envelope)
-            try:
-                running_loop = asyncio.get_running_loop()
-            except RuntimeError:
-                running_loop = None
-
-            if running_loop is loop:
-                loop.create_task(coro)
-            elif loop.is_running():
-                future = asyncio.run_coroutine_threadsafe(coro, loop)
-                try:
-                    future.result(timeout=5.0)
-                except Exception:
-                    dead.append(ws)
-            else:
-                try:
-                    asyncio.run(coro)
-                except Exception:
-                    dead.append(ws)
-
-        if dead:
-            with self._lock:
-                for ws in dead:
-                    if ws in self.active_connections:
-                        self.active_connections.remove(ws)
+            self._schedule_delivery(loop, ws, envelope)
 
         return envelope
+
+    def _schedule_delivery(
+        self,
+        loop: asyncio.AbstractEventLoop,
+        websocket: WebSocket,
+        envelope: dict[str, Any],
+    ) -> None:
+        """Schedule delivery without allowing a client to block the caller."""
+
+        async def _deliver() -> None:
+            try:
+                await websocket.send_json(envelope)
+            except Exception:
+                self.disconnect(websocket)
+
+        try:
+            running_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = None
+
+        if running_loop is loop:
+            loop.create_task(_deliver())
+            return
+
+        try:
+            asyncio.run_coroutine_threadsafe(_deliver(), loop)
+        except RuntimeError:
+            self.disconnect(websocket)
 
     def reset(self) -> None:
         """Reset sequence and active connections for test isolation."""

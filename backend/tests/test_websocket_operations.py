@@ -526,3 +526,78 @@ def test_multiple_concurrent_websocket_clients_receive_identical_envelopes(clien
             assert msg1["version"] == 1
             assert msg1["event"] == "incident.created"
             assert msg1["incident_id"] == incident["id"]
+
+
+def test_publish_does_not_block_on_a_stalled_client() -> None:
+    import asyncio
+    import threading
+    import time
+
+    from app.websocket import OperationsConnectionManager
+
+    manager = OperationsConnectionManager()
+    delivery_started = threading.Event()
+    release_delivery = threading.Event()
+
+    class StalledWebSocket:
+        async def send_json(self, _envelope: object) -> None:
+            delivery_started.set()
+            await asyncio.get_running_loop().run_in_executor(
+                None, release_delivery.wait, 30.0
+            )
+
+    loop = asyncio.new_event_loop()
+    loop_thread = threading.Thread(target=loop.run_forever, daemon=True)
+    loop_thread.start()
+    try:
+        manager.active_connections.append(StalledWebSocket())
+        manager.loop = loop
+
+        started = time.monotonic()
+        envelope = manager.publish(
+            event="incident.updated", incident_id="inc-stall", payload={}
+        )
+
+        assert time.monotonic() - started < 1.0
+        assert envelope["version"] == 1
+        assert delivery_started.wait(timeout=5.0)
+    finally:
+        release_delivery.set()
+        loop.call_soon_threadsafe(loop.stop)
+        loop_thread.join(timeout=5.0)
+        loop.close()
+
+
+def test_publish_prunes_a_socket_that_fails_delivery() -> None:
+    import asyncio
+    import threading
+
+    from app.websocket import OperationsConnectionManager
+
+    manager = OperationsConnectionManager()
+    attempted = threading.Event()
+
+    class BrokenWebSocket:
+        async def send_json(self, _envelope: object) -> None:
+            attempted.set()
+            raise RuntimeError("socket is closed")
+
+    loop = asyncio.new_event_loop()
+    loop_thread = threading.Thread(target=loop.run_forever, daemon=True)
+    loop_thread.start()
+    try:
+        broken = BrokenWebSocket()
+        manager.active_connections.append(broken)
+        manager.loop = loop
+        manager.publish(event="incident.updated", incident_id="inc-broken", payload={})
+
+        assert attempted.wait(timeout=5.0)
+        for _ in range(100):
+            if broken not in manager.active_connections:
+                break
+            threading.Event().wait(0.05)
+        assert broken not in manager.active_connections
+    finally:
+        loop.call_soon_threadsafe(loop.stop)
+        loop_thread.join(timeout=5.0)
+        loop.close()
