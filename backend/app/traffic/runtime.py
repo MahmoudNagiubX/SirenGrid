@@ -246,7 +246,10 @@ class TrafficRuntime:
                 overlay=overlay,
                 failure_reason=failure_reason,
             )
-            self._snapshot = self._with_current_freshness(snapshot, now)
+            freshness_now = (
+                max(now, retrieved_at) if retrieved_at is not None else now
+            )
+            self._snapshot = self._with_current_freshness(snapshot, freshness_now)
             return self._snapshot
 
     def current_snapshot(self, *, now: datetime) -> TrafficSnapshot | None:

@@ -108,6 +108,25 @@ def make_runtime(client: FakeTomTomClient) -> TrafficRuntime:
     )
 
 
+def test_capture_snapshot_uses_provider_completion_time_for_freshness() -> None:
+    client = FakeTomTomClient(
+        [make_result(TrafficProviderState.AVAILABLE, observations=(make_observation(),))]
+    )
+    runtime = make_runtime(client)
+    retrieval_time = T0 + timedelta(seconds=1)
+
+    snapshot = runtime.capture_snapshot(
+        make_graph(),
+        now=T0,
+        wall_clock=lambda: retrieval_time,
+        monotonic=lambda: 1.0,
+    )
+
+    assert snapshot.refresh_attempted_at == T0
+    assert snapshot.retrieved_at == retrieval_time
+    assert snapshot.freshness_status is FreshnessStatus.LIVE
+
+
 def test_failed_refresh_is_not_retried_inside_sixty_seconds() -> None:
     client = FakeTomTomClient(
         [make_result(TrafficProviderState.RATE_LIMITED, failure_reason="TOMTOM_RATE_LIMITED")]
