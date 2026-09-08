@@ -2,41 +2,1310 @@
   "dataset_version": "PHASE08_SCENARIO_DATASET_V1",
   "policy_version": "SIRENGRID_PHASE08_BENCHMARK_V1",
   "scenarios": [
-    {"id":"T01_urgent_activation","title":"One urgent report activates","seed":80101,"master_plan_case":"T01","tags":["activation"],"incident":{"incident_type":"traffic_collision","severity":"HIGH","coordinate":{"lat":30.0561,"lon":31.3452},"requirements":[{"resource_type":"AMBULANCE","minimum_count":1}]},"resource_overrides":[{"resource_id":"10000000-0000-0000-0000-000000000002","status":"OUT_OF_SERVICE"},{"resource_id":"10000000-0000-0000-0000-000000000003","status":"OUT_OF_SERVICE"}],"traffic_fixture":{"fixture_id":"t01-fallback","mode":"FALLBACK","source_reference":"fixed-osm-fallback-v1"},"expected":{"baseline":"PLAN_GENERATED","sirengrid":"PLAN_GENERATED"}},
-    {"id":"T02_duplicate_report","title":"Duplicate caller evidence","seed":80102,"master_plan_case":"T02","tags":["fusion"],"incident":{"incident_type":"traffic_collision","severity":"HIGH","coordinate":{"lat":30.0561,"lon":31.3452},"requirements":[{"resource_type":"AMBULANCE","minimum_count":1}]},"traffic_fixture":{"fixture_id":"t02-fallback","mode":"FALLBACK","source_reference":"fixed-osm-fallback-v1"},"expected":{"baseline":"PLAN_GENERATED","sirengrid":"PLAN_GENERATED"}},
-    {"id":"T03_conflicting_details","title":"Conflicting evidence remains visible","seed":80103,"master_plan_case":"T03","tags":["conflict","review"],"incident":{"incident_type":"traffic_collision","severity":"HIGH","coordinate":{"lat":30.0561,"lon":31.3452},"requirements":[{"resource_type":"AMBULANCE","minimum_count":1}]},"traffic_fixture":{"fixture_id":"t03-fallback","mode":"FALLBACK","source_reference":"fixed-osm-fallback-v1"},"expected":{"baseline":"PLAN_GENERATED","sirengrid":"PLAN_GENERATED"}},
-    {"id":"T04_blocked_road","title":"Closure is retained for replan","seed":80104,"master_plan_case":"T04","tags":["closure","replan"],"incident":{"incident_type":"traffic_collision","severity":"HIGH","coordinate":{"lat":30.0561,"lon":31.3452},"requirements":[{"resource_type":"AMBULANCE","minimum_count":1}]},"traffic_fixture":{"fixture_id":"t04-closure","mode":"CLOSURE","source_reference":"fixed-closure-replay-v1","closure_edge_index":0},"expected":{"baseline":"PLAN_GENERATED","sirengrid":"PLAN_GENERATED"}},
-    {"id":"T05_coverage_tradeoff","title":"Coverage trade-off is exposed","seed":80105,"master_plan_case":"T05","tags":["coverage","reposition"],"incident":{"incident_type":"traffic_collision","severity":"HIGH","coordinate":{"lat":30.0561,"lon":31.3452},"requirements":[{"resource_type":"AMBULANCE","minimum_count":1}]},"traffic_fixture":{"fixture_id":"t05-fallback","mode":"FALLBACK","source_reference":"fixed-osm-fallback-v1"},"expected":{"baseline":"PLAN_GENERATED","sirengrid":"PLAN_GENERATED"}},
-    {"id":"T06_hospital_overload","title":"Hospital overload changes choice","seed":80106,"master_plan_case":"T06","tags":["hospital"],"incident":{"incident_type":"traffic_collision","severity":"HIGH","coordinate":{"lat":30.0561,"lon":31.3452},"requirements":[{"resource_type":"AMBULANCE","minimum_count":1}],"transport_required":true},"traffic_fixture":{"fixture_id":"t06-fallback","mode":"FALLBACK","source_reference":"fixed-osm-fallback-v1"},"expected":{"baseline":"PLAN_GENERATED","sirengrid":"PLAN_GENERATED"}},
-    {"id":"T07_human_rejection","title":"Rejected plan has a continuation path","seed":80107,"master_plan_case":"T07","tags":["approval"],"incident":{"incident_type":"traffic_collision","severity":"HIGH","coordinate":{"lat":30.0561,"lon":31.3452},"requirements":[{"resource_type":"AMBULANCE","minimum_count":1}]},"traffic_fixture":{"fixture_id":"t07-fallback","mode":"FALLBACK","source_reference":"fixed-osm-fallback-v1"},"expected":{"baseline":"PLAN_GENERATED","sirengrid":"PLAN_GENERATED"}},
-    {"id":"T08_missing_location","title":"Missing location blocks routing","seed":80108,"master_plan_case":"T08","tags":["location","failure"],"incident":{"incident_type":"traffic_collision","severity":"HIGH","coordinate":{"lat":31.0,"lon":32.0},"requirements":[{"resource_type":"AMBULANCE","minimum_count":1}]},"traffic_fixture":{"fixture_id":"t08-fallback","mode":"FALLBACK","source_reference":"fixed-osm-fallback-v1"},"expected":{"baseline":"INSUFFICIENT_RESOURCES","sirengrid":"INSUFFICIENT_RESOURCES"}},
-    {"id":"T09_resource_unavailable","title":"Unavailable responder triggers review","seed":80109,"master_plan_case":"T09","tags":["resource","replan"],"incident":{"incident_type":"traffic_collision","severity":"HIGH","coordinate":{"lat":30.0561,"lon":31.3452},"requirements":[{"resource_type":"AMBULANCE","minimum_count":1}]},"resource_overrides":[{"resource_id":"10000000-0000-0000-0000-000000000001","status":"OUT_OF_SERVICE"},{"resource_id":"10000000-0000-0000-0000-000000000002","status":"OUT_OF_SERVICE"},{"resource_id":"10000000-0000-0000-0000-000000000003","status":"OUT_OF_SERVICE"}],"traffic_fixture":{"fixture_id":"t09-fallback","mode":"FALLBACK","source_reference":"fixed-osm-fallback-v1"},"expected":{"baseline":"INSUFFICIENT_RESOURCES","sirengrid":"INSUFFICIENT_RESOURCES"}},
-    {"id":"T10_public_alert","title":"Alert region is forward-only","seed":80110,"master_plan_case":"T10","tags":["driver-alert"],"incident":{"incident_type":"traffic_collision","severity":"HIGH","coordinate":{"lat":30.0561,"lon":31.3452},"requirements":[{"resource_type":"AMBULANCE","minimum_count":1}]},"traffic_fixture":{"fixture_id":"t10-fallback","mode":"FALLBACK","source_reference":"fixed-osm-fallback-v1"},"expected":{"baseline":"PLAN_GENERATED","sirengrid":"PLAN_GENERATED"}},
-    {"id":"T11_hospital_prealert","title":"Pre-alert contains known facts","seed":80111,"master_plan_case":"T11","tags":["hospital","prealert"],"incident":{"incident_type":"traffic_collision","severity":"HIGH","coordinate":{"lat":30.0561,"lon":31.3452},"requirements":[{"resource_type":"AMBULANCE","minimum_count":1}],"transport_required":true},"traffic_fixture":{"fixture_id":"t11-fallback","mode":"FALLBACK","source_reference":"fixed-osm-fallback-v1"},"expected":{"baseline":"PLAN_GENERATED","sirengrid":"PLAN_GENERATED"}},
-    {"id":"T12_ai_failure","title":"AI failure keeps manual fallback","seed":80112,"master_plan_case":"T12","tags":["ai","fallback"],"incident":{"incident_type":"traffic_collision","severity":"HIGH","coordinate":{"lat":30.0561,"lon":31.3452},"requirements":[{"resource_type":"AMBULANCE","minimum_count":1}]},"traffic_fixture":{"fixture_id":"t12-fallback","mode":"FALLBACK","source_reference":"fixed-osm-fallback-v1"},"expected":{"baseline":"PLAN_GENERATED","sirengrid":"PLAN_GENERATED"}},
-    {"id":"T13_operator_correction","title":"Operator correction affects planning inputs","seed":80113,"master_plan_case":"T13","tags":["correction","replan"],"incident":{"incident_type":"traffic_collision","severity":"HIGH","coordinate":{"lat":30.0561,"lon":31.3452},"requirements":[{"resource_type":"AMBULANCE","minimum_count":1}]},"traffic_fixture":{"fixture_id":"t13-fallback","mode":"FALLBACK","source_reference":"fixed-osm-fallback-v1"},"expected":{"baseline":"PLAN_GENERATED","sirengrid":"PLAN_GENERATED"}},
-    {"id":"T14_stale_operational_data","title":"Stale state remains visible","seed":80114,"master_plan_case":"T14","tags":["freshness"],"incident":{"incident_type":"traffic_collision","severity":"HIGH","coordinate":{"lat":30.0561,"lon":31.3452},"requirements":[{"resource_type":"AMBULANCE","minimum_count":1}]},"traffic_fixture":{"fixture_id":"t14-stale","mode":"STALE","source_reference":"fixed-stale-replay-v1"},"expected":{"baseline":"PLAN_GENERATED","sirengrid":"PLAN_GENERATED"}},
-    {"id":"T15_competing_incident","title":"Competing incident does not steal resources","seed":80115,"master_plan_case":"T15","tags":["multi-incident","contention"],"incident":{"incident_type":"traffic_collision","severity":"HIGH","coordinate":{"lat":30.0561,"lon":31.3452},"requirements":[{"resource_type":"AMBULANCE","minimum_count":1}]},"events":[{"event_index":0,"at_seconds":60,"event_type":"SECOND_INCIDENT","incident":{"incident_type":"traffic_collision","severity":"HIGH","coordinate":{"lat":30.0600,"lon":31.3300},"requirements":[{"resource_type":"AMBULANCE","minimum_count":3}]}}],"traffic_fixture":{"fixture_id":"t15-fallback","mode":"FALLBACK","source_reference":"fixed-osm-fallback-v1"},"expected":{"baseline":"PLAN_GENERATED","sirengrid":"PLAN_GENERATED"}},
-    {"id":"X01_greedy_resource","title":"Greedy resource eligibility","seed":80201,"tags":["planning","resource"],"incident":{"incident_type":"traffic_collision","severity":"LOW","coordinate":{"lat":30.0561,"lon":31.3452},"requirements":[{"resource_type":"AMBULANCE","minimum_count":1}]},"traffic_fixture":{"fixture_id":"x01-fallback","mode":"FALLBACK","source_reference":"fixed-osm-fallback-v1"},"expected":{"baseline":"PLAN_GENERATED","sirengrid":"PLAN_GENERATED"}},
-    {"id":"X02_multi_resource","title":"Multiple required cohorts","seed":80202,"tags":["planning","cohort"],"incident":{"incident_type":"traffic_collision","severity":"HIGH","coordinate":{"lat":30.0561,"lon":31.3452},"requirements":[{"resource_type":"AMBULANCE","minimum_count":1},{"resource_type":"FIRE_RESCUE","minimum_count":1}]},"traffic_fixture":{"fixture_id":"x02-fallback","mode":"FALLBACK","source_reference":"fixed-osm-fallback-v1"},"expected":{"baseline":"PLAN_GENERATED","sirengrid":"PLAN_GENERATED"}},
-    {"id":"X03_joint_coverage","title":"Joint coverage cohort outcome","seed":80203,"tags":["coverage","joint"],"incident":{"incident_type":"traffic_collision","severity":"HIGH","coordinate":{"lat":30.0561,"lon":31.3452},"requirements":[{"resource_type":"AMBULANCE","minimum_count":1},{"resource_type":"FIRE_RESCUE","minimum_count":1}]},"traffic_fixture":{"fixture_id":"x03-fallback","mode":"FALLBACK","source_reference":"fixed-osm-fallback-v1"},"expected":{"baseline":"PLAN_GENERATED","sirengrid":"PLAN_GENERATED"}},
-    {"id":"X04_reposition_useful","title":"Useful reposition candidate","seed":80204,"tags":["coverage","reposition"],"incident":{"incident_type":"traffic_collision","severity":"HIGH","coordinate":{"lat":30.0561,"lon":31.3452},"requirements":[{"resource_type":"AMBULANCE","minimum_count":1}]},"traffic_fixture":{"fixture_id":"x04-fallback","mode":"FALLBACK","source_reference":"fixed-osm-fallback-v1"},"expected":{"baseline":"PLAN_GENERATED","sirengrid":"PLAN_GENERATED"}},
-    {"id":"X05_reposition_rejected","title":"Non-useful reposition rejected","seed":80205,"tags":["coverage","reposition"],"incident":{"incident_type":"traffic_collision","severity":"LOW","coordinate":{"lat":30.0561,"lon":31.3452},"requirements":[{"resource_type":"AMBULANCE","minimum_count":1}]},"traffic_fixture":{"fixture_id":"x05-fallback","mode":"FALLBACK","source_reference":"fixed-osm-fallback-v1"},"expected":{"baseline":"PLAN_GENERATED","sirengrid":"PLAN_GENERATED"}},
-    {"id":"X06_stale_traffic","title":"Stale traffic fallback","seed":80206,"tags":["traffic","fallback"],"incident":{"incident_type":"traffic_collision","severity":"LOW","coordinate":{"lat":30.0561,"lon":31.3452},"requirements":[{"resource_type":"AMBULANCE","minimum_count":1}]},"traffic_fixture":{"fixture_id":"x06-stale","mode":"STALE","source_reference":"fixed-stale-replay-v1"},"expected":{"baseline":"PLAN_GENERATED","sirengrid":"PLAN_GENERATED"}},
-    {"id":"X07_valid_closure","title":"Valid closure fixture","seed":80207,"tags":["traffic","closure"],"incident":{"incident_type":"traffic_collision","severity":"LOW","coordinate":{"lat":30.0561,"lon":31.3452},"requirements":[{"resource_type":"AMBULANCE","minimum_count":1}]},"traffic_fixture":{"fixture_id":"x07-closure","mode":"CLOSURE","source_reference":"fixed-closure-replay-v1","closure_edge_index":1},"expected":{"baseline":"PLAN_GENERATED","sirengrid":"PLAN_GENERATED"}},
-    {"id":"X08_no_path","title":"No-path routing outcome","seed":80208,"tags":["routing","failure"],"incident":{"incident_type":"traffic_collision","severity":"LOW","coordinate":{"lat":31.0,"lon":32.0},"requirements":[{"resource_type":"AMBULANCE","minimum_count":1}]},"traffic_fixture":{"fixture_id":"x08-fallback","mode":"FALLBACK","source_reference":"fixed-osm-fallback-v1"},"expected":{"baseline":"INSUFFICIENT_RESOURCES","sirengrid":"INSUFFICIENT_RESOURCES"}},
-    {"id":"X09_outside_graph","title":"Outside graph coordinate","seed":80209,"tags":["routing","validation"],"incident":{"incident_type":"traffic_collision","severity":"LOW","coordinate":{"lat":31.0,"lon":32.0},"requirements":[{"resource_type":"AMBULANCE","minimum_count":1}]},"traffic_fixture":{"fixture_id":"x09-fallback","mode":"FALLBACK","source_reference":"fixed-osm-fallback-v1"},"expected":{"baseline":"INSUFFICIENT_RESOURCES","sirengrid":"INSUFFICIENT_RESOURCES"}},
-    {"id":"X10_insufficient_resources","title":"Insufficient responders visible","seed":80210,"tags":["resource","failure"],"incident":{"incident_type":"traffic_collision","severity":"HIGH","coordinate":{"lat":30.0561,"lon":31.3452},"requirements":[{"resource_type":"AMBULANCE","minimum_count":3},{"resource_type":"FIRE_RESCUE","minimum_count":2}]},"resource_overrides":[{"resource_id":"10000000-0000-0000-0000-000000000001","status":"OUT_OF_SERVICE"},{"resource_id":"10000000-0000-0000-0000-000000000002","status":"OUT_OF_SERVICE"}],"traffic_fixture":{"fixture_id":"x10-fallback","mode":"FALLBACK","source_reference":"fixed-osm-fallback-v1"},"expected":{"baseline":"INSUFFICIENT_RESOURCES","sirengrid":"INSUFFICIENT_RESOURCES"}},
-    {"id":"X11_hospital_unknown","title":"Unknown hospital capability","seed":80211,"tags":["hospital","uncertainty"],"incident":{"incident_type":"traffic_collision","severity":"HIGH","coordinate":{"lat":30.0561,"lon":31.3452},"requirements":[{"resource_type":"AMBULANCE","minimum_count":1}],"transport_required":true},"traffic_fixture":{"fixture_id":"x11-fallback","mode":"FALLBACK","source_reference":"fixed-osm-fallback-v1"},"expected":{"baseline":"PLAN_GENERATED","sirengrid":"PLAN_GENERATED"}},
-    {"id":"X12_hospital_incompatible","title":"Confirmed hospital incompatibility","seed":80212,"tags":["hospital","filter"],"incident":{"incident_type":"traffic_collision","severity":"HIGH","coordinate":{"lat":30.0561,"lon":31.3452},"requirements":[{"resource_type":"AMBULANCE","minimum_count":1}],"transport_required":true},"traffic_fixture":{"fixture_id":"x12-fallback","mode":"FALLBACK","source_reference":"fixed-osm-fallback-v1"},"expected":{"baseline":"PLAN_GENERATED","sirengrid":"PLAN_GENERATED"}},
-    {"id":"X13_hospital_not_accepting","title":"Explicit hospital unavailable","seed":80213,"tags":["hospital","replan"],"incident":{"incident_type":"traffic_collision","severity":"HIGH","coordinate":{"lat":30.0561,"lon":31.3452},"requirements":[{"resource_type":"AMBULANCE","minimum_count":1}],"transport_required":true},"traffic_fixture":{"fixture_id":"x13-fallback","mode":"FALLBACK","source_reference":"fixed-osm-fallback-v1"},"expected":{"baseline":"PLAN_GENERATED","sirengrid":"PLAN_GENERATED"}},
-    {"id":"X14_hospital_unreachable","title":"Hospital route failure","seed":80214,"tags":["hospital","routing"],"incident":{"incident_type":"traffic_collision","severity":"HIGH","coordinate":{"lat":30.0561,"lon":31.3452},"requirements":[{"resource_type":"AMBULANCE","minimum_count":1}],"transport_required":true},"traffic_fixture":{"fixture_id":"x14-fallback","mode":"FALLBACK","source_reference":"fixed-osm-fallback-v1"},"expected":{"baseline":"PLAN_GENERATED","sirengrid":"PLAN_GENERATED"}},
-    {"id":"X15_material_eta_replan","title":"Material ETA increase","seed":80215,"tags":["replan","eta"],"incident":{"incident_type":"traffic_collision","severity":"HIGH","coordinate":{"lat":30.0561,"lon":31.3452},"requirements":[{"resource_type":"AMBULANCE","minimum_count":1}]},"traffic_fixture":{"fixture_id":"x15-congestion","mode":"CONGESTION","source_reference":"fixed-congestion-replay-v1","closure_edge_index":2,"congestion_factor":2.0},"expected":{"baseline":"PLAN_GENERATED","sirengrid":"PLAN_GENERATED"}},
-    {"id":"X16_nonmaterial_eta","title":"Non-material ETA change","seed":80216,"tags":["replan","eta"],"incident":{"incident_type":"traffic_collision","severity":"LOW","coordinate":{"lat":30.0561,"lon":31.3452},"requirements":[{"resource_type":"AMBULANCE","minimum_count":1}]},"traffic_fixture":{"fixture_id":"x16-fallback","mode":"FALLBACK","source_reference":"fixed-osm-fallback-v1"},"expected":{"baseline":"PLAN_GENERATED","sirengrid":"PLAN_GENERATED"}},
-    {"id":"X17_resource_outage","title":"Resource outage trigger","seed":80217,"tags":["replan","resource"],"incident":{"incident_type":"traffic_collision","severity":"HIGH","coordinate":{"lat":30.0561,"lon":31.3452},"requirements":[{"resource_type":"AMBULANCE","minimum_count":1}]},"resource_overrides":[{"resource_id":"10000000-0000-0000-0000-000000000003","status":"OUT_OF_SERVICE"}],"traffic_fixture":{"fixture_id":"x17-fallback","mode":"FALLBACK","source_reference":"fixed-osm-fallback-v1"},"expected":{"baseline":"PLAN_GENERATED","sirengrid":"PLAN_GENERATED"}},
-    {"id":"X18_hospital_invalidation","title":"Hospital invalidation review","seed":80218,"tags":["replan","hospital"],"incident":{"incident_type":"traffic_collision","severity":"HIGH","coordinate":{"lat":30.0561,"lon":31.3452},"requirements":[{"resource_type":"AMBULANCE","minimum_count":1}],"transport_required":true},"traffic_fixture":{"fixture_id":"x18-fallback","mode":"FALLBACK","source_reference":"fixed-osm-fallback-v1"},"expected":{"baseline":"PLAN_GENERATED","sirengrid":"PLAN_GENERATED"}},
-    {"id":"X19_two_incidents_available","title":"Two incidents with reserve","seed":80219,"tags":["multi-incident"],"incident":{"incident_type":"traffic_collision","severity":"HIGH","coordinate":{"lat":30.0561,"lon":31.3452},"requirements":[{"resource_type":"AMBULANCE","minimum_count":1}]},"events":[{"event_index":0,"at_seconds":60,"event_type":"SECOND_INCIDENT","incident":{"incident_type":"traffic_collision","severity":"LOW","coordinate":{"lat":30.0600,"lon":31.3300},"requirements":[{"resource_type":"AMBULANCE","minimum_count":1}]}}],"traffic_fixture":{"fixture_id":"x19-fallback","mode":"FALLBACK","source_reference":"fixed-osm-fallback-v1"},"expected":{"baseline":"PLAN_GENERATED","sirengrid":"PLAN_GENERATED"}},
-    {"id":"X20_two_incidents_contention","title":"Two incidents contend safely","seed":80220,"tags":["multi-incident","contention"],"incident":{"incident_type":"traffic_collision","severity":"HIGH","coordinate":{"lat":30.0561,"lon":31.3452},"requirements":[{"resource_type":"AMBULANCE","minimum_count":2}]},"events":[{"event_index":0,"at_seconds":60,"event_type":"SECOND_INCIDENT","incident":{"incident_type":"traffic_collision","severity":"HIGH","coordinate":{"lat":30.0600,"lon":31.3300},"requirements":[{"resource_type":"AMBULANCE","minimum_count":2}]}}],"traffic_fixture":{"fixture_id":"x20-fallback","mode":"FALLBACK","source_reference":"fixed-osm-fallback-v1"},"expected":{"baseline":"PLAN_GENERATED","sirengrid":"PLAN_GENERATED"}},
-    {"id":"X21_concurrency_idempotency","title":"Stale and repeated commands","seed":80221,"tags":["concurrency","idempotency"],"incident":{"incident_type":"traffic_collision","severity":"HIGH","coordinate":{"lat":30.0561,"lon":31.3452},"requirements":[{"resource_type":"AMBULANCE","minimum_count":1}]},"events":[{"event_index":0,"at_seconds":5,"event_type":"NO_OP"},{"event_index":1,"at_seconds":5,"event_type":"NO_OP"}],"traffic_fixture":{"fixture_id":"x21-fallback","mode":"FALLBACK","source_reference":"fixed-osm-fallback-v1"},"expected":{"baseline":"PLAN_GENERATED","sirengrid":"PLAN_GENERATED"}}
+    {
+      "id": "T01_urgent_activation",
+      "title": "Planning slice for single urgent incident",
+      "seed": 80101,
+      "master_plan_case": "T01",
+      "tags": [
+        "planning",
+        "activation-slice"
+      ],
+      "incident": {
+        "incident_type": "traffic_collision",
+        "severity": "HIGH",
+        "coordinate": {
+          "lat": 30.0561,
+          "lon": 31.3452
+        },
+        "requirements": [
+          {
+            "resource_type": "AMBULANCE",
+            "minimum_count": 1
+          }
+        ]
+      },
+      "resource_overrides": [
+        {
+          "resource_id": "10000000-0000-0000-0000-000000000002",
+          "status": "OUT_OF_SERVICE"
+        },
+        {
+          "resource_id": "10000000-0000-0000-0000-000000000003",
+          "status": "OUT_OF_SERVICE"
+        }
+      ],
+      "traffic_fixture": {
+        "fixture_id": "t01-fallback",
+        "mode": "FALLBACK",
+        "source_reference": "fixed-osm-fallback-v1"
+      },
+      "expected": {
+        "baseline": "PLAN_GENERATED",
+        "sirengrid": "PLAN_GENERATED"
+      }
+    },
+    {
+      "id": "T02_duplicate_report",
+      "title": "Planning slice for duplicate report state",
+      "seed": 80102,
+      "master_plan_case": "T02",
+      "tags": [
+        "planning",
+        "intake-slice"
+      ],
+      "incident": {
+        "incident_type": "traffic_collision",
+        "severity": "HIGH",
+        "coordinate": {
+          "lat": 30.062,
+          "lon": 31.341
+        },
+        "requirements": [
+          {
+            "resource_type": "AMBULANCE",
+            "minimum_count": 1
+          }
+        ]
+      },
+      "traffic_fixture": {
+        "fixture_id": "t02-fallback",
+        "mode": "FALLBACK",
+        "source_reference": "fixed-osm-fallback-v1"
+      },
+      "expected": {
+        "baseline": "PLAN_GENERATED",
+        "sirengrid": "PLAN_GENERATED"
+      }
+    },
+    {
+      "id": "T03_conflicting_details",
+      "title": "Planning slice with conflicting facts recorded",
+      "seed": 80103,
+      "master_plan_case": "T03",
+      "tags": [
+        "planning",
+        "conflict-slice"
+      ],
+      "incident": {
+        "incident_type": "traffic_collision",
+        "severity": "HIGH",
+        "coordinate": {
+          "lat": 30.068,
+          "lon": 31.332
+        },
+        "requirements": [
+          {
+            "resource_type": "AMBULANCE",
+            "minimum_count": 1
+          }
+        ]
+      },
+      "traffic_fixture": {
+        "fixture_id": "t03-fallback",
+        "mode": "FALLBACK",
+        "source_reference": "fixed-osm-fallback-v1"
+      },
+      "expected": {
+        "baseline": "PLAN_GENERATED",
+        "sirengrid": "PLAN_GENERATED"
+      }
+    },
+    {
+      "id": "T04_blocked_road",
+      "title": "Planning with active road network closure",
+      "seed": 80104,
+      "master_plan_case": "T04",
+      "tags": [
+        "planning",
+        "closure"
+      ],
+      "incident": {
+        "incident_type": "traffic_collision",
+        "severity": "HIGH",
+        "coordinate": {
+          "lat": 30.0561,
+          "lon": 31.3452
+        },
+        "requirements": [
+          {
+            "resource_type": "AMBULANCE",
+            "minimum_count": 1
+          }
+        ]
+      },
+      "traffic_fixture": {
+        "fixture_id": "t04-closure",
+        "mode": "CLOSURE",
+        "source_reference": "fixed-closure-replay-v1",
+        "closure_edge_index": 1526
+      },
+      "expected": {
+        "baseline": "PLAN_GENERATED",
+        "sirengrid": "PLAN_GENERATED"
+      }
+    },
+    {
+      "id": "T05_coverage_tradeoff",
+      "title": "Coverage trade-off evaluated during candidate selection",
+      "seed": 80105,
+      "master_plan_case": "T05",
+      "tags": [
+        "coverage",
+        "reposition"
+      ],
+      "incident": {
+        "incident_type": "traffic_collision",
+        "severity": "HIGH",
+        "coordinate": {
+          "lat": 30.05,
+          "lon": 31.355
+        },
+        "requirements": [
+          {
+            "resource_type": "AMBULANCE",
+            "minimum_count": 1
+          }
+        ]
+      },
+      "traffic_fixture": {
+        "fixture_id": "t05-fallback",
+        "mode": "FALLBACK",
+        "source_reference": "fixed-osm-fallback-v1"
+      },
+      "expected": {
+        "baseline": "PLAN_GENERATED",
+        "sirengrid": "PLAN_GENERATED"
+      }
+    },
+    {
+      "id": "T06_hospital_overload",
+      "title": "Planning response with transport-required flag",
+      "seed": 80106,
+      "master_plan_case": "T06",
+      "tags": [
+        "planning",
+        "transport-slice"
+      ],
+      "incident": {
+        "incident_type": "traffic_collision",
+        "severity": "HIGH",
+        "coordinate": {
+          "lat": 30.075,
+          "lon": 31.34
+        },
+        "requirements": [
+          {
+            "resource_type": "AMBULANCE",
+            "minimum_count": 1
+          }
+        ],
+        "transport_required": true
+      },
+      "traffic_fixture": {
+        "fixture_id": "t06-fallback",
+        "mode": "FALLBACK",
+        "source_reference": "fixed-osm-fallback-v1"
+      },
+      "expected": {
+        "baseline": "PLAN_GENERATED",
+        "sirengrid": "PLAN_GENERATED"
+      }
+    },
+    {
+      "id": "T07_human_rejection",
+      "title": "Alternative candidate generation for operator choice",
+      "seed": 80107,
+      "master_plan_case": "T07",
+      "tags": [
+        "planning",
+        "alternatives"
+      ],
+      "incident": {
+        "incident_type": "traffic_collision",
+        "severity": "HIGH",
+        "coordinate": {
+          "lat": 30.058,
+          "lon": 31.365
+        },
+        "requirements": [
+          {
+            "resource_type": "AMBULANCE",
+            "minimum_count": 1
+          }
+        ]
+      },
+      "traffic_fixture": {
+        "fixture_id": "t07-fallback",
+        "mode": "FALLBACK",
+        "source_reference": "fixed-osm-fallback-v1"
+      },
+      "expected": {
+        "baseline": "PLAN_GENERATED",
+        "sirengrid": "PLAN_GENERATED"
+      }
+    },
+    {
+      "id": "T08_missing_location",
+      "title": "Unroutable coordinate yields safe insufficiency",
+      "seed": 80108,
+      "master_plan_case": "T08",
+      "tags": [
+        "routing",
+        "failure"
+      ],
+      "incident": {
+        "incident_type": "traffic_collision",
+        "severity": "HIGH",
+        "coordinate": {
+          "lat": 31.0,
+          "lon": 32.0
+        },
+        "requirements": [
+          {
+            "resource_type": "AMBULANCE",
+            "minimum_count": 1
+          }
+        ]
+      },
+      "traffic_fixture": {
+        "fixture_id": "t08-fallback",
+        "mode": "FALLBACK",
+        "source_reference": "fixed-osm-fallback-v1"
+      },
+      "expected": {
+        "baseline": "INSUFFICIENT_RESOURCES",
+        "sirengrid": "INSUFFICIENT_RESOURCES"
+      }
+    },
+    {
+      "id": "T09_resource_unavailable",
+      "title": "Responder outage yields safe insufficiency",
+      "seed": 80109,
+      "master_plan_case": "T09",
+      "tags": [
+        "resource",
+        "outage"
+      ],
+      "incident": {
+        "incident_type": "traffic_collision",
+        "severity": "HIGH",
+        "coordinate": {
+          "lat": 30.065,
+          "lon": 31.35
+        },
+        "requirements": [
+          {
+            "resource_type": "AMBULANCE",
+            "minimum_count": 1
+          }
+        ]
+      },
+      "resource_overrides": [
+        {
+          "resource_id": "10000000-0000-0000-0000-000000000001",
+          "status": "OUT_OF_SERVICE"
+        },
+        {
+          "resource_id": "10000000-0000-0000-0000-000000000002",
+          "status": "OUT_OF_SERVICE"
+        },
+        {
+          "resource_id": "10000000-0000-0000-0000-000000000003",
+          "status": "OUT_OF_SERVICE"
+        }
+      ],
+      "traffic_fixture": {
+        "fixture_id": "t09-fallback",
+        "mode": "FALLBACK",
+        "source_reference": "fixed-osm-fallback-v1"
+      },
+      "expected": {
+        "baseline": "INSUFFICIENT_RESOURCES",
+        "sirengrid": "INSUFFICIENT_RESOURCES"
+      }
+    },
+    {
+      "id": "T10_public_alert",
+      "title": "Candidate route corridor geometry generation",
+      "seed": 80110,
+      "master_plan_case": "T10",
+      "tags": [
+        "planning",
+        "corridor-geometry"
+      ],
+      "incident": {
+        "incident_type": "traffic_collision",
+        "severity": "HIGH",
+        "coordinate": {
+          "lat": 30.07,
+          "lon": 31.355
+        },
+        "requirements": [
+          {
+            "resource_type": "AMBULANCE",
+            "minimum_count": 1
+          }
+        ]
+      },
+      "traffic_fixture": {
+        "fixture_id": "t10-fallback",
+        "mode": "FALLBACK",
+        "source_reference": "fixed-osm-fallback-v1"
+      },
+      "expected": {
+        "baseline": "PLAN_GENERATED",
+        "sirengrid": "PLAN_GENERATED"
+      }
+    },
+    {
+      "id": "T11_hospital_prealert",
+      "title": "Candidate generation for transport-ready incident",
+      "seed": 80111,
+      "master_plan_case": "T11",
+      "tags": [
+        "planning",
+        "transport-slice"
+      ],
+      "incident": {
+        "incident_type": "traffic_collision",
+        "severity": "HIGH",
+        "coordinate": {
+          "lat": 30.052,
+          "lon": 31.338
+        },
+        "requirements": [
+          {
+            "resource_type": "AMBULANCE",
+            "minimum_count": 1
+          }
+        ],
+        "transport_required": true
+      },
+      "traffic_fixture": {
+        "fixture_id": "t11-fallback",
+        "mode": "FALLBACK",
+        "source_reference": "fixed-osm-fallback-v1"
+      },
+      "expected": {
+        "baseline": "PLAN_GENERATED",
+        "sirengrid": "PLAN_GENERATED"
+      }
+    },
+    {
+      "id": "T12_ai_failure",
+      "title": "Deterministic planning operates without external AI",
+      "seed": 80112,
+      "master_plan_case": "T12",
+      "tags": [
+        "planning",
+        "deterministic"
+      ],
+      "incident": {
+        "incident_type": "traffic_collision",
+        "severity": "HIGH",
+        "coordinate": {
+          "lat": 30.0561,
+          "lon": 31.3452
+        },
+        "requirements": [
+          {
+            "resource_type": "AMBULANCE",
+            "minimum_count": 1
+          }
+        ]
+      },
+      "traffic_fixture": {
+        "fixture_id": "t12-fallback",
+        "mode": "FALLBACK",
+        "source_reference": "fixed-osm-fallback-v1"
+      },
+      "expected": {
+        "baseline": "PLAN_GENERATED",
+        "sirengrid": "PLAN_GENERATED"
+      }
+    },
+    {
+      "id": "T13_operator_correction",
+      "title": "Planning response with corrected incident input",
+      "seed": 80113,
+      "master_plan_case": "T13",
+      "tags": [
+        "planning",
+        "correction-slice"
+      ],
+      "incident": {
+        "incident_type": "traffic_collision",
+        "severity": "HIGH",
+        "coordinate": {
+          "lat": 30.062,
+          "lon": 31.341
+        },
+        "requirements": [
+          {
+            "resource_type": "AMBULANCE",
+            "minimum_count": 1
+          }
+        ]
+      },
+      "traffic_fixture": {
+        "fixture_id": "t13-fallback",
+        "mode": "FALLBACK",
+        "source_reference": "fixed-osm-fallback-v1"
+      },
+      "expected": {
+        "baseline": "PLAN_GENERATED",
+        "sirengrid": "PLAN_GENERATED"
+      }
+    },
+    {
+      "id": "T14_stale_operational_data",
+      "title": "Planning under stale traffic snapshot fallback",
+      "seed": 80114,
+      "master_plan_case": "T14",
+      "tags": [
+        "planning",
+        "freshness-fallback"
+      ],
+      "incident": {
+        "incident_type": "traffic_collision",
+        "severity": "HIGH",
+        "coordinate": {
+          "lat": 30.068,
+          "lon": 31.332
+        },
+        "requirements": [
+          {
+            "resource_type": "AMBULANCE",
+            "minimum_count": 1
+          }
+        ]
+      },
+      "traffic_fixture": {
+        "fixture_id": "t14-stale",
+        "mode": "STALE",
+        "source_reference": "fixed-stale-replay-v1"
+      },
+      "expected": {
+        "baseline": "PLAN_GENERATED",
+        "sirengrid": "PLAN_GENERATED"
+      }
+    },
+    {
+      "id": "T15_competing_incident",
+      "title": "Planning under competing incident resource reservation",
+      "seed": 80115,
+      "master_plan_case": "T15",
+      "tags": [
+        "planning",
+        "contention-slice"
+      ],
+      "incident": {
+        "incident_type": "traffic_collision",
+        "severity": "HIGH",
+        "coordinate": {
+          "lat": 30.0561,
+          "lon": 31.3452
+        },
+        "requirements": [
+          {
+            "resource_type": "AMBULANCE",
+            "minimum_count": 1
+          }
+        ]
+      },
+      "events": [
+        {
+          "event_index": 0,
+          "at_seconds": 60,
+          "event_type": "SECOND_INCIDENT",
+          "incident": {
+            "incident_type": "traffic_collision",
+            "severity": "HIGH",
+            "coordinate": {
+              "lat": 30.06,
+              "lon": 31.33
+            },
+            "requirements": [
+              {
+                "resource_type": "AMBULANCE",
+                "minimum_count": 3
+              }
+            ]
+          }
+        }
+      ],
+      "traffic_fixture": {
+        "fixture_id": "t15-fallback",
+        "mode": "FALLBACK",
+        "source_reference": "fixed-osm-fallback-v1"
+      },
+      "expected": {
+        "baseline": "PLAN_GENERATED",
+        "sirengrid": "PLAN_GENERATED"
+      }
+    },
+    {
+      "id": "X01_greedy_resource",
+      "title": "Greedy resource selection under baseline",
+      "seed": 80201,
+      "tags": [
+        "planning",
+        "resource"
+      ],
+      "incident": {
+        "incident_type": "traffic_collision",
+        "severity": "LOW",
+        "coordinate": {
+          "lat": 30.0561,
+          "lon": 31.3452
+        },
+        "requirements": [
+          {
+            "resource_type": "AMBULANCE",
+            "minimum_count": 1
+          }
+        ]
+      },
+      "traffic_fixture": {
+        "fixture_id": "x01-fallback",
+        "mode": "FALLBACK",
+        "source_reference": "fixed-osm-fallback-v1"
+      },
+      "expected": {
+        "baseline": "PLAN_GENERATED",
+        "sirengrid": "PLAN_GENERATED"
+      }
+    },
+    {
+      "id": "X02_multi_resource",
+      "title": "Multi-cohort requirements planning",
+      "seed": 80202,
+      "tags": [
+        "planning",
+        "cohort"
+      ],
+      "incident": {
+        "incident_type": "traffic_collision",
+        "severity": "HIGH",
+        "coordinate": {
+          "lat": 30.062,
+          "lon": 31.341
+        },
+        "requirements": [
+          {
+            "resource_type": "AMBULANCE",
+            "minimum_count": 1
+          },
+          {
+            "resource_type": "FIRE_RESCUE",
+            "minimum_count": 1
+          }
+        ]
+      },
+      "traffic_fixture": {
+        "fixture_id": "x02-fallback",
+        "mode": "FALLBACK",
+        "source_reference": "fixed-osm-fallback-v1"
+      },
+      "expected": {
+        "baseline": "PLAN_GENERATED",
+        "sirengrid": "PLAN_GENERATED"
+      }
+    },
+    {
+      "id": "X03_joint_coverage",
+      "title": "Joint multi-cohort coverage evaluation",
+      "seed": 80203,
+      "tags": [
+        "coverage",
+        "joint"
+      ],
+      "incident": {
+        "incident_type": "traffic_collision",
+        "severity": "HIGH",
+        "coordinate": {
+          "lat": 30.05,
+          "lon": 31.355
+        },
+        "requirements": [
+          {
+            "resource_type": "AMBULANCE",
+            "minimum_count": 1
+          },
+          {
+            "resource_type": "FIRE_RESCUE",
+            "minimum_count": 1
+          }
+        ]
+      },
+      "traffic_fixture": {
+        "fixture_id": "x03-fallback",
+        "mode": "FALLBACK",
+        "source_reference": "fixed-osm-fallback-v1"
+      },
+      "expected": {
+        "baseline": "PLAN_GENERATED",
+        "sirengrid": "PLAN_GENERATED"
+      }
+    },
+    {
+      "id": "X04_reposition_useful",
+      "title": "Reposition proposal identified during planning",
+      "seed": 80204,
+      "tags": [
+        "coverage",
+        "reposition"
+      ],
+      "incident": {
+        "incident_type": "traffic_collision",
+        "severity": "HIGH",
+        "coordinate": {
+          "lat": 30.058,
+          "lon": 31.365
+        },
+        "requirements": [
+          {
+            "resource_type": "AMBULANCE",
+            "minimum_count": 1
+          }
+        ]
+      },
+      "traffic_fixture": {
+        "fixture_id": "x04-fallback",
+        "mode": "FALLBACK",
+        "source_reference": "fixed-osm-fallback-v1"
+      },
+      "expected": {
+        "baseline": "PLAN_GENERATED",
+        "sirengrid": "PLAN_GENERATED"
+      }
+    },
+    {
+      "id": "X05_reposition_rejected",
+      "title": "No beneficial reposition proposal identified",
+      "seed": 80205,
+      "tags": [
+        "coverage",
+        "reposition"
+      ],
+      "incident": {
+        "incident_type": "traffic_collision",
+        "severity": "LOW",
+        "coordinate": {
+          "lat": 30.07,
+          "lon": 31.355
+        },
+        "requirements": [
+          {
+            "resource_type": "AMBULANCE",
+            "minimum_count": 1
+          }
+        ]
+      },
+      "traffic_fixture": {
+        "fixture_id": "x05-fallback",
+        "mode": "FALLBACK",
+        "source_reference": "fixed-osm-fallback-v1"
+      },
+      "expected": {
+        "baseline": "PLAN_GENERATED",
+        "sirengrid": "PLAN_GENERATED"
+      }
+    },
+    {
+      "id": "X06_stale_traffic",
+      "title": "Stale traffic fallback to base OSM routing",
+      "seed": 80206,
+      "tags": [
+        "traffic",
+        "stale-fallback"
+      ],
+      "incident": {
+        "incident_type": "traffic_collision",
+        "severity": "LOW",
+        "coordinate": {
+          "lat": 30.052,
+          "lon": 31.338
+        },
+        "requirements": [
+          {
+            "resource_type": "AMBULANCE",
+            "minimum_count": 1
+          }
+        ]
+      },
+      "traffic_fixture": {
+        "fixture_id": "x06-stale",
+        "mode": "STALE",
+        "source_reference": "fixed-stale-replay-v1"
+      },
+      "expected": {
+        "baseline": "PLAN_GENERATED",
+        "sirengrid": "PLAN_GENERATED"
+      }
+    },
+    {
+      "id": "X07_valid_closure",
+      "title": "Active road closure causes deterministic detour",
+      "seed": 80207,
+      "tags": [
+        "traffic",
+        "closure"
+      ],
+      "incident": {
+        "incident_type": "traffic_collision",
+        "severity": "LOW",
+        "coordinate": {
+          "lat": 30.0561,
+          "lon": 31.3452
+        },
+        "requirements": [
+          {
+            "resource_type": "AMBULANCE",
+            "minimum_count": 1
+          }
+        ]
+      },
+      "traffic_fixture": {
+        "fixture_id": "x07-closure",
+        "mode": "CLOSURE",
+        "source_reference": "fixed-closure-replay-v1",
+        "closure_edge_index": 1526
+      },
+      "expected": {
+        "baseline": "PLAN_GENERATED",
+        "sirengrid": "PLAN_GENERATED"
+      }
+    },
+    {
+      "id": "X08_no_path",
+      "title": "No-path coordinate yields safe insufficiency",
+      "seed": 80208,
+      "tags": [
+        "routing",
+        "failure"
+      ],
+      "incident": {
+        "incident_type": "traffic_collision",
+        "severity": "LOW",
+        "coordinate": {
+          "lat": 31.0,
+          "lon": 32.0
+        },
+        "requirements": [
+          {
+            "resource_type": "AMBULANCE",
+            "minimum_count": 1
+          }
+        ]
+      },
+      "traffic_fixture": {
+        "fixture_id": "x08-fallback",
+        "mode": "FALLBACK",
+        "source_reference": "fixed-osm-fallback-v1"
+      },
+      "expected": {
+        "baseline": "INSUFFICIENT_RESOURCES",
+        "sirengrid": "INSUFFICIENT_RESOURCES"
+      }
+    },
+    {
+      "id": "X09_outside_graph",
+      "title": "Outside-graph coordinate fails safely",
+      "seed": 80209,
+      "tags": [
+        "routing",
+        "validation"
+      ],
+      "incident": {
+        "incident_type": "traffic_collision",
+        "severity": "LOW",
+        "coordinate": {
+          "lat": 31.0,
+          "lon": 32.0
+        },
+        "requirements": [
+          {
+            "resource_type": "AMBULANCE",
+            "minimum_count": 1
+          }
+        ]
+      },
+      "traffic_fixture": {
+        "fixture_id": "x09-fallback",
+        "mode": "FALLBACK",
+        "source_reference": "fixed-osm-fallback-v1"
+      },
+      "expected": {
+        "baseline": "INSUFFICIENT_RESOURCES",
+        "sirengrid": "INSUFFICIENT_RESOURCES"
+      }
+    },
+    {
+      "id": "X10_insufficient_resources",
+      "title": "Demand exceeding availability yields insufficiency",
+      "seed": 80210,
+      "tags": [
+        "resource",
+        "shortage"
+      ],
+      "incident": {
+        "incident_type": "traffic_collision",
+        "severity": "HIGH",
+        "coordinate": {
+          "lat": 30.065,
+          "lon": 31.35
+        },
+        "requirements": [
+          {
+            "resource_type": "AMBULANCE",
+            "minimum_count": 3
+          },
+          {
+            "resource_type": "FIRE_RESCUE",
+            "minimum_count": 2
+          }
+        ]
+      },
+      "resource_overrides": [
+        {
+          "resource_id": "10000000-0000-0000-0000-000000000001",
+          "status": "OUT_OF_SERVICE"
+        },
+        {
+          "resource_id": "10000000-0000-0000-0000-000000000002",
+          "status": "OUT_OF_SERVICE"
+        }
+      ],
+      "traffic_fixture": {
+        "fixture_id": "x10-fallback",
+        "mode": "FALLBACK",
+        "source_reference": "fixed-osm-fallback-v1"
+      },
+      "expected": {
+        "baseline": "INSUFFICIENT_RESOURCES",
+        "sirengrid": "INSUFFICIENT_RESOURCES"
+      }
+    },
+    {
+      "id": "X11_hospital_unknown",
+      "title": "Planning slice for transport incident with unknown destination load",
+      "seed": 80211,
+      "tags": [
+        "planning",
+        "transport-slice"
+      ],
+      "incident": {
+        "incident_type": "traffic_collision",
+        "severity": "HIGH",
+        "coordinate": {
+          "lat": 30.075,
+          "lon": 31.34
+        },
+        "requirements": [
+          {
+            "resource_type": "AMBULANCE",
+            "minimum_count": 1
+          }
+        ],
+        "transport_required": true
+      },
+      "traffic_fixture": {
+        "fixture_id": "x11-fallback",
+        "mode": "FALLBACK",
+        "source_reference": "fixed-osm-fallback-v1"
+      },
+      "expected": {
+        "baseline": "PLAN_GENERATED",
+        "sirengrid": "PLAN_GENERATED"
+      }
+    },
+    {
+      "id": "X12_hospital_incompatible",
+      "title": "Planning slice for transport incident with destination capability filter",
+      "seed": 80212,
+      "tags": [
+        "planning",
+        "transport-slice"
+      ],
+      "incident": {
+        "incident_type": "traffic_collision",
+        "severity": "HIGH",
+        "coordinate": {
+          "lat": 30.068,
+          "lon": 31.332
+        },
+        "requirements": [
+          {
+            "resource_type": "AMBULANCE",
+            "minimum_count": 1
+          }
+        ],
+        "transport_required": true
+      },
+      "traffic_fixture": {
+        "fixture_id": "x12-fallback",
+        "mode": "FALLBACK",
+        "source_reference": "fixed-osm-fallback-v1"
+      },
+      "expected": {
+        "baseline": "PLAN_GENERATED",
+        "sirengrid": "PLAN_GENERATED"
+      }
+    },
+    {
+      "id": "X13_hospital_not_accepting",
+      "title": "Planning slice for transport incident under destination unavailable state",
+      "seed": 80213,
+      "tags": [
+        "planning",
+        "transport-slice"
+      ],
+      "incident": {
+        "incident_type": "traffic_collision",
+        "severity": "HIGH",
+        "coordinate": {
+          "lat": 30.062,
+          "lon": 31.341
+        },
+        "requirements": [
+          {
+            "resource_type": "AMBULANCE",
+            "minimum_count": 1
+          }
+        ],
+        "transport_required": true
+      },
+      "traffic_fixture": {
+        "fixture_id": "x13-fallback",
+        "mode": "FALLBACK",
+        "source_reference": "fixed-osm-fallback-v1"
+      },
+      "expected": {
+        "baseline": "PLAN_GENERATED",
+        "sirengrid": "PLAN_GENERATED"
+      }
+    },
+    {
+      "id": "X14_hospital_unreachable",
+      "title": "Planning slice for transport incident with unreachable destination candidate",
+      "seed": 80214,
+      "tags": [
+        "planning",
+        "transport-slice"
+      ],
+      "incident": {
+        "incident_type": "traffic_collision",
+        "severity": "HIGH",
+        "coordinate": {
+          "lat": 30.05,
+          "lon": 31.355
+        },
+        "requirements": [
+          {
+            "resource_type": "AMBULANCE",
+            "minimum_count": 1
+          }
+        ],
+        "transport_required": true
+      },
+      "traffic_fixture": {
+        "fixture_id": "x14-fallback",
+        "mode": "FALLBACK",
+        "source_reference": "fixed-osm-fallback-v1"
+      },
+      "expected": {
+        "baseline": "PLAN_GENERATED",
+        "sirengrid": "PLAN_GENERATED"
+      }
+    },
+    {
+      "id": "X15_material_eta_replan",
+      "title": "Congestion fixture increases route travel time",
+      "seed": 80215,
+      "tags": [
+        "traffic",
+        "congestion"
+      ],
+      "incident": {
+        "incident_type": "traffic_collision",
+        "severity": "HIGH",
+        "coordinate": {
+          "lat": 30.0561,
+          "lon": 31.3452
+        },
+        "requirements": [
+          {
+            "resource_type": "AMBULANCE",
+            "minimum_count": 1
+          }
+        ]
+      },
+      "traffic_fixture": {
+        "fixture_id": "x15-congestion",
+        "mode": "CONGESTION",
+        "source_reference": "fixed-congestion-replay-v1",
+        "closure_edge_index": 1526,
+        "congestion_factor": 3.0
+      },
+      "expected": {
+        "baseline": "PLAN_GENERATED",
+        "sirengrid": "PLAN_GENERATED"
+      }
+    },
+    {
+      "id": "X16_nonmaterial_eta",
+      "title": "Light traffic conditions preserve base route",
+      "seed": 80216,
+      "tags": [
+        "traffic",
+        "routing"
+      ],
+      "incident": {
+        "incident_type": "traffic_collision",
+        "severity": "LOW",
+        "coordinate": {
+          "lat": 30.058,
+          "lon": 31.365
+        },
+        "requirements": [
+          {
+            "resource_type": "AMBULANCE",
+            "minimum_count": 1
+          }
+        ]
+      },
+      "traffic_fixture": {
+        "fixture_id": "x16-fallback",
+        "mode": "FALLBACK",
+        "source_reference": "fixed-osm-fallback-v1"
+      },
+      "expected": {
+        "baseline": "PLAN_GENERATED",
+        "sirengrid": "PLAN_GENERATED"
+      }
+    },
+    {
+      "id": "X17_resource_outage",
+      "title": "Planning with single resource outage override",
+      "seed": 80217,
+      "tags": [
+        "resource",
+        "outage"
+      ],
+      "incident": {
+        "incident_type": "traffic_collision",
+        "severity": "HIGH",
+        "coordinate": {
+          "lat": 30.07,
+          "lon": 31.355
+        },
+        "requirements": [
+          {
+            "resource_type": "AMBULANCE",
+            "minimum_count": 1
+          }
+        ]
+      },
+      "resource_overrides": [
+        {
+          "resource_id": "10000000-0000-0000-0000-000000000003",
+          "status": "OUT_OF_SERVICE"
+        }
+      ],
+      "traffic_fixture": {
+        "fixture_id": "x17-fallback",
+        "mode": "FALLBACK",
+        "source_reference": "fixed-osm-fallback-v1"
+      },
+      "expected": {
+        "baseline": "PLAN_GENERATED",
+        "sirengrid": "PLAN_GENERATED"
+      }
+    },
+    {
+      "id": "X18_hospital_invalidation",
+      "title": "Planning transport incident under destination invalidation",
+      "seed": 80218,
+      "tags": [
+        "planning",
+        "transport-slice"
+      ],
+      "incident": {
+        "incident_type": "traffic_collision",
+        "severity": "HIGH",
+        "coordinate": {
+          "lat": 30.052,
+          "lon": 31.338
+        },
+        "requirements": [
+          {
+            "resource_type": "AMBULANCE",
+            "minimum_count": 1
+          }
+        ],
+        "transport_required": true
+      },
+      "traffic_fixture": {
+        "fixture_id": "x18-fallback",
+        "mode": "FALLBACK",
+        "source_reference": "fixed-osm-fallback-v1"
+      },
+      "expected": {
+        "baseline": "PLAN_GENERATED",
+        "sirengrid": "PLAN_GENERATED"
+      }
+    },
+    {
+      "id": "X19_two_incidents_available",
+      "title": "Two sequential incidents with adequate reserve",
+      "seed": 80219,
+      "tags": [
+        "planning",
+        "multi-incident"
+      ],
+      "incident": {
+        "incident_type": "traffic_collision",
+        "severity": "HIGH",
+        "coordinate": {
+          "lat": 30.065,
+          "lon": 31.35
+        },
+        "requirements": [
+          {
+            "resource_type": "AMBULANCE",
+            "minimum_count": 1
+          }
+        ]
+      },
+      "events": [
+        {
+          "event_index": 0,
+          "at_seconds": 60,
+          "event_type": "SECOND_INCIDENT",
+          "incident": {
+            "incident_type": "traffic_collision",
+            "severity": "LOW",
+            "coordinate": {
+              "lat": 30.06,
+              "lon": 31.33
+            },
+            "requirements": [
+              {
+                "resource_type": "AMBULANCE",
+                "minimum_count": 1
+              }
+            ]
+          }
+        }
+      ],
+      "traffic_fixture": {
+        "fixture_id": "x19-fallback",
+        "mode": "FALLBACK",
+        "source_reference": "fixed-osm-fallback-v1"
+      },
+      "expected": {
+        "baseline": "PLAN_GENERATED",
+        "sirengrid": "PLAN_GENERATED"
+      }
+    },
+    {
+      "id": "X20_two_incidents_contention",
+      "title": "Two sequential incidents contend safely for resources",
+      "seed": 80220,
+      "tags": [
+        "planning",
+        "contention"
+      ],
+      "incident": {
+        "incident_type": "traffic_collision",
+        "severity": "HIGH",
+        "coordinate": {
+          "lat": 30.0561,
+          "lon": 31.3452
+        },
+        "requirements": [
+          {
+            "resource_type": "AMBULANCE",
+            "minimum_count": 2
+          }
+        ]
+      },
+      "events": [
+        {
+          "event_index": 0,
+          "at_seconds": 60,
+          "event_type": "SECOND_INCIDENT",
+          "incident": {
+            "incident_type": "traffic_collision",
+            "severity": "HIGH",
+            "coordinate": {
+              "lat": 30.06,
+              "lon": 31.33
+            },
+            "requirements": [
+              {
+                "resource_type": "AMBULANCE",
+                "minimum_count": 2
+              }
+            ]
+          }
+        }
+      ],
+      "traffic_fixture": {
+        "fixture_id": "x20-fallback",
+        "mode": "FALLBACK",
+        "source_reference": "fixed-osm-fallback-v1"
+      },
+      "expected": {
+        "baseline": "PLAN_GENERATED",
+        "sirengrid": "PLAN_GENERATED"
+      }
+    },
+    {
+      "id": "X21_concurrency_idempotency",
+      "title": "Deterministic candidate generation replay stability",
+      "seed": 80221,
+      "tags": [
+        "planning",
+        "determinism"
+      ],
+      "incident": {
+        "incident_type": "traffic_collision",
+        "severity": "HIGH",
+        "coordinate": {
+          "lat": 30.062,
+          "lon": 31.341
+        },
+        "requirements": [
+          {
+            "resource_type": "AMBULANCE",
+            "minimum_count": 1
+          }
+        ]
+      },
+      "events": [
+        {
+          "event_index": 0,
+          "at_seconds": 5,
+          "event_type": "NO_OP"
+        },
+        {
+          "event_index": 1,
+          "at_seconds": 5,
+          "event_type": "NO_OP"
+        }
+      ],
+      "traffic_fixture": {
+        "fixture_id": "x21-fallback",
+        "mode": "FALLBACK",
+        "source_reference": "fixed-osm-fallback-v1"
+      },
+      "expected": {
+        "baseline": "PLAN_GENERATED",
+        "sirengrid": "PLAN_GENERATED"
+      }
+    }
   ]
 }

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import json
+from datetime import datetime, timezone
 
 import networkx as nx
 import pytest
-
+from app import coverage
+from app.benchmark_runner import Phase08ScenarioRunner
 from app.benchmark_scenarios import (
     BenchmarkScenario,
     TrafficFixture,
@@ -15,11 +16,17 @@ from app.benchmark_scenarios import (
 )
 from app.candidate_generation import CandidateResource
 from app.coverage import CoverageZone
-from app import coverage
 from app.models import Incident
 from app.planning import evaluate_phase04_candidate_set
-from app.benchmark_runner import Phase08ScenarioRunner
-from app.schemas import Coordinate, ConfidenceLevel, DataReality, IncidentStatus, ResourceStatus, ResourceType, Severity
+from app.schemas import (
+    ConfidenceLevel,
+    Coordinate,
+    DataReality,
+    IncidentStatus,
+    ResourceStatus,
+    ResourceType,
+    Severity,
+)
 from app.traffic.matching import graph_fingerprint
 from app.traffic.models import TrafficProviderState
 
@@ -267,3 +274,88 @@ def test_coverage_reuses_immutable_travel_trees_for_repeated_snapshots(
 
     assert first == second
     assert call_count == 1
+
+
+def test_phase08_manifest_diversity_contracts() -> None:
+    """AG-RC-07: Verify scenario diversity, unique IDs, multiple shapes, and traffic modes."""
+    manifest = load_scenario_manifest()
+
+    # 1. Exactly 36 scenarios with unique IDs
+    assert len(manifest.scenarios) == 36
+    ids = [s.id for s in manifest.scenarios]
+    assert len(ids) == len(set(ids))
+
+    # 2. Traceability: dedicated T01-T15 cases
+    t_cases = [s for s in manifest.scenarios if s.master_plan_case is not None]
+    assert len(t_cases) == 15
+    assert {s.master_plan_case for s in t_cases} == {f"T{i:02d}" for i in range(1, 16)}
+
+    # 3. >= 8 distinct incident coordinates
+    coords = {(s.incident.coordinate.lat, s.incident.coordinate.lon) for s in manifest.scenarios}
+    assert len(coords) >= 8, f"Expected >= 8 distinct coordinates, found {len(coords)}"
+
+    # 4. >= 3 distinct response requirement shapes
+    shapes = {
+        tuple((r.resource_type.value, r.minimum_count) for r in s.incident.requirements)
+        for s in manifest.scenarios
+    }
+    assert len(shapes) >= 3, f"Expected >= 3 requirement shapes, found {len(shapes)}"
+
+    # 5. Traffic modes diversity
+    modes = {s.traffic_fixture.mode for s in manifest.scenarios}
+    assert {"FALLBACK", "CLOSURE", "STALE", "CONGESTION"}.issubset(modes)
+
+    # 6. Multiple resource availability patterns
+    override_patterns = {
+        tuple((ro.resource_id, ro.status.value if ro.status else None) for ro in s.resource_overrides)
+        for s in manifest.scenarios
+    }
+    assert len(override_patterns) >= 3
+
+    # 7. Meaningful second-incident contention cases
+    second_incidents = [
+        s for s in manifest.scenarios
+        if any(e.event_type == "SECOND_INCIDENT" for e in s.events)
+    ]
+    assert len(second_incidents) >= 1
+
+    # 8. Expected outcomes are explicit
+    for s in manifest.scenarios:
+        assert s.expected.baseline in {"PLAN_GENERATED", "INSUFFICIENT_RESOURCES"}
+        assert s.expected.sirengrid in {"PLAN_GENERATED", "INSUFFICIENT_RESOURCES"}
+
+
+def test_phase08_route_impacting_closure_and_congestion() -> None:
+    """AG-RC-07: Verify closure and congestion fixtures materially alter routing outcomes."""
+    manifest = load_scenario_manifest()
+    runner = Phase08ScenarioRunner()
+
+    # T04 closure actually affects path selection
+    t04 = next(s for s in manifest.scenarios if s.id == "T04_blocked_road")
+    res_t04 = runner.run_scenario(t04)
+    assert res_t04["sirengrid"]["outcome"] == "PLAN_GENERATED"
+    routes_t04 = res_t04["sirengrid"]["routes"]
+    assert any(
+        r.get("traffic_closure_affected_path_selection") is True
+        for r in routes_t04
+    ), "T04 road closure did not affect any path selection!"
+
+    # X07 closure actually affects path selection
+    x07 = next(s for s in manifest.scenarios if s.id == "X07_valid_closure")
+    res_x07 = runner.run_scenario(x07)
+    assert res_x07["sirengrid"]["outcome"] == "PLAN_GENERATED"
+    routes_x07 = res_x07["sirengrid"]["routes"]
+    assert any(
+        r.get("traffic_closure_affected_path_selection") is True
+        for r in routes_x07
+    ), "X07 road closure did not affect any path selection!"
+
+    # X15 congestion fixture increases effective travel time
+    x15 = next(s for s in manifest.scenarios if s.id == "X15_material_eta_replan")
+    res_x15 = runner.run_scenario(x15)
+    assert res_x15["sirengrid"]["outcome"] == "PLAN_GENERATED"
+    routes_x15 = res_x15["sirengrid"]["routes"]
+    assert any(
+        r.get("traffic_weight_affected_path_selection") is True
+        for r in routes_x15
+    ), "X15 congestion fixture did not affect path selection weight!"
