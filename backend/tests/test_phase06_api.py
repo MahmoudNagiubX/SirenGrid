@@ -15,6 +15,9 @@ from app.main import app
 from app.models import Incident, Report, TimelineEvent
 from app.schemas import IncidentStatus
 
+PNG_BYTES = b"\x89PNG\r\n\x1a\n"
+WAV_BYTES = b"RIFF\x04\x00\x00\x00WAVE"
+
 
 @pytest.fixture(autouse=True)
 def setup_isolated_db_tables(isolated_engine: Engine) -> None:
@@ -48,7 +51,7 @@ def test_audio_upload_persists_opaque_media_and_requires_manual_transcript(
 
     response = client.post(
         "/api/v1/reports/intake/audio",
-        files={"file": ("caller.wav", b"RIFF synthetic", "audio/wav")},
+        files={"file": ("caller.wav", WAV_BYTES, "audio/wav")},
         data={"source_reference": "call-001"},
     )
 
@@ -66,7 +69,7 @@ def test_audio_upload_persists_opaque_media_and_requires_manual_transcript(
     assert list(tmp_path.iterdir())
 
 
-def test_image_upload_is_retained_for_manual_review_and_video_is_rejected(
+def test_image_upload_is_retained_and_spoofed_image_and_video_are_rejected(
     client: TestClient,
     tmp_path: Any,
     monkeypatch: pytest.MonkeyPatch,
@@ -75,8 +78,13 @@ def test_image_upload_is_retained_for_manual_review_and_video_is_rejected(
 
     image = client.post(
         "/api/v1/reports/intake/image",
-        files={"file": ("evidence.png", b"PNG synthetic", "image/png")},
+        files={"file": ("evidence.png", PNG_BYTES, "image/png")},
         data={"source_reference": "image-001"},
+    )
+    spoofed_image = client.post(
+        "/api/v1/reports/intake/image",
+        files={"file": ("evidence.png", b"PNG synthetic", "image/png")},
+        data={"source_reference": "image-spoofed"},
     )
     video = client.post(
         "/api/v1/reports/intake/image",
@@ -86,7 +94,9 @@ def test_image_upload_is_retained_for_manual_review_and_video_is_rejected(
 
     assert image.status_code == 201, image.text
     assert image.json()["processing_status"] == "VISION_MANUAL_REVIEW"
+    assert spoofed_image.status_code == 422
     assert video.status_code == 422
+    assert len(list(tmp_path.glob("*.png"))) == 1
 
 
 def test_default_structured_processing_is_visible_and_does_not_mutate_incident(
@@ -266,7 +276,7 @@ def test_manual_transcript_fallback_appends_transcript_without_overwriting_media
     monkeypatch.setattr(settings, "phase06_media_dir", tmp_path)
     uploaded = client.post(
         "/api/v1/reports/intake/audio",
-        files={"file": ("caller.wav", b"RIFF synthetic", "audio/wav")},
+        files={"file": ("caller.wav", WAV_BYTES, "audio/wav")},
         data={"source_reference": "call-manual"},
     )
     report_id = uploaded.json()["id"]
@@ -305,7 +315,7 @@ def test_explicit_asr_action_appends_transcript_without_mutating_incident(
     created = client.post("/api/v1/intake/manual", json=_incident_payload()).json()
     uploaded = client.post(
         "/api/v1/reports/intake/audio",
-        files={"file": ("caller.wav", b"RIFF synthetic", "audio/wav")},
+        files={"file": ("caller.wav", WAV_BYTES, "audio/wav")},
         data={"source_reference": "call-asr", "incident_id": created["id"]},
     )
     assert uploaded.status_code == 201
