@@ -12,7 +12,13 @@ from app.corridor import corridor_provenance, extract_corridor_signals
 from app.config import settings
 from app.db import get_db
 from app.hospital_api import _approved_plan
-from app.models import CorridorState, EmergencyResource, Incident, TimelineEvent
+from app.models import (
+    CorridorState,
+    EmergencyResource,
+    Incident,
+    TimelineEvent,
+    new_timeline_event_id,
+)
 from app.schemas import (
     CorridorGenerateRequest,
     CorridorPriorityRequest,
@@ -124,7 +130,7 @@ def generate_corridor(
         row.updated_at = now
         event_type = "CORRIDOR_REFRESHED"
     db.add(TimelineEvent(
-        id=str(uuid.uuid4()),
+        id=new_timeline_event_id(),
         incident_id=incident.id,
         event_type=event_type,
         details_json={
@@ -196,7 +202,7 @@ def update_corridor_priority(
         signals.append(updated)
     row.signals_json = signals
     db.add(TimelineEvent(
-        id=str(uuid.uuid4()),
+        id=new_timeline_event_id(),
         incident_id=incident.id,
         event_type="CORRIDOR_PRIORITY_CHANGED",
         details_json={

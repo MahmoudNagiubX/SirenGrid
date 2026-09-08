@@ -30,7 +30,7 @@ from app.incidents import (
     serialize_timeline_event,
 )
 from app.media import MediaValidationError, resolve_media_path, store_media
-from app.models import Incident, Report, TimelineEvent
+from app.models import Incident, Report, TimelineEvent, new_timeline_event_id
 from app.schemas import (
     DataReality,
     FreshnessStatus,
@@ -157,7 +157,7 @@ def _timeline_event(
     *, incident_id: str, event_type: str, details: dict[str, Any], created_at: datetime
 ) -> TimelineEvent:
     return TimelineEvent(
-        id=str(uuid.uuid4()),
+        id=new_timeline_event_id(),
         incident_id=incident_id,
         event_type=event_type,
         details_json=details,

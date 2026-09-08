@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 import app.models as _models  # noqa: F401 - ensure all ORM models are registered
 from app.db import init_db
 from app.main import app
-from app.models import Incident, TimelineEvent
+from app.models import Incident, TimelineEvent, new_timeline_event_id
 from app.schemas import ConfidenceLevel, DataReality, FreshnessStatus, IncidentStatus, Severity
 
 
@@ -352,6 +352,54 @@ def test_existing_not_null_location_database_is_migrated_without_data_loss(
             assert connection.execute(text("SELECT COUNT(*) FROM incidents")).scalar() == 2
     finally:
         legacy_engine.dispose()
+
+
+def test_timeline_event_ids_are_ordered_unique_uuid7_values() -> None:
+    generated = [new_timeline_event_id() for _ in range(2000)]
+
+    assert generated == sorted(generated)
+    assert len(set(generated)) == len(generated)
+    for value in (generated[0], generated[-1]):
+        parsed = uuid.UUID(value)
+        assert str(parsed) == value
+        assert parsed.version == 7
+
+
+def test_same_timestamp_timeline_events_read_in_insert_order(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    incident = Incident(
+        id=str(uuid.uuid4()),
+        version=1,
+        incident_type="traffic_collision",
+        severity=Severity.HIGH,
+        confidence_level=ConfidenceLevel.HIGH,
+        status=IncidentStatus.ACTIVE_UNCONFIRMED,
+        latitude=30.0561,
+        longitude=31.3452,
+        required_resources_json=[],
+        provenance_json={},
+    )
+    db_session.add(incident)
+    db_session.commit()
+
+    timestamp = datetime.datetime(2026, 9, 8, tzinfo=datetime.timezone.utc)
+    expected = [f"STEP_{index:02d}" for index in range(12)]
+    for event_type in expected:
+        db_session.add(
+            TimelineEvent(
+                incident_id=incident.id,
+                event_type=event_type,
+                details_json={},
+                created_at=timestamp,
+            )
+        )
+        db_session.commit()
+
+    response = client.get(f"/api/v1/incidents/{incident.id}/timeline")
+    assert response.status_code == 200, response.text
+    assert [event["event_type"] for event in response.json()] == expected
 
 
 def test_invalid_coordinates_return_422(client: TestClient) -> None:

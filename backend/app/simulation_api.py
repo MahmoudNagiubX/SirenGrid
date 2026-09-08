@@ -5,7 +5,6 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from threading import Lock
 from typing import Any
-import uuid
 import json
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -34,6 +33,7 @@ from app.models import (
     Report,
     ResponsePlan,
     TimelineEvent,
+    new_timeline_event_id,
 )
 from app.schemas import (
     ConfidenceLevel,
@@ -210,7 +210,7 @@ def load_simulation_scenario(
         db.add(incident)
         resources = _load_resources(db, scenario)
         event = TimelineEvent(
-            id=str(uuid.uuid4()),
+            id=new_timeline_event_id(),
             incident_id=incident.id,
             event_type="SIMULATION_SCENARIO_LOADED",
             details_json={
@@ -282,7 +282,7 @@ def trigger_simulation_event(
             db.add(created)
             created_incident_id = created.id
         timeline = TimelineEvent(
-            id=str(uuid.uuid4()),
+            id=new_timeline_event_id(),
             incident_id=incident.id,
             event_type="SIMULATION_EVENT_TRIGGERED",
             details_json={

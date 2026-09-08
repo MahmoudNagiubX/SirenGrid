@@ -36,6 +36,7 @@ from app.models import (
     Incident,
     ResponsePlan,
     TimelineEvent,
+    new_timeline_event_id,
 )
 from app.incidents import (
     ensure_incident_actionable,
@@ -722,7 +723,7 @@ def select_alternative_plan(
     plan.status = ResponsePlanStatus.RECOMMENDED
     plan.incident_version = incident.version
     timeline_event = TimelineEvent(
-        id=str(uuid.uuid4()),
+        id=new_timeline_event_id(),
         incident_id=incident.id,
         event_type="PLAN_ALTERNATIVE_SELECTED",
         details_json={
@@ -822,7 +823,7 @@ def _supersede_replaced_route_state(
         }
         db.add(
             TimelineEvent(
-                id=str(uuid.uuid4()),
+                id=new_timeline_event_id(),
                 incident_id=incident.id,
                 event_type="CORRIDOR_SUPERSEDED",
                 details_json={
@@ -880,7 +881,7 @@ def _supersede_replaced_route_state(
         db.add(new_row)
         db.add(
             TimelineEvent(
-                id=str(uuid.uuid4()),
+                id=new_timeline_event_id(),
                 incident_id=incident.id,
                 event_type="CORRIDOR_REDERIVED",
                 details_json={
@@ -906,7 +907,7 @@ def _supersede_replaced_route_state(
         active_alert_resource_ids.add(alert.resource_id)
         db.add(
             TimelineEvent(
-                id=str(uuid.uuid4()),
+                id=new_timeline_event_id(),
                 incident_id=incident.id,
                 event_type="DRIVER_ALERT_SUPERSEDED",
                 details_json={
@@ -1268,7 +1269,7 @@ def approve_response_plan(
     )
 
     plan_approved_event = TimelineEvent(
-        id=str(uuid.uuid4()),
+        id=new_timeline_event_id(),
         incident_id=incident.id,
         event_type="PLAN_APPROVED",
         details_json={
@@ -1282,7 +1283,7 @@ def approve_response_plan(
     )
 
     resources_assigned_event = TimelineEvent(
-        id=str(uuid.uuid4()),
+        id=new_timeline_event_id(),
         incident_id=incident.id,
         event_type="RESOURCES_ASSIGNED",
         details_json={

@@ -22,7 +22,7 @@ from app.incidents import (
     serialize_report,
     serialize_timeline_event,
 )
-from app.models import Incident, Report, TimelineEvent
+from app.models import Incident, Report, TimelineEvent, new_timeline_event_id
 from app.phase06_api import _incident_fusion_view, _report_fusion_view
 from app.schemas import DataReality
 from app.social import (
@@ -466,7 +466,7 @@ def associate_social_signal(
     }
     report.provenance_json = provenance
     event = TimelineEvent(
-        id=str(uuid.uuid4()),
+        id=new_timeline_event_id(),
         incident_id=incident.id,
         event_type="SOCIAL_SIGNAL_ASSOCIATED",
         details_json={

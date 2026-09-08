@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import math
 from typing import Any
-import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select, text
@@ -11,7 +10,13 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.driver_alert import refresh_driver_alert
-from app.models import EmergencyResource, Incident, ResponsePlan, TimelineEvent
+from app.models import (
+    EmergencyResource,
+    Incident,
+    ResponsePlan,
+    TimelineEvent,
+    new_timeline_event_id,
+)
 from app.routing import haversine_distance_m
 from app.schemas import (
     DataReality,
@@ -330,7 +335,7 @@ def assign_resource(
     }
 
     timeline_event = TimelineEvent(
-        id=str(uuid.uuid4()),
+        id=new_timeline_event_id(),
         incident_id=incident.id,
         event_type="RESOURCE_ASSIGNED",
         details_json={
@@ -472,7 +477,7 @@ def patch_resource_state(
 
     if incident is not None:
         timeline_event = TimelineEvent(
-            id=str(uuid.uuid4()),
+            id=new_timeline_event_id(),
             incident_id=incident.id,
             event_type="RESOURCE_STATUS_CHANGED",
             details_json={
@@ -601,7 +606,7 @@ def release_resource(
     }
 
     timeline_event = TimelineEvent(
-        id=str(uuid.uuid4()),
+        id=new_timeline_event_id(),
         incident_id=incident.id,
         event_type="RESOURCE_RELEASED",
         details_json={
@@ -823,7 +828,7 @@ def patch_resource_movement(
     }
 
     timeline_event = TimelineEvent(
-        id=str(uuid.uuid4()),
+        id=new_timeline_event_id(),
         incident_id=incident.id,
         event_type="RESOURCE_MOVED",
         details_json={

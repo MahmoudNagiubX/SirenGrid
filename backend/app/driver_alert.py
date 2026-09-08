@@ -12,7 +12,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.models import DriverAlert, EmergencyResource, Incident, ResponsePlan, TimelineEvent
+from app.models import (
+    DriverAlert,
+    EmergencyResource,
+    Incident,
+    ResponsePlan,
+    TimelineEvent,
+    new_timeline_event_id,
+)
 
 __all__ = [
     "DriverAlertGateway",
@@ -91,7 +98,7 @@ def _expire_active_alerts(
     for alert in active:
         alert.status = "EXPIRED"
         db.add(TimelineEvent(
-            id=str(uuid.uuid4()),
+            id=new_timeline_event_id(),
             incident_id=incident_id,
             event_type="DRIVER_ALERT_EXPIRED",
             details_json={
@@ -162,7 +169,7 @@ def refresh_driver_alert(
     )
     db.add(alert)
     db.add(TimelineEvent(
-        id=str(uuid.uuid4()),
+        id=new_timeline_event_id(),
         incident_id=incident.id,
         event_type="DRIVER_ALERT_REFRESHED" if status == "ACTIVE" else "DRIVER_ALERT_EXPIRED",
         details_json={

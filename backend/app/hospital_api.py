@@ -27,6 +27,7 @@ from app.models import (
     Incident,
     ResponsePlan,
     TimelineEvent,
+    new_timeline_event_id,
 )
 from app.routing import (
     RouteNotFoundError,
@@ -192,7 +193,7 @@ def invalidate_selected_hospital_for_replan(
     }
     db.add(
         TimelineEvent(
-            id=str(uuid.uuid4()),
+            id=new_timeline_event_id(),
             incident_id=incident.id,
             event_type="HOSPITAL_DESTINATION_INVALIDATED",
             details_json={
@@ -388,7 +389,7 @@ def patch_hospital_simulation_state(
             invalidated_destinations.append((incident.id, hospital_id))
             db.add(
                 TimelineEvent(
-                    id=str(uuid.uuid4()),
+                    id=new_timeline_event_id(),
                     incident_id=incident.id,
                     event_type="HOSPITAL_DESTINATION_INVALIDATED",
                     details_json={
@@ -625,7 +626,7 @@ def select_hospital_destination(
     )
     db.add(destination)
     db.add(TimelineEvent(
-        id=str(uuid.uuid4()),
+        id=new_timeline_event_id(),
         incident_id=incident.id,
         event_type="HOSPITAL_DESTINATION_SELECTED",
         details_json={
@@ -757,7 +758,7 @@ def request_hospital_prealert(
     )
     db.add(alert)
     db.add(TimelineEvent(
-        id=str(uuid.uuid4()), incident_id=incident.id,
+        id=new_timeline_event_id(), incident_id=incident.id,
         event_type="HOSPITAL_PREALERT_REQUESTED",
         details_json={"prealert_id": alert.id, "hospital_id": destination.hospital_id, "operator_reference": payload.operator_reference},
         created_at=now,
@@ -771,7 +772,7 @@ def request_hospital_prealert(
     if gateway_result.status is not HospitalPreAlertStatus.FAILED:
         alert.status = HospitalPreAlertStatus.SENT.value
         db.add(TimelineEvent(
-            id=str(uuid.uuid4()), incident_id=incident.id,
+            id=new_timeline_event_id(), incident_id=incident.id,
             event_type="HOSPITAL_PREALERT_SENT",
             details_json={"prealert_id": alert.id, "data_reality": DataReality.SIMULATED.value},
             created_at=now,
@@ -786,7 +787,7 @@ def request_hospital_prealert(
         else "HOSPITAL_PREALERT_ACKNOWLEDGED"
     )
     db.add(TimelineEvent(
-        id=str(uuid.uuid4()), incident_id=incident.id,
+        id=new_timeline_event_id(), incident_id=incident.id,
         event_type=event_type,
         details_json={"prealert_id": alert.id, "data_reality": DataReality.SIMULATED.value},
         created_at=now,

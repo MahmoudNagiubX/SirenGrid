@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import secrets
+import threading
+import time
 from typing import Any
 import uuid
 
@@ -42,7 +45,38 @@ __all__ = [
     "CorridorState",
     "DriverAlert",
     "ReplanEvaluation",
+    "new_timeline_event_id",
 ]
+
+
+_TIMELINE_ID_LOCK = threading.Lock()
+_TIMELINE_ID_LAST_MS = 0
+_TIMELINE_ID_COUNTER = 0
+_TIMELINE_ID_MAX_COUNTER = 0xFFF
+
+
+def new_timeline_event_id() -> str:
+    """Return a valid UUIDv7 whose lexical order follows event insertion."""
+    global _TIMELINE_ID_LAST_MS, _TIMELINE_ID_COUNTER
+    with _TIMELINE_ID_LOCK:
+        now_ms = time.time_ns() // 1_000_000
+        if now_ms > _TIMELINE_ID_LAST_MS:
+            _TIMELINE_ID_LAST_MS = now_ms
+            _TIMELINE_ID_COUNTER = 0
+        else:
+            _TIMELINE_ID_COUNTER += 1
+            if _TIMELINE_ID_COUNTER > _TIMELINE_ID_MAX_COUNTER:
+                _TIMELINE_ID_LAST_MS += 1
+                _TIMELINE_ID_COUNTER = 0
+        milliseconds = _TIMELINE_ID_LAST_MS
+        counter = _TIMELINE_ID_COUNTER
+
+    value = (milliseconds & 0xFFFF_FFFF_FFFF) << 80
+    value |= 0x7 << 76
+    value |= counter << 64
+    value |= 0b10 << 62
+    value |= secrets.randbits(62)
+    return str(uuid.UUID(int=value))
 
 
 class Incident(Base):
@@ -299,7 +333,7 @@ class TimelineEvent(Base):
     id: Mapped[str] = mapped_column(
         String(36),
         primary_key=True,
-        default=lambda: str(uuid.uuid4()),
+        default=new_timeline_event_id,
     )
     incident_id: Mapped[str] = mapped_column(String(36))
     event_type: Mapped[str] = mapped_column(String)
