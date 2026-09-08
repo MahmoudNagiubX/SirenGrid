@@ -119,8 +119,23 @@ def test_failed_attempt_without_retrieval_has_unknown_freshness() -> None:
     assert evaluate_freshness(snapshot, NOW) is FreshnessStatus.UNKNOWN
 
 
-def test_negative_age_is_rejected_instead_of_becoming_live() -> None:
+def test_future_retrieval_timestamp_has_unknown_freshness() -> None:
     snapshot = make_snapshot(retrieved_at=NOW + timedelta(seconds=1))
 
-    with pytest.raises(ValueError, match="later than evaluation time"):
-        evaluate_freshness(snapshot, NOW)
+    assert evaluate_freshness(snapshot, NOW) is FreshnessStatus.UNKNOWN
+
+
+def test_future_provider_timestamp_has_unknown_freshness() -> None:
+    snapshot = make_snapshot(
+        retrieved_at=NOW + timedelta(seconds=2),
+        provider_last_updated=NOW + timedelta(seconds=1),
+    )
+
+    assert evaluate_freshness(snapshot, NOW) is FreshnessStatus.UNKNOWN
+
+
+def test_naive_evaluation_time_remains_invalid() -> None:
+    snapshot = make_snapshot(retrieved_at=NOW)
+
+    with pytest.raises(ValueError, match="timezone-aware"):
+        evaluate_freshness(snapshot, NOW.replace(tzinfo=None))

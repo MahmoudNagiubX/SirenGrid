@@ -206,6 +206,25 @@ def test_stale_snapshot_falls_back_to_independent_base_route() -> None:
     assert result.matched_traversed_edge_count == 0
 
 
+def test_future_timestamp_snapshot_cannot_weight_routing() -> None:
+    graph = two_path_graph()
+    snapshot = make_snapshot(
+        graph,
+        (traffic_entry(("a", "d", "0"), factor=4),),
+        freshness=FreshnessStatus.UNKNOWN,
+        failure_reason="TOMTOM_SNAPSHOT_TIMESTAMP_IN_FUTURE",
+    )
+
+    result = compute_traffic_aware_route(graph, ORIGIN, DESTINATION, snapshot)
+
+    assert result.nodes == ["a", "d"]
+    assert result.base_eta == result.effective_eta == 10
+    assert result.routing_source == ROUTING_SOURCE_OSM_BASE_TRAVEL_TIME
+    assert result.traffic_freshness_status is FreshnessStatus.UNKNOWN
+    assert result.traffic_fallback_reason == "TOMTOM_SNAPSHOT_TIMESTAMP_IN_FUTURE"
+    assert result.matched_traversed_edge_count == 0
+
+
 def test_graph_fingerprint_mismatch_falls_back_without_using_overlay() -> None:
     graph = two_path_graph()
     snapshot = make_snapshot(

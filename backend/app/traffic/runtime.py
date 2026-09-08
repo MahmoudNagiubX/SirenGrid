@@ -19,7 +19,7 @@ from app.traffic.client import (
     TomTomFlowClient,
     TomTomRefreshResult,
 )
-from app.traffic.freshness import evaluate_freshness
+from app.traffic.freshness import evaluate_freshness, freshness_origin
 from app.traffic.matching import (
     build_overlay,
     graph_fingerprint,
@@ -29,6 +29,7 @@ from app.traffic.models import TrafficProviderState, TrafficSnapshot
 
 TRAFFIC_SAMPLE_POINTS_FILENAME = "nasr_city_traffic_sample_points.geojson"
 TRAFFIC_SOURCE = "TomTom Traffic Flow Segment Data"
+TRAFFIC_FUTURE_TIMESTAMP_REASON = "TOMTOM_SNAPSHOT_TIMESTAMP_IN_FUTURE"
 
 
 class TrafficClient(Protocol):
@@ -108,9 +109,23 @@ class TrafficRuntime:
         now: datetime,
     ) -> TrafficSnapshot:
         current = evaluate_freshness(snapshot, now)
-        if current is snapshot.freshness_status:
+        origin = freshness_origin(snapshot)
+        timestamp_in_future = snapshot.refresh_attempted_at > now or (
+            origin is not None and origin > now
+        )
+        updates = {}
+        if current is not snapshot.freshness_status:
+            updates["freshness_status"] = current
+        if timestamp_in_future and snapshot.failure_reason is None:
+            updates["failure_reason"] = TRAFFIC_FUTURE_TIMESTAMP_REASON
+        elif (
+            not timestamp_in_future
+            and snapshot.failure_reason == TRAFFIC_FUTURE_TIMESTAMP_REASON
+        ):
+            updates["failure_reason"] = None
+        if not updates:
             return snapshot
-        return snapshot.model_copy(update={"freshness_status": current})
+        return snapshot.model_copy(update=updates)
 
     def _publish_failure(
         self,
@@ -150,8 +165,6 @@ class TrafficRuntime:
         with self._lock:
             if self._snapshot is not None and self._snapshot.graph_fingerprint == graph_hash:
                 age = (now - self._snapshot.refresh_attempted_at).total_seconds()
-                if age < 0:
-                    raise ValueError("capture time cannot predate the cached refresh attempt")
                 if age < settings.TOMTOM_REFRESH_INTERVAL_SECONDS:
                     current = self._with_current_freshness(self._snapshot, now)
                     if current is not self._snapshot:
