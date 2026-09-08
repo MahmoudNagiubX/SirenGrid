@@ -1090,8 +1090,6 @@ def patch_incident_facts(
 
     db.add(incident)
     db.add(timeline_event)
-    db.commit()
-    db.refresh(incident)
 
     if downstream_inputs_dirty and incident.current_plan_id:
         active_plan = db.get(ResponsePlan, incident.current_plan_id)
@@ -1099,9 +1097,9 @@ def patch_incident_facts(
             # Corrections are already authoritative and versioned by this
             # endpoint. Replanning is a separate pending evaluation and does
             # not mutate the active approved plan.
-            from app.replanning import record_replan_trigger
+            from app.replanning import apply_replan_trigger
 
-            record_replan_trigger(
+            apply_replan_trigger(
                 db,
                 incident_id=incident.id,
                 expected_incident_version=incident.version,
@@ -1113,6 +1111,11 @@ def patch_incident_facts(
                 },
                 now=now_utc,
             )
+
+    # Keep the authoritative correction and any resulting trigger in one
+    # transaction. Notification is intentionally after this commit.
+    db.commit()
+    db.refresh(incident)
 
     serialized_incident = serialize_incident(incident)
     publish_operations_event(

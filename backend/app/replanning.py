@@ -254,12 +254,36 @@ def record_replan_trigger(
     input_references: dict[str, Any],
     now: datetime | None = None,
 ) -> tuple[ReplanEvaluation, bool]:
-    """Record/coalesce a trigger without changing incident version.
-
-    Returns ``(evaluation, idempotent)``. The caller owns the transaction and
-    can use this helper from both the REST command and future domain events.
-    """
+    """Acquire the write lock, record/coalesce a trigger, and commit it."""
     _acquire_write_lock(db)
+    evaluation, idempotent = apply_replan_trigger(
+        db,
+        incident_id=incident_id,
+        expected_incident_version=expected_incident_version,
+        trigger_reasons=trigger_reasons,
+        input_references=input_references,
+        now=now,
+    )
+    db.commit()
+    db.refresh(evaluation)
+    return evaluation, idempotent
+
+
+def apply_replan_trigger(
+    db: Session,
+    *,
+    incident_id: str,
+    expected_incident_version: int,
+    trigger_reasons: list[str],
+    input_references: dict[str, Any],
+    now: datetime | None = None,
+) -> tuple[ReplanEvaluation, bool]:
+    """Record/coalesce a trigger inside the caller's open transaction.
+
+    This variant acquires no lock and performs no commit. It is for atomic
+    commands that have already changed authoritative state and need the
+    resulting replan trigger to commit or roll back with that change.
+    """
     incident = db.get(Incident, incident_id)
     if incident is None:
         raise HTTPException(
@@ -344,8 +368,7 @@ def record_replan_trigger(
             created_at=now_utc,
         )
     )
-    db.commit()
-    db.refresh(evaluation)
+    db.flush()
     return evaluation, idempotent
 
 

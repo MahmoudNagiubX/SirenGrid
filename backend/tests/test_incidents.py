@@ -13,8 +13,15 @@ from sqlalchemy.orm import Session
 import app.models as _models  # noqa: F401 - ensure all ORM models are registered
 from app.db import init_db
 from app.main import app
-from app.models import Incident, TimelineEvent, new_timeline_event_id
-from app.schemas import ConfidenceLevel, DataReality, FreshnessStatus, IncidentStatus, Severity
+from app.models import Incident, ResponsePlan, TimelineEvent, new_timeline_event_id
+from app.schemas import (
+    ConfidenceLevel,
+    DataReality,
+    FreshnessStatus,
+    IncidentStatus,
+    ResponsePlanStatus,
+    Severity,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -154,6 +161,68 @@ def test_single_report_activates_immediately_no_second_report_needed(
     db_incident = db_session.get(Incident, data["id"])
     assert db_incident is not None
     assert db_incident.status == IncidentStatus.ACTIVE_UNCONFIRMED
+
+
+def test_fact_correction_and_replan_trigger_roll_back_together_on_trigger_failure(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    incident = Incident(
+        id=str(uuid.uuid4()),
+        version=4,
+        incident_type="traffic_collision",
+        severity=Severity.HIGH,
+        confidence_level=ConfidenceLevel.HIGH,
+        status=IncidentStatus.RESPONSE_ACTIVE,
+        latitude=30.0561,
+        longitude=31.3452,
+        required_resources_json=[{"resource_type": "AMBULANCE", "count": 1}],
+        provenance_json={},
+        current_plan_id="approved-plan",
+    )
+    plan = ResponsePlan(
+        id="approved-plan",
+        incident_id=incident.id,
+        incident_version=4,
+        plan_version=1,
+        status=ResponsePlanStatus.APPROVED,
+        resource_ids_json=[],
+        routes_json=[],
+        metrics_json={},
+        score_breakdown_json={},
+    )
+    db_session.add_all([incident, plan])
+    db_session.commit()
+
+    def fail_trigger(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise RuntimeError("controlled replan trigger failure")
+
+    monkeypatch.setattr("app.replanning.apply_replan_trigger", fail_trigger)
+
+    with pytest.raises(RuntimeError, match="controlled replan trigger failure"):
+        client.patch(
+            f"/api/v1/incidents/{incident.id}/facts",
+            json={
+                "expected_incident_version": 4,
+                "required_resources": [
+                    {"resource_type": "AMBULANCE", "count": 2},
+                ],
+                "operator_reference": "test-operator",
+            },
+        )
+
+    db_session.expire_all()
+    saved = db_session.get(Incident, incident.id)
+    assert saved is not None
+    assert saved.version == 4
+    assert saved.required_resources_json == [
+        {"resource_type": "AMBULANCE", "count": 1},
+    ]
+    assert db_session.scalars(
+        select(TimelineEvent).where(TimelineEvent.incident_id == incident.id)
+    ).all() == []
 
 
 def test_omitted_optional_fields_remain_null(
