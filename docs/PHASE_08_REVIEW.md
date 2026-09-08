@@ -200,9 +200,11 @@ No external code was copied into the production decision path.
 
 The 36-case benchmark generated 31 plans and 5 visible insufficient-resource
 outcomes in each engine. Median modeled incident ETA was 179.557 seconds for
-both. Mean post-dispatch joint coverage was 0.918452 for the baseline and
-0.920198 for SirenGrid. These are fixture-set measurements, not universal
-claims. The benchmark report contains the full dimensions and trade-offs.
+both. Mean post-dispatch joint coverage was 0.916425 for the baseline and
+0.919185 for SirenGrid. Five scenarios had unavailable ETA/coverage
+measurements; those values remain missing in the raw and aggregate artifacts.
+These are fixture-set measurements, not universal claims. The benchmark report
+contains the full dimensions and trade-offs.
 
 ## Limitations / not measured
 

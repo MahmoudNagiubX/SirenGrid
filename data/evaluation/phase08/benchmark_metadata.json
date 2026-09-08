@@ -1,14 +1,14 @@
 {
   "assets": {
     "hospitals": "5b0439c14e1920ee822602c98449e88d0e5b4c0b7562d9cd2c680934b40203b4",
-    "population_zones": "d7f9a46642608a1cbae8796ff90b95183e214f59c2a6162215d8e3f6e8c471d9",
+    "population_zones": "687ad07b25df21de91556f04c550812c0d78dd2860215e533b1bc78668562884",
     "routing_graph": "080e9b87039278681d086abf92e778797e7108ea215f4037706501185c43d88d",
-    "scenario_manifest": "0b088378186f32bc067c23c330f40447a5557dbef051dc0e66cb28e8508ed45a",
+    "scenario_manifest": "277adf0ca2eddde9c23acc59d4486fa307d37486cce37f83a534b10bf58435ea",
     "traffic_signals": "a83d9c3c6d73868009a3542fe9e58a69d527c8e97e412b3b15538e0792bb145c"
   },
   "benchmark_policy_version": "SIRENGRID_PHASE08_BENCHMARK_V1",
-  "code_commit": "dcc27904a32631426cf19fcadf5e4db556ad1c52",
-  "generated_at": "2026-09-08T10:57:44.548333+00:00",
+  "code_commit": "7c9e3a9bb8098cea79b9ae661c7f78ee0c46f99a",
+  "generated_at": "2026-09-08T22:00:56.920295+00:00",
   "reality": "SIMULATED benchmark scenarios grounded in REAL_PUBLIC/REAL_DERIVED static assets",
   "runtime": {
     "platform": "Windows-11-10.0.26200-SP0",
