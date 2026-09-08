@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -236,6 +237,14 @@ def _validate_zones(zones: Iterable[CoverageZone]) -> tuple[CoverageZone, ...]:
     return validated
 
 
+def _traffic_cache_identity(snapshot: TrafficSnapshot | None) -> str | None:
+    if snapshot is None:
+        return None
+    return hashlib.sha256(
+        snapshot.model_dump_json().encode("utf-8")
+    ).hexdigest()
+
+
 def _matches_cohort(resource: CoverageResource, cohort: CoverageCohort) -> bool:
     return (
         resource.status is ResourceStatus.AVAILABLE
@@ -311,6 +320,7 @@ def compute_coverage_snapshot(
         (resource for resource in resources if _matches_cohort(resource, cohort)),
         key=lambda resource: resource.resource_id,
     )
+    traffic_identity = _traffic_cache_identity(traffic_snapshot)
     trees = []
     excluded_resource_ids: list[str] = []
     for resource in selected_resources:
@@ -319,9 +329,7 @@ def compute_coverage_snapshot(
             resource.resource_id,
             resource.coordinate.lat,
             resource.coordinate.lon,
-            traffic_snapshot.snapshot_id if traffic_snapshot else None,
-            traffic_snapshot.version if traffic_snapshot else None,
-            traffic_snapshot.freshness_status.value if traffic_snapshot else None,
+            traffic_identity,
         )
         try:
             tree = (
