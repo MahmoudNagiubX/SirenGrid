@@ -64,6 +64,37 @@ class StoredMedia:
         return self._path.read_bytes()
 
 
+def _has_media_signature(content: bytes, content_type: str) -> bool:
+    if content_type == "image/png":
+        return content.startswith(b"\x89PNG\r\n\x1a\n")
+    if content_type == "image/jpeg":
+        return content.startswith(b"\xff\xd8\xff")
+    if content_type == "image/webp":
+        return len(content) >= 12 and content[:4] == b"RIFF" and content[8:12] == b"WEBP"
+    if content_type in {"audio/wav", "audio/x-wav"}:
+        return len(content) >= 12 and content[:4] == b"RIFF" and content[8:12] == b"WAVE"
+    if content_type == "audio/ogg":
+        return content.startswith(b"OggS")
+    if content_type == "audio/webm":
+        return content.startswith(b"\x1a\x45\xdf\xa3")
+    if content_type == "audio/mp4":
+        if len(content) < 12 or content[4:8] != b"ftyp":
+            return False
+        box_size = int.from_bytes(content[:4], byteorder="big")
+        return 12 <= box_size <= len(content)
+    if content_type == "audio/mpeg":
+        if len(content) >= 10 and content.startswith(b"ID3"):
+            return True
+        if len(content) < 4 or content[0] != 0xFF or content[1] & 0xE0 != 0xE0:
+            return False
+        version = (content[1] >> 3) & 0x03
+        layer = (content[1] >> 1) & 0x03
+        bitrate = content[2] >> 4
+        sample_rate = (content[2] >> 2) & 0x03
+        return version != 1 and layer != 0 and bitrate not in {0, 15} and sample_rate != 3
+    return False
+
+
 def _validate_media(content: bytes, *, media_kind: str, content_type: str) -> str:
     normalized_kind = media_kind.casefold().strip()
     normalized_type = content_type.casefold().strip()
@@ -79,6 +110,8 @@ def _validate_media(content: bytes, *, media_kind: str, content_type: str) -> st
     )
     if len(content) > max_bytes:
         raise MediaValidationError("media upload is too large")
+    if not _has_media_signature(content, normalized_type):
+        raise MediaValidationError("media content does not match the claimed MIME signature")
     return normalized_type
 
 
