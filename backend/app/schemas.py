@@ -1030,6 +1030,26 @@ class IncidentCloseRequest(BaseModel):
     reason: str | None = None
 
 
+class IncidentCancelRequest(BaseModel):
+    """Operator cancellation of an incident that turned out to be a false report."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "expected_incident_version": 2,
+                "operator_reference": "dispatcher-op-01",
+                "reason_code": "FALSE_REPORT",
+                "reason": "Caller confirmed no emergency at this location",
+            }
+        }
+    )
+
+    expected_incident_version: int = Field(ge=1)
+    operator_reference: str = Field(min_length=1)
+    reason_code: str = Field(default="FALSE_REPORT", min_length=1, max_length=64)
+    reason: str | None = Field(default=None, max_length=500)
+
+
 class TimelineEventRead(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={

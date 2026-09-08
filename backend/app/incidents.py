@@ -9,10 +9,18 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models import Incident, Report, ResponsePlan, TimelineEvent, new_timeline_event_id
+from app.models import (
+    EmergencyResource,
+    Incident,
+    Report,
+    ResponsePlan,
+    TimelineEvent,
+    new_timeline_event_id,
+)
 from app.schemas import (
     DataReality,
     FreshnessStatus,
+    IncidentCancelRequest,
     IncidentCloseRequest,
     IncidentFactsPatchRequest,
     IncidentFactsPatchResponse,
@@ -22,6 +30,8 @@ from app.schemas import (
     ManualIncidentCreate,
     ReportCreate,
     ReportRead,
+    ResourceStatus,
+    ResponsePlanStatus,
     TimelineEventRead,
 )
 from app.websocket import publish_operations_event
@@ -42,6 +52,8 @@ __all__ = [
     "get_report",
     "transition_incident_lifecycle",
     "close_incident",
+    "cancel_incident",
+    "committed_response_blockers",
     "LOCKED_FORWARD_TRANSITIONS",
     "PLANNING_INPUT_FACT_FIELDS",
     "NON_ACTIONABLE_INCIDENT_STATUSES",
@@ -151,6 +163,52 @@ def ensure_incident_actionable(incident: Incident, action: str) -> None:
         status_code=status.HTTP_409_CONFLICT,
         detail=f"Cannot {action} for incident with status {status_value}",
     )
+
+
+COMMITTED_RESOURCE_STATUSES: frozenset[ResourceStatus] = frozenset(
+    {
+        ResourceStatus.ASSIGNED,
+        ResourceStatus.EN_ROUTE,
+        ResourceStatus.ON_SCENE,
+        ResourceStatus.TRANSPORTING,
+    }
+)
+CANCELLABLE_TERMINAL_STATUSES: frozenset[IncidentStatus] = frozenset(
+    {
+        IncidentStatus.CLOSED,
+        IncidentStatus.DUPLICATE_MERGED,
+        IncidentStatus.CANCELLED_FALSE_REPORT,
+    }
+)
+
+
+def committed_response_blockers(db: Session, incident: Incident) -> list[str]:
+    """Return reasons an incident already has a committed operational response.
+
+    Cancelling a false report must never silently demobilize responders that
+    are already committed, so an approved active plan or any committed
+    responder blocks the command.
+    """
+    blockers: list[str] = []
+    if incident.current_plan_id:
+        plan = db.get(ResponsePlan, incident.current_plan_id)
+        if plan is not None and plan.status == ResponsePlanStatus.APPROVED:
+            blockers.append(f"approved response plan '{plan.id}' is active")
+
+    committed = db.scalars(
+        select(EmergencyResource)
+        .where(EmergencyResource.assigned_incident_id == incident.id)
+        .order_by(EmergencyResource.id.asc())
+    ).all()
+    for resource in committed:
+        status_value = (
+            resource.status.value
+            if hasattr(resource.status, "value")
+            else str(resource.status)
+        )
+        if resource.status in COMMITTED_RESOURCE_STATUSES:
+            blockers.append(f"resource '{resource.id}' is {status_value}")
+    return blockers
 
 
 def _acquire_write_lock(db: Session) -> None:
@@ -666,6 +724,121 @@ def close_incident(
         payload=transition_req,
         db=db,
     )
+
+
+@router.post(
+    "/incidents/{incident_id}/cancel",
+    status_code=status.HTTP_200_OK,
+    response_model=IncidentRead,
+)
+def cancel_incident(
+    incident_id: str,
+    payload: IncidentCancelRequest,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Cancel an incident that turned out to be a false report.
+
+    This is only safe before an operational response is committed. If an
+    approved plan is active or any responder is committed to the incident, the
+    command is rejected with 409 so responders are never silently demobilized;
+    controlled operator resolution is required instead.
+
+    Unapproved candidate plans are superseded and the pending pointers are
+    cleared so the cancelled incident cannot be approved or replanned later.
+    """
+    _acquire_write_lock(db)
+
+    incident = db.get(Incident, incident_id)
+    if incident is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Incident '{incident_id}' not found",
+        )
+
+    if incident.status in CANCELLABLE_TERMINAL_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"INCIDENT_NOT_CANCELLABLE: incident is already "
+                f"{incident.status.value}"
+            ),
+        )
+
+    if payload.expected_incident_version != incident.version:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Incident version mismatch: expected {payload.expected_incident_version}, "
+                f"but current version is {incident.version}"
+            ),
+        )
+
+    blockers = committed_response_blockers(db, incident)
+    if blockers:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "RESPONSE_ALREADY_COMMITTED: cannot cancel as a false report "
+                "because " + "; ".join(blockers) + ". Controlled operator "
+                "resolution is required instead."
+            ),
+        )
+
+    now_utc = datetime.now(timezone.utc)
+    previous_status = incident.status
+    previous_version = incident.version
+
+    superseded_plan_ids: list[str] = []
+    open_plans = db.scalars(
+        select(ResponsePlan)
+        .where(ResponsePlan.incident_id == incident.id)
+        .order_by(ResponsePlan.plan_version.asc(), ResponsePlan.id.asc())
+    ).all()
+    for plan in open_plans:
+        if plan.status in (
+            ResponsePlanStatus.CANDIDATE,
+            ResponsePlanStatus.RECOMMENDED,
+            ResponsePlanStatus.ALTERNATIVE,
+        ):
+            plan.status = ResponsePlanStatus.SUPERSEDED
+            superseded_plan_ids.append(plan.id)
+            db.add(plan)
+
+    incident.status = IncidentStatus.CANCELLED_FALSE_REPORT
+    incident.current_plan_id = None
+    incident.pending_replan_plan_id = None
+    incident.version = previous_version + 1
+    incident.updated_at = now_utc
+
+    timeline_event = TimelineEvent(
+        id=new_timeline_event_id(),
+        incident_id=incident.id,
+        event_type="INCIDENT_CANCELLED",
+        details_json={
+            "from_status": previous_status.value,
+            "to_status": IncidentStatus.CANCELLED_FALSE_REPORT.value,
+            "previous_version": previous_version,
+            "new_version": incident.version,
+            "operator_reference": payload.operator_reference,
+            "reason_code": payload.reason_code,
+            "reason": payload.reason,
+            "superseded_plan_ids": superseded_plan_ids,
+        },
+        created_at=now_utc,
+    )
+
+    db.add(incident)
+    db.add(timeline_event)
+    db.commit()
+    db.refresh(incident)
+
+    result = serialize_incident(incident)
+    publish_operations_event(
+        event="incident.updated",
+        incident_id=incident.id,
+        payload=result,
+    )
+    return result
 
 
 @router.get(

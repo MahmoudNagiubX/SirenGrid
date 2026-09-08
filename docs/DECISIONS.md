@@ -1110,3 +1110,44 @@ The operator timeline, and every audit consumer ordering by `created_at` then
 because the column type and format are unchanged, and existing stored events
 keep working; only ordering among identically stamped events changes. No new
 dependency is introduced.
+
+## PD-067 - Controlled False-Report Cancellation
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner (post-audit hardening mission, HD-004)
+
+### Decision
+
+`POST /api/v1/incidents/{incident_id}/cancel` terminates an incident that
+turned out to be a false report, setting `CANCELLED_FALSE_REPORT`.
+
+It is permitted only before an operational response is committed. If the
+incident has an approved active plan, or any responder assigned to it is
+`ASSIGNED`, `EN_ROUTE`, `ON_SCENE`, or `TRANSPORTING`, the command returns
+HTTP 409 `RESPONSE_ALREADY_COMMITTED` and names the blocking responders.
+Responders are never released automatically; controlled operator resolution is
+required instead.
+
+A permitted cancellation is version checked, runs under `BEGIN IMMEDIATE`,
+supersedes any unapproved candidate plans, clears the current and pending plan
+pointers, increments the incident version exactly once, appends an
+`INCIDENT_CANCELLED` timeline event, commits once, and publishes afterwards.
+
+Repeat cancellation returns HTTP 409 `INCIDENT_NOT_CANCELLABLE`, matching the
+existing repeat-approval convention rather than introducing a second style.
+
+`REQUIRES_REVIEW` may be cancelled; `CLOSED`, `DUPLICATE_MERGED`, and an
+already cancelled incident may not.
+
+### Reason
+
+`CANCELLED_FALSE_REPORT` existed in the lifecycle but no code path ever
+assigned it, and `close` only accepts `HANDOVER`. An operator who created an
+incident and then learned it was a false alarm had no way to terminate it, so
+the queue accumulated incidents that could still be planned against.
+
+### Impact
+
+Cancelled incidents are non-actionable under PD-065, so they cannot be planned
+or approved afterwards. No emergency demobilization doctrine is introduced.
