@@ -169,8 +169,10 @@ Phase 04 endpoint is also available at:
 
 It resolves the approved requirements, captures one routing/traffic state,
 generates and ranks candidates, persists the comparison set, and returns the
-recommendation plus alternatives. The Phase 01 single-plan endpoint remains
-unchanged for backward compatibility.
+recommendation plus alternatives. The legacy Phase 01 single-plan endpoint
+retains its response contract while delegating to this same canonical
+candidate-planning engine, including stale-input protection and the evolved
+active/pending plan identity rules.
 
 ## Tests
 

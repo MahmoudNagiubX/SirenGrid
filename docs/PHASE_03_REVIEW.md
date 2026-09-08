@@ -38,14 +38,17 @@ Lifecycle:
 - Added all locked normal and exceptional lifecycle values.
 - Normal lifecycle transitions are strict, deterministic, forward-only,
   version-checked, and timeline-audited.
-- Manual intake remains `ACTIVE_UNCONFIRMED`; plan generation remains
-  externally `AWAITING_APPROVAL`; approval remains `RESPONSE_ACTIVE`.
+- Manual intake remains `ACTIVE_UNCONFIRMED`; canonical planning may transition
+  directly to `AWAITING_APPROVAL`; approval remains `RESPONSE_ACTIVE`.
+- An explicit, version-safe operator review resolution may move
+  `REQUIRES_REVIEW` to `ACTIVE_UNCONFIRMED`. Terminal states remain terminal.
 - Exceptional states are not accepted as arbitrary normal transitions.
 
 Timeline:
 
 - Added `GET /api/v1/incidents/{id}/timeline` with deterministic chronological
-  ordering.
+  ordering. New event IDs preserve insertion order for same-timestamp events;
+  existing UUID records remain readable.
 - Operational changes append new `TimelineEvent` rows. Existing timeline rows
   are not updated or deleted.
 
@@ -62,6 +65,16 @@ Manual correction:
 - Current corrected-field provenance is retained as operator-corrected.
   Planning-input corrections expose `downstream_inputs_dirty=true` without
   implementing recalculation or replanning.
+- Exact incident coordinates may remain unknown until an operator supplies a
+  trusted correction; planning and routing reject unresolved locations without
+  using a sentinel coordinate.
+
+False-report cancellation:
+
+- An explicit transactional cancellation is available only before a committed
+  operational response. It supersedes unapproved candidate plans, increments
+  the incident version once, appends audit history, and never releases
+  committed responders automatically.
 
 Resource locking:
 
