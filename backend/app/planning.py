@@ -37,7 +37,7 @@ from app.models import (
     ResponsePlan,
     TimelineEvent,
 )
-from app.incidents import serialize_incident
+from app.incidents import ensure_incident_actionable, serialize_incident
 from app.resources import interpolate_route_progress, serialize_resource
 from app.response_requirements import (
     ResponseRequirement,
@@ -450,14 +450,7 @@ def generate_canonical_candidate_set(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Incident '{incident_id}' not found",
         )
-    if incident.status in (
-        IncidentStatus.CLOSED,
-        IncidentStatus.CANCELLED_FALSE_REPORT,
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Cannot generate response plans for incident with status {incident.status.value}",
-        )
+    ensure_incident_actionable(incident, "generate response plans")
     if incident.current_plan_id:
         active_plan = db.get(ResponsePlan, incident.current_plan_id)
         if active_plan is not None and active_plan.status == ResponsePlanStatus.APPROVED:
@@ -1022,6 +1015,11 @@ def approve_response_plan(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Response plan status is '{status_val}', expected '{ResponsePlanStatus.RECOMMENDED.value}'",
         )
+
+    # A plan may have been recommended before the incident became terminal,
+    # merged, or review-held. Approving it would commit responders to an
+    # incident that is no longer operationally actionable.
+    ensure_incident_actionable(incident, "approve a response plan")
 
     pending_replacement = incident.pending_replan_plan_id == plan.id
     if not pending_replacement and incident.status != IncidentStatus.AWAITING_APPROVAL:

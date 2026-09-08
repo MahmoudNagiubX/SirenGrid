@@ -821,6 +821,123 @@ def test_concurrent_legacy_generation_yields_one_authoritative_candidate_set(
     assert reloaded.current_plan_id == recommended[0].id
 
 
+@pytest.mark.parametrize(
+    "status",
+    [
+        IncidentStatus.CLOSED,
+        IncidentStatus.CANCELLED_FALSE_REPORT,
+        IncidentStatus.DUPLICATE_MERGED,
+        IncidentStatus.REQUIRES_REVIEW,
+    ],
+)
+@pytest.mark.parametrize("endpoint", ["generate", "generate-candidates"])
+def test_planning_is_fenced_for_non_actionable_incidents(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    status: IncidentStatus,
+    endpoint: str,
+) -> None:
+    """Neither planning entry point may act on a non-actionable incident.
+
+    A merged, cancelled, closed, or review-held incident must not be revived
+    into AWAITING_APPROVAL by generating a plan for it.
+    """
+    configure_canonical_planner(
+        monkeypatch,
+        planner_graph([("amb-fence", 30.0610, 31.3410, 100.0)]),
+    )
+    incident = create_test_incident(
+        db=db_session,
+        status=status,
+        required_resources=[{"resource_type": "AMBULANCE", "count": 1}],
+    )
+    create_test_resource(
+        db=db_session,
+        resource_id="amb-fence",
+        name="Fence Ambulance",
+        resource_type=ResourceType.AMBULANCE,
+        status=ResourceStatus.AVAILABLE,
+        lat=30.0610,
+        lon=31.3410,
+    )
+
+    response = client.post(f"/api/v1/incidents/{incident.id}/plans/{endpoint}")
+    assert response.status_code == 409, response.text
+    assert status.value in response.json()["detail"]
+
+    # The incident must not be mutated or revived by the rejected attempt.
+    db_session.expire_all()
+    reloaded = db_session.get(Incident, incident.id)
+    assert reloaded is not None
+    assert reloaded.status == status
+    assert reloaded.version == 1
+    assert reloaded.current_plan_id is None
+    assert (
+        db_session.scalars(
+            select(ResponsePlan).where(ResponsePlan.incident_id == incident.id)
+        ).all()
+        == []
+    )
+
+
+def test_approval_is_fenced_when_incident_becomes_non_actionable(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A plan recommended before a merge must not be approvable afterwards.
+
+    Otherwise a duplicate that was merged away could still commit responders.
+    """
+    configure_canonical_planner(
+        monkeypatch,
+        planner_graph([("amb-late-merge", 30.0610, 31.3410, 100.0)]),
+    )
+    incident = create_test_incident(
+        db=db_session,
+        required_resources=[{"resource_type": "AMBULANCE", "count": 1}],
+    )
+    resource = create_test_resource(
+        db=db_session,
+        resource_id="amb-late-merge",
+        name="Late Merge Ambulance",
+        resource_type=ResourceType.AMBULANCE,
+        status=ResourceStatus.AVAILABLE,
+        lat=30.0610,
+        lon=31.3410,
+    )
+
+    generated = client.post(f"/api/v1/incidents/{incident.id}/plans/generate")
+    assert generated.status_code == 201, generated.text
+    plan = generated.json()
+
+    # The incident is merged into a canonical incident after the plan existed.
+    db_session.expire_all()
+    reloaded = db_session.get(Incident, incident.id)
+    assert reloaded is not None
+    reloaded.status = IncidentStatus.DUPLICATE_MERGED
+    db_session.commit()
+
+    approval = client.post(
+        f"/api/v1/plans/{plan['id']}/approve",
+        json={
+            "expected_incident_version": plan["incident_version"],
+            "expected_plan_version": plan["plan_version"],
+            "operator_reference": "dispatcher-fence",
+        },
+    )
+    assert approval.status_code == 409, approval.text
+    assert IncidentStatus.DUPLICATE_MERGED.value in approval.json()["detail"]
+
+    # No responder may be committed to the merged incident.
+    db_session.expire_all()
+    reloaded_resource = db_session.get(EmergencyResource, resource.id)
+    assert reloaded_resource is not None
+    assert reloaded_resource.status == ResourceStatus.AVAILABLE
+    assert reloaded_resource.assigned_incident_id is None
+
+
 def test_generate_plan_real_osm_routing_integration(
     client: TestClient,
     db_session: Session,

@@ -44,6 +44,9 @@ __all__ = [
     "close_incident",
     "LOCKED_FORWARD_TRANSITIONS",
     "PLANNING_INPUT_FACT_FIELDS",
+    "NON_ACTIONABLE_INCIDENT_STATUSES",
+    "is_incident_actionable",
+    "ensure_incident_actionable",
 ]
 
 router = APIRouter(tags=["incidents"])
@@ -113,6 +116,41 @@ LOCKED_FORWARD_TRANSITIONS: dict[IncidentStatus, set[IncidentStatus]] = {
     IncidentStatus.DUPLICATE_MERGED: set(),
     IncidentStatus.CANCELLED_FALSE_REPORT: set(),
 }
+
+
+NON_ACTIONABLE_INCIDENT_STATUSES: frozenset[IncidentStatus] = frozenset(
+    {
+        IncidentStatus.CLOSED,
+        IncidentStatus.CANCELLED_FALSE_REPORT,
+        IncidentStatus.DUPLICATE_MERGED,
+        IncidentStatus.REQUIRES_REVIEW,
+    }
+)
+
+
+def is_incident_actionable(incident: Incident) -> bool:
+    """Return whether operational planning may act on this incident.
+
+    Closed and cancelled incidents are terminal. A duplicate that has been
+    merged into a canonical incident must never be revived by planning, and a
+    review-held incident must wait for the operator to resolve it.
+    """
+    return incident.status not in NON_ACTIONABLE_INCIDENT_STATUSES
+
+
+def ensure_incident_actionable(incident: Incident, action: str) -> None:
+    """Reject an operational action on a non-actionable incident with 409."""
+    if is_incident_actionable(incident):
+        return
+    status_value = (
+        incident.status.value
+        if hasattr(incident.status, "value")
+        else str(incident.status)
+    )
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=f"Cannot {action} for incident with status {status_value}",
+    )
 
 
 def _acquire_write_lock(db: Session) -> None:

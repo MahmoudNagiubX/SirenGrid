@@ -1037,3 +1037,37 @@ backend test suite from 12m55s to 4m16s. No scoring weight, coverage target,
 candidate cap, cohort, or reposition policy changes; the remaining cost is the
 approved bounded reposition simulation. Coverage still evaluates every modeled
 zone.
+
+## PD-065 - Non-Actionable Incident Planning Fence
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner (post-audit hardening mission, HD-003)
+
+### Decision
+
+`CLOSED`, `CANCELLED_FALSE_REPORT`, `DUPLICATE_MERGED`, and `REQUIRES_REVIEW`
+are non-actionable incident statuses. Response-plan generation and response-
+plan approval both reject them with HTTP 409 through one shared predicate,
+`incidents.ensure_incident_actionable()`.
+
+### Reason
+
+Planning previously fenced only `CLOSED` and `CANCELLED_FALSE_REPORT`. An
+incident marked `DUPLICATE_MERGED` could therefore have a plan generated for
+it, which reset its status to `AWAITING_APPROVAL` and revived a duplicate that
+had already been merged into a canonical incident. Approving that plan would
+have committed real responders to an incident no longer being worked.
+
+Approval is fenced separately because an incident can become non-actionable
+after its plan was recommended, and the replacement-approval path deliberately
+skips the `AWAITING_APPROVAL` status check.
+
+`REQUIRES_REVIEW` is a pre-dispatch hold: automated planning must wait for the
+operator to resolve the ambiguity.
+
+### Impact
+
+A merged, cancelled, closed, or review-held incident cannot be revived or
+receive responders. Active and replanning states are unaffected, and the
+canonical incident of a merge remains fully plannable.
