@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -82,6 +83,29 @@ def test_cli_writes_canonical_utf8_lf_bytes(
     artifact = {
         "type": "FeatureCollection",
         "message": "مرحبا",
+        "properties": {
+            "data_reality": "REAL_DERIVED",
+            "freshness_status": "STATIC",
+            "source_metadata": {
+                "acquired_at": "2026-09-07T00:00:00+00:00",
+                "allocation_crs": "EPSG:6933",
+                "doi": "10.5258/SOTON/WP00803",
+                "raster_url": "https://example.invalid/egy.tif",
+                "release": "R2024B",
+                "source": "WorldPop Egypt constrained population counts",
+                "source_filename": "egy.tif",
+                "source_reference": "https://example.invalid/summary",
+                "source_sha256": "00",
+                "underlying_data_reality": "REAL_PUBLIC",
+                "version": "v1",
+            },
+            "validation": {
+                "conservation_error": 0.0,
+                "nodata_cell_count": 0,
+                "total_modeled_population": 1.0,
+                "zone_count": 1,
+            },
+        },
         "features": [
             {"properties": {"zone_id": "zone-1", "population": 1.0}}
         ],
@@ -104,13 +128,15 @@ def test_cli_writes_canonical_utf8_lf_bytes(
 
     worldpop.main()
 
-    assert output.read_bytes() == (
-        b'{\n  "features": [\n    {\n      "properties": {\n'
-        b'        "population": 1.0,\n        "zone_id": "zone-1"\n'
-        b'      }\n    }\n  ],\n  "message": '
-        b'"\xd9\x85\xd8\xb1\xd8\xad\xd8\xa8\xd8\xa7",\n'
-        b'  "type": "FeatureCollection"\n}'
-    )
+    assert output.read_bytes() == worldpop.serialize_zone_population_artifact(artifact)
+
+    manifest_path = output.parent / worldpop.WORLDPOP_PROVENANCE_FILENAME
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    record = manifest["artifacts"][output.name]
+    assert record["sha256"] == hashlib.sha256(output.read_bytes()).hexdigest()
+    assert record["record_count"] == 1
+    assert manifest["data_reality"] == "REAL_DERIVED"
+    assert manifest["underlying_data_reality"] == "REAL_PUBLIC"
 
 
 def test_zone_artifact_preserves_worldpop_reality_and_provenance() -> None:

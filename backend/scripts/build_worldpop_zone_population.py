@@ -28,6 +28,8 @@ WORLDPOP_DOI = "10.5258/SOTON/WP00803"
 WORLDPOP_RELEASE = "R2024B"
 WORLDPOP_VERSION = "v1"
 EQUAL_AREA_CRS = "EPSG:6933"
+WORLDPOP_PROVENANCE_FILENAME = "worldpop_provenance.json"
+WORLDPOP_PROVENANCE_PHASE = "PHASE_04_COVERAGE_AND_RESPONSE_PLANNING"
 
 
 @dataclass(frozen=True)
@@ -208,6 +210,52 @@ def publish_validated_zone_population_artifact(staged_path: Path, target_path: P
     os.replace(staged_path, target_path)
 
 
+def serialize_zone_population_artifact(artifact: Mapping[str, Any]) -> bytes:
+    """Return the canonical UTF-8/LF bytes locked by the manifest hash."""
+    return json.dumps(
+        artifact, ensure_ascii=False, indent=2, sort_keys=True
+    ).encode("utf-8")
+
+
+def build_worldpop_provenance(
+    artifact: Mapping[str, Any], artifact_filename: str
+) -> dict[str, Any]:
+    """Build the integrity manifest for a published WorldPop zone artifact."""
+    properties = artifact["properties"]
+    source_metadata = properties["source_metadata"]
+    validation = properties["validation"]
+    artifact_bytes = serialize_zone_population_artifact(artifact)
+    return {
+        "phase": WORLDPOP_PROVENANCE_PHASE,
+        "generated_by": "backend/scripts/build_worldpop_zone_population.py",
+        "data_reality": properties["data_reality"],
+        "underlying_data_reality": source_metadata["underlying_data_reality"],
+        "hash_encoding": "canonical UTF-8 bytes with LF line endings",
+        "artifacts": {
+            artifact_filename: {
+                "sha256": hashlib.sha256(artifact_bytes).hexdigest(),
+                "byte_count": len(artifact_bytes),
+                "data_reality": properties["data_reality"],
+                "freshness_status": properties["freshness_status"],
+                "record_count": validation["zone_count"],
+                "total_modeled_population": validation["total_modeled_population"],
+                "conservation_error": validation["conservation_error"],
+                "nodata_cell_count": validation["nodata_cell_count"],
+                "source": source_metadata["source"],
+                "source_reference": source_metadata["source_reference"],
+                "source_filename": source_metadata["source_filename"],
+                "source_sha256": source_metadata["source_sha256"],
+                "raster_url": source_metadata["raster_url"],
+                "doi": source_metadata["doi"],
+                "release": source_metadata["release"],
+                "version": source_metadata["version"],
+                "acquired_at": source_metadata["acquired_at"],
+                "allocation_crs": source_metadata["allocation_crs"],
+            }
+        },
+    }
+
+
 def load_operational_zones(grid_path: Path) -> list[OperationalZone]:
     payload = json.loads(grid_path.read_text(encoding="utf-8"))
     if payload.get("type") != "FeatureCollection" or not isinstance(
@@ -322,10 +370,16 @@ def main() -> None:
 
     artifact = build_artifact_from_worldpop_raster(arguments.raster, arguments.grid)
     staged_path = arguments.output.with_suffix(arguments.output.suffix + ".staged")
-    staged_path.write_bytes(
-        json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True).encode("utf-8")
-    )
+    staged_path.write_bytes(serialize_zone_population_artifact(artifact))
     publish_validated_zone_population_artifact(staged_path, arguments.output)
+
+    # The manifest is written only after the validated artifact is in place.
+    provenance = build_worldpop_provenance(artifact, arguments.output.name)
+    provenance_path = arguments.output.parent / WORLDPOP_PROVENANCE_FILENAME
+    provenance_path.write_bytes(
+        (json.dumps(provenance, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
+        .encode("utf-8")
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover

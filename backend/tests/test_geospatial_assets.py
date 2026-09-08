@@ -15,7 +15,9 @@ REQUIRED_FILES = [
     "nasr_city_emergency_facilities.geojson",
     "nasr_city_traffic_signals.geojson",
     "nasr_city_traffic_sample_points.geojson",
+    "nasr_city_zone_population_worldpop_2025.geojson",
     "provenance.json",
+    "worldpop_provenance.json",
 ]
 
 REQUIRED_GEOJSON_LAYERS = [
@@ -96,6 +98,32 @@ def test_phase_02_provenance_metadata_and_hashes_match():
         assert retained[filename]["source_commit"] == (
             "93ca9e90e2fc52c914dd5ccbe42bdc84ce745d3d"
         )
+
+
+def test_worldpop_artifact_has_dedicated_integrity_manifest() -> None:
+    manifest_path = NASR_CITY_ASSETS_DIR / "worldpop_provenance.json"
+    artifact_path = NASR_CITY_ASSETS_DIR / "nasr_city_zone_population_worldpop_2025.geojson"
+    assert manifest_path.is_file()
+    assert artifact_path.is_file()
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+    record = manifest["artifacts"][artifact_path.name]
+    canonical_bytes = artifact_path.read_bytes().replace(b"\r\n", b"\n")
+
+    assert manifest["phase"] == "PHASE_04_COVERAGE_AND_RESPONSE_PLANNING"
+    assert manifest["data_reality"] == "REAL_DERIVED"
+    assert manifest["underlying_data_reality"] == "REAL_PUBLIC"
+    assert record["sha256"] == hashlib.sha256(canonical_bytes).hexdigest()
+    assert record["record_count"] == len(artifact["features"])
+    assert record["record_count"] == artifact["properties"]["validation"]["zone_count"]
+    assert record["total_modeled_population"] == artifact["properties"]["validation"]["total_modeled_population"]
+    assert record["source_sha256"] == artifact["properties"]["source_metadata"]["source_sha256"]
+    assert record["source_reference"] == artifact["properties"]["source_metadata"]["source_reference"]
+    assert record["release"] == artifact["properties"]["source_metadata"]["release"]
+    assert record["version"] == artifact["properties"]["source_metadata"]["version"]
+    assert record["doi"] == artifact["properties"]["source_metadata"]["doi"]
+    assert record["freshness_status"] == "STATIC"
 
 
 def test_graphml_parsable_by_networkx():
