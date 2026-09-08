@@ -62,8 +62,10 @@ PHASE08_FIXED_MODEL_TIME = datetime(2026, 9, 8, tzinfo=timezone.utc)
 
 @dataclass(frozen=True)
 class EngineRunResult:
+    scenario_id: str
     engine: str
     outcome: str
+    expected_outcome: str
     resource_ids: tuple[str, ...] = ()
     incident_eta_seconds: float | None = None
     routes: tuple[dict[str, Any], ...] = ()
@@ -77,8 +79,10 @@ class EngineRunResult:
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "scenario_id": self.scenario_id,
             "engine": self.engine,
             "outcome": self.outcome,
+            "expected_outcome": self.expected_outcome,
             "resource_ids": list(self.resource_ids),
             "incident_eta_seconds": self.incident_eta_seconds,
             "routes": list(self.routes),
@@ -223,10 +227,18 @@ def _reposition_to_dict(proposal: Any | None) -> dict[str, Any] | None:
     }
 
 
-def _error_result(engine: str, error: Exception) -> EngineRunResult:
+def _error_result(
+    engine: str,
+    error: Exception,
+    *,
+    scenario_id: str,
+    expected_outcome: str,
+) -> EngineRunResult:
     return EngineRunResult(
+        scenario_id=scenario_id,
         engine=engine,
         outcome="INSUFFICIENT_RESOURCES",
+        expected_outcome=expected_outcome,
         error=str(error),
     )
 
@@ -441,7 +453,12 @@ def _baseline_result(
             include_route_alternatives=False,
         )
     except BaselineInsufficientResourcesError as exc:
-        return _error_result("BASELINE", exc)
+        return _error_result(
+            "BASELINE",
+            exc,
+            scenario_id=scenario.id,
+            expected_outcome=scenario.expected.baseline,
+        )
     combination = CandidateCombination(
         responders=tuple(
             CandidateResponder(choice.requirement, choice.resource, choice.route)
@@ -460,8 +477,10 @@ def _baseline_result(
         zone_nodes_cache=zone_nodes_cache,
     )
     result = EngineRunResult(
+        scenario_id=scenario.id,
         engine="BASELINE",
         outcome="PLAN_GENERATED",
+        expected_outcome=scenario.expected.baseline,
         resource_ids=selection.resource_ids,
         incident_eta_seconds=selection.max_incident_eta_seconds,
         routes=tuple(choice.route.model_dump(mode="json") for choice in selection.choices),
@@ -537,12 +556,19 @@ def _sirengrid_result(
             )
         )
     except (NoFeasibleCandidateError, ValueError) as exc:
-        return _error_result("SIRENGRID", exc)
+        return _error_result(
+            "SIRENGRID",
+            exc,
+            scenario_id=scenario.id,
+            expected_outcome=scenario.expected.sirengrid,
+        )
     selected = ranked[0]
     proposal = reposition_proposals.get(selected.combination.resource_ids)
     result = EngineRunResult(
+        scenario_id=scenario.id,
         engine="SIRENGRID",
         outcome="PLAN_GENERATED",
+        expected_outcome=scenario.expected.sirengrid,
         resource_ids=selected.combination.resource_ids,
         incident_eta_seconds=selected.metrics.max_incident_eta_seconds,
         routes=tuple(
