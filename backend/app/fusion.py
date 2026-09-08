@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import re
+import unicodedata
 from datetime import datetime
 from enum import Enum
 from typing import Any
@@ -12,6 +13,19 @@ from pydantic import BaseModel, ConfigDict, Field
 
 DUPLICATE_SPATIAL_THRESHOLD_METERS = 500
 DUPLICATE_TEMPORAL_WINDOW_SECONDS = 900
+
+GENERIC_LOCATION_TOKENS = frozenset(
+    {
+        "street", "road", "avenue", "square", "district", "area", "zone",
+        "city", "region", "near", "next", "opposite", "front", "behind",
+        "beside", "main", "north", "south", "east", "west", "cairo", "egypt",
+        "nasr", "شارع", "طريق", "ميدان", "منطقة", "حي", "مدينة", "القاهرة",
+        "مصر", "امام", "أمام", "بجوار", "خلف", "قرب", "بالقرب", "شمال", "جنوب",
+        "شرق", "غرب", "نصر",
+    }
+)
+MINIMUM_SIGNIFICANT_TOKEN_LENGTH = 3
+MINIMUM_SHARED_SIGNIFICANT_TOKENS = 2
 
 
 class FusionDecision(str, Enum):
@@ -73,19 +87,30 @@ def _distance_meters(first: FusionReport, second: FusionReport) -> float | None:
 def _tokens(value: str | None) -> set[str]:
     if not value:
         return set()
-    return set(re.findall(r"\w+", value.casefold(), flags=re.UNICODE))
+    normalized = unicodedata.normalize("NFKC", value).casefold()
+    return set(re.findall(r"\w+", normalized, flags=re.UNICODE))
+
+
+def _significant_tokens(value: str | None) -> set[str]:
+    return {
+        token
+        for token in _tokens(value)
+        if len(token) >= MINIMUM_SIGNIFICANT_TOKEN_LENGTH
+        and token not in GENERIC_LOCATION_TOKENS
+    }
 
 
 def _context_matches(first: FusionReport, second: FusionReport) -> tuple[bool, bool, bool]:
-    first_phrase = _tokens(first.location_phrase)
-    second_phrase = _tokens(second.location_phrase)
+    first_phrase = _significant_tokens(first.location_phrase)
+    second_phrase = _significant_tokens(second.location_phrase)
     location_match = bool(first_phrase and first_phrase == second_phrase)
     source_match = bool(
         first.source_reference
         and second.source_reference
         and first.source_reference == second.source_reference
     )
-    token_match = bool(first_phrase and second_phrase and first_phrase & second_phrase)
+    shared = first_phrase & second_phrase
+    token_match = len(shared) >= MINIMUM_SHARED_SIGNIFICANT_TOKENS
     return location_match, source_match, token_match
 
 

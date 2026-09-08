@@ -114,3 +114,46 @@ def test_time_window_and_context_gate_are_explicit() -> None:
     assert stale.reason_code == "outside_temporal_window"
     assert no_context.decision is FusionDecision.REQUIRES_REVIEW
     assert no_context.reason_code == "context_match_required"
+
+
+def test_single_generic_shared_word_does_not_auto_associate() -> None:
+    result = evaluate_report_association(
+        report(location_phrase="Tayaran Street"),
+        report(
+            report_id="report-b",
+            location_phrase="Makram Street",
+            source_reference="caller-2",
+        ),
+    )
+
+    assert result.decision is FusionDecision.REQUIRES_REVIEW
+    assert result.token_overlap_match is False
+    assert result.location_phrase_match is False
+
+
+def test_single_generic_shared_word_in_arabic_does_not_auto_associate() -> None:
+    result = evaluate_report_association(
+        report(location_phrase="شارع عباس العقاد"),
+        report(
+            report_id="report-b",
+            location_phrase="شارع مكرم عبيد",
+            source_reference="caller-2",
+        ),
+    )
+
+    assert result.decision is FusionDecision.REQUIRES_REVIEW
+    assert result.token_overlap_match is False
+
+
+def test_genuine_corroboration_still_auto_associates() -> None:
+    result = evaluate_report_association(
+        report(location_phrase="Abbas El Akkad Main Road"),
+        report(
+            report_id="report-b",
+            location_phrase="Abbas El Akkad Road",
+            source_reference="caller-2",
+        ),
+    )
+
+    assert result.decision is FusionDecision.AUTO_ASSOCIATE
+    assert result.token_overlap_match is True
