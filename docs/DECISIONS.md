@@ -1518,3 +1518,37 @@ The MVP schema evolved iteratively across phases; several tables maintain logica
 
 ### Impact
 Application code maintains strict explicit validation for all entity relationships (e.g. incident ownership, resource assignment, plan linkages) before persisting state transitions.
+
+## PD-080 — Phase 09A Controlled Backend Integration and Feature Reconciliation
+
+**Date:** 2026-09-09
+**Status:** Approved
+**Owner:** Project owner (Phase 09A controlled backend integration)
+
+### Decision
+
+The hardened Phase 00–08 backend baseline (`hardening/phase00-08-post-audit-antigravity`) is canonical. Integration of performance and operational work from the divergent feature branch (`feature/phase-01-golden-flow`) was executed strictly via selective manual ports and verified with focused regressions, rather than through git merge, rebase, or cherry-pick.
+
+#### 1. Integrated Optimizations (Passed & Verified)
+- **Per-Graph Coordinate Snap Cache:** Memoized coordinate-to-node graph snaps using a thread-safe `WeakKeyDictionary` keyed on `(lat, lon, max_distance_m)` in `app.routing`. Snaps are automatically cleared alongside the GraphML cache via `clear_routing_graph_cache()`.
+- **Planning Alternative Route Skipping:** Extended `compute_traffic_aware_route` with `include_alternatives: bool = True` (default unchanged). Internal candidate generation (`generate_candidate_combinations`) and reposition evaluation (`_route_to_staging`) pass `include_alternatives=False` to skip expensive edge-disjoint alternative path calculations while preserving exact primary route metrics, geometry, and traffic attribution.
+
+#### 2. Features and Divergences Explicitly Deferred or Excluded
+- **Social Media Intelligence (Deferred):** Integration of social providers, routers, and synthetic signal feeds (donor commits `7cabda6`, `4ef924a`, `245c495`) is deferred to a future dedicated phase to preserve backend hardening contracts.
+- **TomTom Incident Details Adapter (Deferred):** The live TomTom incident details adapter (donor commit `3870735`) is deferred to avoid unverified external network dependencies.
+- **Benchmark Scenario REST Loader (Excluded):** Feature-branch endpoints for benchmark scenario loading under `/api/v1/simulation` were excluded; the hardened, gated simulation demo API (`PD-078`) remains canonical.
+- **Large Raw Benchmark Artifacts (Excluded):** The ~968k-line raw benchmark evaluation artifact (`6f720c5`) is excluded from git tracking to maintain repository health and size discipline.
+- **Clock-Skew and Rejection Regressions (Excluded):** Hardened future traffic timestamp safe degradation and hardened same-node zero-distance/zero-ETA routing were preserved; stricter feature-side route rejections were explicitly rejected.
+- **Frontend Isolation:** Zero frontend modifications were introduced during backend integration; frontend contracts remain untouched.
+
+#### 3. Post-Audit Gap Revalidation Governance
+- SG-GAP item numbers and descriptions from prior audit documents must not be assumed without fresh verification against the canonical integrated baseline. SG-GAP definitions are not redefined here.
+- Formal revalidation of SG-GAP-001 through SG-GAP-015 is deferred to Phase 09B, executed against this canonical integrated backend.
+
+### Reason
+The feature branch diverged significantly from the hardened baseline. A standard merge or rebase would reintroduce regressions (e.g. broken same-node routing, unverified background endpoints, future clock-skew crashes, repository bloat). Selective manual porting preserves the verified 511-test baseline, Layer A 36/36 benchmark, and Layer B 10/10 acceptance suites while adopting high-value algorithmic performance improvements.
+
+### Impact
+- `backend/app/routing.py`, `backend/app/candidate_generation.py`, and `backend/app/repositioning.py` incorporate verified performance improvements.
+- All core hardening contracts, safety fences, and test suites remain 100% green.
+- Next gate: Phase 09B revalidation of SG-GAP-001..015 against the canonical integrated backend.
