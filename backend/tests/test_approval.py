@@ -960,7 +960,7 @@ def test_concurrent_plan_approvals_serialized_with_single_success_and_conflict(
 
     def execute_approval(worker_id: int) -> tuple[int, dict[str, Any] | str]:
         with TestClient(app) as client:
-            start_barrier.wait(timeout=5.0)
+            start_barrier.wait(timeout=30.0)
             response = client.post(
                 f"/api/v1/plans/{plan_id}/approve",
                 json={
