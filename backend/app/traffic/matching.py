@@ -163,12 +163,18 @@ def _edge_line(
     return LineString(reversed(line.coords)) if reverse_distance < forward_distance else line
 
 
-def _metric_transformer(observation: TrafficObservation) -> tuple[Transformer, str]:
-    average_lon = sum(point[0] for point in observation.coordinates) / len(observation.coordinates)
-    average_lat = sum(point[1] for point in observation.coordinates) / len(observation.coordinates)
+def _metric_transformer_for_coordinates(
+    coordinates: tuple[tuple[float, float], ...],
+) -> tuple[Transformer, str]:
+    average_lon = sum(point[0] for point in coordinates) / len(coordinates)
+    average_lat = sum(point[1] for point in coordinates) / len(coordinates)
     zone = max(1, min(60, int((average_lon + 180) // 6) + 1))
     epsg = (32600 if average_lat >= 0 else 32700) + zone
     return Transformer.from_crs("EPSG:4326", f"EPSG:{epsg}", always_xy=True), f"EPSG:{epsg}"
+
+
+def _metric_transformer(observation: TrafficObservation) -> tuple[Transformer, str]:
+    return _metric_transformer_for_coordinates(observation.coordinates)
 
 
 def _bearing(line: LineString) -> float:
@@ -186,6 +192,37 @@ def _direction_difference(first: float, second: float) -> float:
 
 def _max_vertex_separation(edge: LineString, observation: LineString) -> float:
     return max(Point(coordinate).distance(observation) for coordinate in edge.coords)
+
+
+def _geometry_search_bounds(line: LineString) -> tuple[float, float, float, float]:
+    """Return a conservative WGS84 prefilter around a geometry.
+
+    The exact safety gate remains the projected 30 m calculation below. This
+    envelope only avoids transforming graph edges that are clearly distant.
+    """
+    min_lon, min_lat, max_lon, max_lat = line.bounds
+    average_lat = (min_lat + max_lat) / 2
+    latitude_margin = settings.TOMTOM_MAX_GEOMETRY_SEPARATION_M / 50_000
+    longitude_scale = max(abs(math.cos(math.radians(average_lat))), 0.1)
+    longitude_margin = latitude_margin / longitude_scale
+    return (
+        min_lon - longitude_margin,
+        min_lat - latitude_margin,
+        max_lon + longitude_margin,
+        max_lat + latitude_margin,
+    )
+
+
+def _bounds_intersect(
+    first: tuple[float, float, float, float],
+    second: tuple[float, float, float, float],
+) -> bool:
+    return not (
+        first[2] < second[0]
+        or first[0] > second[2]
+        or first[3] < second[1]
+        or first[1] > second[3]
+    )
 
 
 def _lookup_allowed_edges(
@@ -214,34 +251,52 @@ def _unmatched(
     )
 
 
-def match_observation(
-    graph: nx.Graph,
-    observation: TrafficObservation,
-    allowed_edges: frozenset[EdgeKey],
+def _unmatched_id(
+    subject_id: str,
+    reason: str,
+    *,
+    status: TrafficMatchStatus = TrafficMatchStatus.UNMATCHED,
+    metric_crs: str | None = None,
 ) -> TrafficEdgeMatch:
-    """Apply locked gates, then accept only one structural directed chain."""
-    if observation.confidence < settings.TOMTOM_MIN_PROVIDER_CONFIDENCE:
-        return _unmatched(observation, "LOW_PROVIDER_CONFIDENCE")
-
-    transformer, metric_crs = _metric_transformer(observation)
-    observation_line = transform(
-        transformer.transform,
-        LineString(observation.coordinates),
+    return TrafficEdgeMatch(
+        observation_id=subject_id,
+        status=status,
+        reason=reason,
+        metric_crs=metric_crs,
     )
-    observation_bearing = _bearing(observation_line)
 
+
+def _match_polyline(
+    graph: nx.Graph,
+    *,
+    subject_id: str,
+    line: LineString,
+    allowed_edges: frozenset[EdgeKey],
+    transformer: Transformer,
+    metric_crs: str,
+) -> TrafficEdgeMatch:
+    try:
+        subject_line = transform(transformer.transform, line)
+        subject_bearing = _bearing(subject_line)
+    except (ShapelyError, TypeError, ValueError):
+        return _unmatched_id(subject_id, "INVALID_GEOMETRY", metric_crs=metric_crs)
+
+    search_bounds = _geometry_search_bounds(line)
     geometry_candidates: list[tuple[Any, Any, Any, float, float]] = []
     passing_candidates: list[tuple[Any, Any, Any, float, float]] = []
     for u, v, key, attrs in _lookup_allowed_edges(graph, allowed_edges):
         try:
+            edge_geometry = _edge_line(graph, u, v, attrs)
+            if not _bounds_intersect(edge_geometry.bounds, search_bounds):
+                continue
             edge_line = transform(
                 transformer.transform,
-                _edge_line(graph, u, v, attrs),
+                edge_geometry,
             )
-            separation = _max_vertex_separation(edge_line, observation_line)
+            separation = _max_vertex_separation(edge_line, subject_line)
             if separation > settings.TOMTOM_MAX_GEOMETRY_SEPARATION_M:
                 continue
-            direction = _direction_difference(_bearing(edge_line), observation_bearing)
+            direction = _direction_difference(_bearing(edge_line), subject_bearing)
         except (KeyError, ShapelyError, TypeError, ValueError):
             continue
         geometry_candidates.append((u, v, key, separation, direction))
@@ -249,14 +304,14 @@ def match_observation(
             passing_candidates.append((u, v, key, separation, direction))
 
     if not geometry_candidates:
-        return _unmatched(observation, "GEOMETRY_SEPARATION", metric_crs=metric_crs)
+        return _unmatched_id(subject_id, "GEOMETRY_SEPARATION", metric_crs=metric_crs)
     if not passing_candidates:
-        return _unmatched(observation, "DIRECTION_DIFFERENCE", metric_crs=metric_crs)
+        return _unmatched_id(subject_id, "DIRECTION_DIFFERENCE", metric_crs=metric_crs)
 
     endpoint_counts = Counter((str(u), str(v)) for u, v, *_ in passing_candidates)
     if any(count > 1 for count in endpoint_counts.values()):
-        return _unmatched(
-            observation,
+        return _unmatched_id(
+            subject_id,
             "PARALLEL_CANDIDATES",
             status=TrafficMatchStatus.AMBIGUOUS,
             metric_crs=metric_crs,
@@ -274,15 +329,18 @@ def match_observation(
         )
 
     if nx.number_weakly_connected_components(candidates) != 1:
-        return _unmatched(
-            observation,
+        return _unmatched_id(
+            subject_id,
             "MULTIPLE_CANDIDATE_CHAINS",
             status=TrafficMatchStatus.AMBIGUOUS,
             metric_crs=metric_crs,
         )
-    if any(candidates.in_degree(node) > 1 or candidates.out_degree(node) > 1 for node in candidates):
-        return _unmatched(
-            observation,
+    if any(
+        candidates.in_degree(node) > 1 or candidates.out_degree(node) > 1
+        for node in candidates
+    ):
+        return _unmatched_id(
+            subject_id,
             "BRANCHING_CANDIDATES",
             status=TrafficMatchStatus.AMBIGUOUS,
             metric_crs=metric_crs,
@@ -290,8 +348,8 @@ def match_observation(
 
     starts = [node for node in candidates if candidates.in_degree(node) == 0]
     if len(starts) != 1:
-        return _unmatched(
-            observation,
+        return _unmatched_id(
+            subject_id,
             "NON_CHAIN_CANDIDATES",
             status=TrafficMatchStatus.AMBIGUOUS,
             metric_crs=metric_crs,
@@ -304,20 +362,63 @@ def match_observation(
         ordered.append(metrics[(current, following)])
         current = following
     if len(ordered) != candidates.number_of_edges():
-        return _unmatched(
-            observation,
+        return _unmatched_id(
+            subject_id,
             "NON_CHAIN_CANDIDATES",
             status=TrafficMatchStatus.AMBIGUOUS,
             metric_crs=metric_crs,
         )
 
     return TrafficEdgeMatch(
-        observation_id=observation.observation_id,
+        observation_id=subject_id,
         status=TrafficMatchStatus.MATCHED,
         reason="ALL_SAFETY_GATES_PASSED",
         edge_keys=tuple(item[0] for item in ordered),
         max_geometry_separation_m=max(item[1] for item in ordered),
         max_direction_difference_degrees=max(item[2] for item in ordered),
+        metric_crs=metric_crs,
+    )
+
+
+def match_polyline_geometry(
+    graph: nx.Graph,
+    coordinates: tuple[tuple[float, float], ...],
+    *,
+    subject_id: str,
+    allowed_edges: frozenset[EdgeKey],
+) -> TrafficEdgeMatch:
+    """Match provider geometry using the existing fail-closed safety gates."""
+    try:
+        transformer, metric_crs = _metric_transformer_for_coordinates(coordinates)
+        line = LineString(coordinates)
+    except (ShapelyError, TypeError, ValueError, ZeroDivisionError):
+        return _unmatched_id(subject_id, "INVALID_GEOMETRY")
+    return _match_polyline(
+        graph,
+        subject_id=subject_id,
+        line=line,
+        allowed_edges=allowed_edges,
+        transformer=transformer,
+        metric_crs=metric_crs,
+    )
+
+
+def match_observation(
+    graph: nx.Graph,
+    observation: TrafficObservation,
+    allowed_edges: frozenset[EdgeKey],
+) -> TrafficEdgeMatch:
+    """Apply locked gates, then accept only one structural directed chain."""
+    if observation.confidence < settings.TOMTOM_MIN_PROVIDER_CONFIDENCE:
+        return _unmatched(observation, "LOW_PROVIDER_CONFIDENCE")
+
+    transformer, metric_crs = _metric_transformer(observation)
+    return _match_polyline(
+        graph,
+        subject_id=observation.observation_id,
+        line=LineString(observation.coordinates),
+        allowed_edges=allowed_edges,
+        transformer=transformer,
         metric_crs=metric_crs,
     )
 

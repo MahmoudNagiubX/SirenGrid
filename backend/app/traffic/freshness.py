@@ -12,14 +12,15 @@ def freshness_origin(snapshot: TrafficSnapshot) -> datetime | None:
     return snapshot.provider_last_updated or snapshot.retrieved_at
 
 
-def evaluate_freshness(
-    snapshot: TrafficSnapshot,
+def evaluate_freshness_origin(
+    origin: datetime | None,
     now: datetime,
 ) -> FreshnessStatus:
     """Evaluate the locked inclusive 60/120-second freshness boundaries."""
-    origin = freshness_origin(snapshot)
     if origin is None:
         return FreshnessStatus.UNKNOWN
+    if origin.tzinfo is None or origin.utcoffset() is None:
+        raise ValueError("freshness origin must be timezone-aware")
     if now.tzinfo is None or now.utcoffset() is None:
         raise ValueError("freshness evaluation time must be timezone-aware")
     if now < origin:
@@ -31,3 +32,10 @@ def evaluate_freshness(
     if age_seconds <= settings.TOMTOM_FRESH_MAX_AGE_SECONDS:
         return FreshnessStatus.FRESH
     return FreshnessStatus.STALE
+
+
+def evaluate_freshness(
+    snapshot: TrafficSnapshot,
+    now: datetime,
+) -> FreshnessStatus:
+    return evaluate_freshness_origin(freshness_origin(snapshot), now)
