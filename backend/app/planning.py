@@ -74,6 +74,15 @@ __all__ = [
 
 router = APIRouter(tags=["planning"])
 
+# Immutable graph-derived zone centroid -> graph node mapping, shared across
+# planning calls. Keys carry the graph fingerprint and exact centroid.
+_ZONE_NODE_CACHE: dict[tuple[Any, ...], Any] = {}
+
+
+def clear_zone_node_cache() -> None:
+    """Drop cached zone snapping. Intended for tests and asset refreshes."""
+    _ZONE_NODE_CACHE.clear()
+
 
 @dataclass(frozen=True)
 class _Phase04PlanningState:
@@ -369,7 +378,14 @@ def evaluate_phase04_candidate_set(
         incident_id=planning_incident_id,
     )
     travel_times_cache = travel_times_cache if travel_times_cache is not None else {}
-    zone_nodes_cache = zone_nodes_cache if zone_nodes_cache is not None else {}
+    # Snapping a zone centroid scans every graph node, and the modeled zone set
+    # and base graph are both immutable, so the mapping is shared across calls.
+    # Its key already carries the graph fingerprint and the exact centroid, so
+    # a refreshed graph or a changed zone cannot read a stale node. Travel-time
+    # trees stay per-call because they are large.
+    zone_nodes_cache = (
+        zone_nodes_cache if zone_nodes_cache is not None else _ZONE_NODE_CACHE
+    )
     evaluated = tuple(
         evaluate_candidate_combination(
             graph=graph,

@@ -5,6 +5,7 @@ import hashlib
 import json
 import math
 from typing import Any, Iterable
+from weakref import WeakKeyDictionary
 
 import networkx as nx
 from pyproj import Transformer
@@ -40,8 +41,34 @@ def _stable_value(value: Any) -> Any:
     return str(value)
 
 
+_FINGERPRINT_CACHE: WeakKeyDictionary[nx.Graph, tuple[int, int, str]] = (
+    WeakKeyDictionary()
+)
+
+
+def clear_graph_fingerprint_cache() -> None:
+    """Drop memoized fingerprints. Intended for tests and asset refreshes."""
+    _FINGERPRINT_CACHE.clear()
+
+
 def graph_fingerprint(graph: nx.Graph) -> str:
-    """Hash graph truth deterministically without altering graph state."""
+    """Hash graph truth deterministically without altering graph state.
+
+    Serializing every node and edge is expensive, and coverage evaluation asks
+    for the fingerprint of the same immutable base graph many times per plan.
+    The result is memoized per graph object and revalidated against the node
+    and edge counts, so a structurally changed graph is never served a stale
+    hash. The base OSM graph is treated as immutable runtime truth: routing
+    copies before removing edges and traffic overlays are frozen records
+    rather than graph attributes, which regression tests assert by comparing
+    ``node_link_data`` before and after routing and matching.
+    """
+    cached = _FINGERPRINT_CACHE.get(graph)
+    if cached is not None:
+        node_count, edge_count, fingerprint = cached
+        if node_count == graph.number_of_nodes() and edge_count == graph.number_of_edges():
+            return fingerprint
+
     nodes = [
         (str(node), _stable_value(attrs))
         for node, attrs in graph.nodes(data=True)
@@ -71,7 +98,18 @@ def graph_fingerprint(graph: nx.Graph) -> str:
         sort_keys=True,
         separators=(",", ":"),
     ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
+    fingerprint = hashlib.sha256(encoded).hexdigest()
+    try:
+        _FINGERPRINT_CACHE[graph] = (
+            graph.number_of_nodes(),
+            graph.number_of_edges(),
+            fingerprint,
+        )
+    except TypeError:
+        # A graph implementation that does not support weak references still
+        # gets a correct fingerprint, just without memoization.
+        pass
+    return fingerprint
 
 
 def _iter_edges(graph: nx.Graph) -> Iterable[tuple[Any, Any, Any, dict[str, Any]]]:

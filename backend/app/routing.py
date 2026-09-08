@@ -204,10 +204,25 @@ def _edge_travel_time_weight(u: Any, v: Any, edge_data: Any) -> float:
     return float("inf")
 
 
+_GRAPH_CACHE: dict[str, tuple[int, int, nx.MultiDiGraph]] = {}
+
+
+def clear_routing_graph_cache() -> None:
+    """Drop the cached graph. Intended for tests and asset refreshes."""
+    _GRAPH_CACHE.clear()
+
+
 def load_routing_graph(graph_path: Path | str | None = None) -> nx.MultiDiGraph:
     """Load the processed road network graph from GraphML.
 
     Raises FileNotFoundError visibly if the GraphML file is missing.
+
+    The parsed graph is cached per file identity because the base OSM graph is
+    immutable runtime truth: routing copies before removing edges and traffic
+    is applied as a frozen overlay rather than graph attributes. Reusing one
+    object also lets the graph fingerprint memoize across requests. The cache
+    is invalidated when the file's modification time or size changes, so a
+    published asset refresh is picked up.
     """
     if graph_path is None:
         target_path = settings.NASR_CITY_DATA_DIR / "nasr_city_graph.graphml"
@@ -217,7 +232,17 @@ def load_routing_graph(graph_path: Path | str | None = None) -> nx.MultiDiGraph:
     if not target_path.is_file():
         raise FileNotFoundError(f"Routing graph file not found: {target_path}")
 
-    return nx.read_graphml(target_path)
+    stats = target_path.stat()
+    cache_key = str(target_path.resolve())
+    cached = _GRAPH_CACHE.get(cache_key)
+    if cached is not None:
+        mtime_ns, size, graph = cached
+        if mtime_ns == stats.st_mtime_ns and size == stats.st_size:
+            return graph
+
+    graph = nx.read_graphml(target_path)
+    _GRAPH_CACHE[cache_key] = (stats.st_mtime_ns, stats.st_size, graph)
+    return graph
 
 
 def snap_coordinate_to_graph(

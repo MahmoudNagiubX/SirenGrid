@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+import shutil
+
 import networkx as nx
 import pytest
 
@@ -8,12 +11,14 @@ from app.routing import (
     RouteNotFoundError,
     RouteResult,
     RoutingPointOutsideGraphError,
+    clear_routing_graph_cache,
     compute_route_on_graph,
     haversine_distance_m,
     load_routing_graph,
     snap_coordinate_to_graph,
 )
 from app.schemas import Coordinate
+from app.traffic.matching import clear_graph_fingerprint_cache, graph_fingerprint
 
 
 def test_haversine_distance_m_basic():
@@ -235,3 +240,63 @@ def test_real_nasr_city_route_computes_with_exact_spec():
     assert as_dict["distance_m"] == result.distance_m
     assert as_dict["eta_seconds"] == result.eta_seconds
     assert as_dict["geometry"] == geometry
+
+
+def test_load_routing_graph_reuses_the_immutable_graph_and_refreshes_on_change(
+    tmp_path,
+) -> None:
+    """The base graph is cached per file identity but must follow a refresh.
+
+    Reusing one object keeps the fingerprint memo effective across requests.
+    A republished asset must still be picked up rather than served stale.
+    """
+    clear_routing_graph_cache()
+    source = settings.NASR_CITY_DATA_DIR / "nasr_city_graph.graphml"
+    target = tmp_path / "graph.graphml"
+    shutil.copy2(source, target)
+
+    first = load_routing_graph(target)
+    second = load_routing_graph(target)
+    assert first is second, "unchanged graph asset should not be re-parsed"
+
+    # Republish with different content and a distinct modification time.
+    rewritten = first.copy()
+    rewritten.remove_node(next(iter(rewritten.nodes())))
+    nx.write_graphml(rewritten, target)
+    stats = target.stat()
+    os.utime(target, ns=(stats.st_atime_ns, stats.st_mtime_ns + 1_000_000_000))
+
+    third = load_routing_graph(target)
+    assert third is not first, "refreshed graph asset must invalidate the cache"
+    assert third.number_of_nodes() == first.number_of_nodes() - 1
+    clear_routing_graph_cache()
+
+
+def test_graph_fingerprint_is_memoized_without_serving_a_stale_hash() -> None:
+    """Memoization must never hide a structural change to a graph."""
+    clear_graph_fingerprint_cache()
+    graph = nx.MultiDiGraph()
+    graph.add_node("a", x=31.30, y=30.00)
+    graph.add_node("b", x=31.31, y=30.00)
+    graph.add_edge("a", "b", key="0", length=100.0, travel_time=10.0)
+
+    first = graph_fingerprint(graph)
+    assert graph_fingerprint(graph) == first, "repeat call must be stable"
+
+    graph.add_node("c", x=31.32, y=30.00)
+    assert graph_fingerprint(graph) != first, "added node must change the hash"
+
+    graph.add_edge("b", "c", key="0", length=100.0, travel_time=10.0)
+    with_edge = graph_fingerprint(graph)
+    assert with_edge != first
+
+    # An independently built but identical graph hashes the same, proving the
+    # memo is keyed on content rather than object identity alone.
+    twin = nx.MultiDiGraph()
+    twin.add_node("a", x=31.30, y=30.00)
+    twin.add_node("b", x=31.31, y=30.00)
+    twin.add_node("c", x=31.32, y=30.00)
+    twin.add_edge("a", "b", key="0", length=100.0, travel_time=10.0)
+    twin.add_edge("b", "c", key="0", length=100.0, travel_time=10.0)
+    assert graph_fingerprint(twin) == with_edge
+    clear_graph_fingerprint_cache()

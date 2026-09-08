@@ -993,3 +993,47 @@ and the approval boundary are unchanged.
 
 Concurrent generation now yields exactly one persisted candidate set; stale
 losers receive `409` rather than silently persisting duplicates.
+
+## PD-064 - Immutable Geospatial Runtime Caching
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner (post-audit hardening mission, HD-001/FX-019)
+
+### Decision
+
+Three immutable geospatial derivations are cached in process:
+
+1. the parsed base GraphML graph, keyed by file path with modification-time
+   and size revalidation, so a republished asset is picked up;
+2. the graph fingerprint, memoized per graph object and revalidated against
+   node and edge counts, so a structurally changed graph never receives a
+   stale hash;
+3. the zone-centroid to graph-node mapping, keyed by graph fingerprint, zone
+   ID, and exact centroid.
+
+Single-source travel-time trees remain per-request because each is large.
+Each cache exposes an explicit clear function for tests and asset refreshes.
+
+### Reason
+
+Routing an incident through the canonical planner took roughly 39 seconds.
+`graph_fingerprint` serialized all 7,348 nodes and 17,439 edges on every
+coverage snapshot (about 40 times per plan, roughly 8.4 seconds), the GraphML
+file was reparsed on every request, and every zone centroid was snapped by
+scanning all graph nodes, roughly three million haversine evaluations per
+plan.
+
+This is safe because the base OSM graph is already specified as immutable
+runtime truth: routing copies the graph before removing edges and traffic is
+applied as a frozen overlay rather than graph attributes. Regression tests
+assert this by comparing `node_link_data` before and after routing and
+matching.
+
+### Impact
+
+A canonical plan call drops from about 39 seconds to about 13 seconds, and the
+backend test suite from 12m55s to 4m16s. No scoring weight, coverage target,
+candidate cap, cohort, or reposition policy changes; the remaining cost is the
+approved bounded reposition simulation. Coverage still evaluates every modeled
+zone.
