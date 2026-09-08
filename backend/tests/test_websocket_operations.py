@@ -526,3 +526,93 @@ def test_multiple_concurrent_websocket_clients_receive_identical_envelopes(clien
             assert msg1["version"] == 1
             assert msg1["event"] == "incident.created"
             assert msg1["incident_id"] == incident["id"]
+
+
+def test_publish_does_not_block_on_a_stalled_client() -> None:
+    """A slow or dead socket must not stall the mutation that triggered it.
+
+    The publishing thread has already committed its database transaction, so
+    waiting on a socket write would let one stuck client add seconds to every
+    operational mutation.
+    """
+    import asyncio
+    import threading
+    import time
+
+    from app.websocket import OperationsConnectionManager
+
+    manager = OperationsConnectionManager()
+    delivery_started = threading.Event()
+    release_delivery = threading.Event()
+
+    class StalledWebSocket:
+        async def send_json(self, _envelope: object) -> None:
+            delivery_started.set()
+            # Block the stream loop the way a wedged client would.
+            await asyncio.get_running_loop().run_in_executor(
+                None, release_delivery.wait, 30.0
+            )
+
+    loop = asyncio.new_event_loop()
+    loop_thread = threading.Thread(target=loop.run_forever, daemon=True)
+    loop_thread.start()
+    try:
+        manager.active_connections.append(StalledWebSocket())
+        manager.loop = loop
+
+        started = time.monotonic()
+        envelope = manager.publish(
+            event="incident.updated", incident_id="inc-stall", payload={}
+        )
+        elapsed = time.monotonic() - started
+
+        # Publication returns immediately rather than waiting on the socket.
+        assert elapsed < 1.0, f"publish blocked for {elapsed:.2f}s"
+        assert envelope["event"] == "incident.updated"
+        assert envelope["version"] == 1
+        assert delivery_started.wait(timeout=5.0), "delivery was never scheduled"
+    finally:
+        release_delivery.set()
+        loop.call_soon_threadsafe(loop.stop)
+        loop_thread.join(timeout=5.0)
+        loop.close()
+
+
+def test_publish_prunes_a_socket_that_fails_delivery() -> None:
+    """A broken socket is dropped asynchronously without affecting the caller."""
+    import asyncio
+    import threading
+
+    from app.websocket import OperationsConnectionManager
+
+    manager = OperationsConnectionManager()
+    attempted = threading.Event()
+
+    class BrokenWebSocket:
+        async def send_json(self, _envelope: object) -> None:
+            attempted.set()
+            raise RuntimeError("socket is closed")
+
+    loop = asyncio.new_event_loop()
+    loop_thread = threading.Thread(target=loop.run_forever, daemon=True)
+    loop_thread.start()
+    try:
+        broken = BrokenWebSocket()
+        manager.active_connections.append(broken)
+        manager.loop = loop
+
+        # The failure must not propagate to the committing request thread.
+        manager.publish(event="incident.updated", incident_id="inc-broken", payload={})
+
+        assert attempted.wait(timeout=5.0)
+        deadline = 5.0
+        step = 0.05
+        waited = 0.0
+        while broken in manager.active_connections and waited < deadline:
+            threading.Event().wait(step)
+            waited += step
+        assert broken not in manager.active_connections
+    finally:
+        loop.call_soon_threadsafe(loop.stop)
+        loop_thread.join(timeout=5.0)
+        loop.close()

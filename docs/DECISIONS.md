@@ -1399,3 +1399,37 @@ A failure recording the trigger now rolls the whole request back: no version
 bump, no fact change, no audit event. The five-second debounce and
 idempotency rules are unchanged, and the REST trigger endpoint keeps its
 existing commit behaviour.
+
+## PD-074 - Non-Blocking Operations Stream Publication
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner (post-audit hardening mission, HD-013)
+
+### Decision
+
+`OperationsConnectionManager.publish()` hands each envelope to the stream
+event loop and returns immediately. It never waits for a socket write, and a
+delivery failure is absorbed by the delivery task, which prunes the dead
+socket asynchronously. REST remains the canonical recovery path for anything
+a client misses.
+
+### Reason
+
+Publication previously called `asyncio.run_coroutine_threadsafe(...)` and then
+`future.result(timeout=5.0)` on the request thread. Reproduced with a stalled
+cross-loop client: the request thread waited on the socket, so one wedged
+browser tab added up to five seconds to every operational mutation, and the
+timeout raised inside a request whose database transaction had already
+committed. A second branch called `asyncio.run()` when no loop was running,
+creating a fresh loop for a socket bound to a different one.
+
+### Impact
+
+Publication is fire-and-forget. The mutation has already committed by the time
+it runs, so a publish failure cannot roll back durable state and cannot change
+the HTTP result. Sequence numbers stay strictly monotonic because the counter
+increments under the manager lock before any scheduling. Ordering per socket
+is preserved by the loop's FIFO task order. `test_publish_does_not_block_on_a_stalled_client`
+bounds publication response time deterministically, and
+`test_publish_prunes_a_socket_that_fails_delivery` pins the pruning behaviour.
