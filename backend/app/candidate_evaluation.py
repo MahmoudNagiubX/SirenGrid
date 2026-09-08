@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from datetime import datetime
-from typing import Iterable
+from typing import Any, Iterable
 
 import networkx as nx
 
@@ -177,6 +177,8 @@ def evaluate_candidate_combination(
     traffic_snapshot: TrafficSnapshot | None,
     modeled_at: datetime,
     incident_id: str | None = None,
+    travel_times_cache: dict[tuple[Any, ...], Any] | None = None,
+    zone_nodes_cache: dict[tuple[Any, ...], Any] | None = None,
 ) -> EvaluatedCandidate:
     """Evaluate one hypothetical combination without mutating operations state."""
     resources_tuple = tuple(resources)
@@ -221,6 +223,8 @@ def evaluate_candidate_combination(
                 traffic_snapshot=traffic_snapshot,
                 modeled_at=modeled_at,
                 allowed_precommitted_resource_ids=allowed_precommitted_resource_ids,
+                travel_times_cache=travel_times_cache,
+                zone_nodes_cache=zone_nodes_cache,
             )
         )
     baseline_joint = derive_joint_coverage_snapshot(

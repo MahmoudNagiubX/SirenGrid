@@ -7,11 +7,13 @@ import pytest
 
 from app.benchmark_baseline import (
     BaselineInsufficientResourcesError,
+    choose_nearest_baseline_hospital,
     choose_greedy_baseline_resources,
 )
 from app.candidate_generation import CandidateResource
 from app.response_requirements import ResponseRequirement
 from app.routing import TrafficAwareRouteResult
+from app.hospitals import HospitalOperationalSnapshot, HospitalStaticRecord
 from app.schemas import Coordinate, DataReality, ResourceStatus, ResourceType
 
 
@@ -160,3 +162,54 @@ def test_baseline_reports_insufficient_resources_without_backtracking(
             requirements=(general, advanced),
             traffic_snapshot=None,
         )
+
+
+def test_baseline_hospital_uses_truth_filters_then_nearest_route(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    graph = nx.MultiDiGraph()
+    hospitals = (
+        HospitalStaticRecord(
+            id="osm:unknown-capability",
+            source_id="unknown-capability",
+            latitude=30.001,
+            longitude=31.301,
+        ),
+        HospitalStaticRecord(
+            id="osm:incompatible",
+            source_id="incompatible",
+            latitude=30.002,
+            longitude=31.302,
+            confirmed_incompatible_capabilities=("TRAUMA",),
+        ),
+        HospitalStaticRecord(
+            id="osm:not-accepting",
+            source_id="not-accepting",
+            latitude=30.003,
+            longitude=31.303,
+        ),
+    )
+
+    def fake_route(_graph, _origin, destination, _snapshot):
+        if destination.lon == 31.303:
+            raise ValueError("unreachable")
+        return _route(120.0 if destination.lon == 31.301 else 60.0, 200.0)
+
+    monkeypatch.setattr("app.benchmark_baseline.compute_traffic_aware_route", fake_route)
+    states = {
+        "osm:not-accepting": HospitalOperationalSnapshot(
+            hospital_id="osm:not-accepting", accepting_state="NOT_ACCEPTING"
+        )
+    }
+
+    selected = choose_nearest_baseline_hospital(
+        graph=graph,
+        origin=Coordinate(lat=30.0, lon=31.3),
+        required_capabilities=("TRAUMA",),
+        traffic_snapshot=None,
+        hospitals=hospitals,
+        operational_states=states,
+    )
+
+    assert selected is not None
+    assert selected.hospital.id == "osm:unknown-capability"

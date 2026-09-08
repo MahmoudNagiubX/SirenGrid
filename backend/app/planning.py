@@ -511,8 +511,20 @@ def evaluate_phase04_candidate_set(
     *,
     now_utc: datetime | None = None,
     planning_incident_id: str | None = None,
+    graph_override: Any | None = None,
+    zones_override: tuple[Any, ...] | None = None,
+    traffic_snapshot_override: Any = None,
+    use_traffic_runtime: bool = True,
+    resources_override: tuple[CandidateResource, ...] | None = None,
+    travel_times_cache: dict[tuple[Any, ...], Any] | None = None,
+    zone_nodes_cache: dict[tuple[Any, ...], Any] | None = None,
 ) -> tuple[Any, tuple[Any, ...], dict[tuple[str, ...], Any], datetime]:
-    """Evaluate one coherent Phase 04 candidate set without persisting it."""
+    """Evaluate one coherent Phase 04 candidate set without persisting it.
+
+    The optional overrides are an internal deterministic replay seam used by
+    Phase 08. Normal API callers retain the existing graph, zone, traffic,
+    and database-resource behavior.
+    """
     source_requirements = _phase04_source_requirements(
         incident.required_resources_json
     )
@@ -521,48 +533,54 @@ def evaluate_phase04_candidate_set(
         severity=incident.severity,
         source_requirements=source_requirements,
     )
-    graph = load_routing_graph()
-    zones = load_population_zones(
+    graph = graph_override if graph_override is not None else load_routing_graph()
+    zones = zones_override or load_population_zones(
         settings.NASR_CITY_DATA_DIR
         / "nasr_city_zone_population_worldpop_2025.geojson"
     )
     timestamp = now_utc or datetime.now(timezone.utc)
-    traffic_snapshot = traffic_runtime.capture_snapshot(
-        graph,
-        now=timestamp,
-        wall_clock=lambda: datetime.now(timezone.utc),
-        monotonic=time.monotonic,
-    )
+    if use_traffic_runtime:
+        traffic_snapshot = traffic_runtime.capture_snapshot(
+            graph,
+            now=timestamp,
+            wall_clock=lambda: datetime.now(timezone.utc),
+            monotonic=time.monotonic,
+        )
+    else:
+        traffic_snapshot = traffic_snapshot_override
     active_plan = (
         db.get(ResponsePlan, incident.current_plan_id)
         if planning_incident_id and incident.current_plan_id
         else None
     )
-    resources = tuple(
-        CandidateResource(
-            resource_id=resource.id,
-            resource_type=resource.resource_type,
-            capability_tags=tuple(resource.capability_tags_json or ()),
-            status=resource.status,
-            assigned_incident_id=resource.assigned_incident_id,
-            coordinate=resource_coordinate_for_replan(
-                resource,
-                active_plan,
-                incident_id=planning_incident_id or incident.id,
-            ),
-            data_reality=DataReality(
-                (resource.provenance_json or {}).get(
-                    "data_reality", DataReality.SIMULATED.value
-                )
-            ),
-            source=(resource.provenance_json or {}).get(
-                "source", "phase03_simulated_resource"
-            ),
+    if resources_override is not None:
+        resources = resources_override
+    else:
+        resources = tuple(
+            CandidateResource(
+                resource_id=resource.id,
+                resource_type=resource.resource_type,
+                capability_tags=tuple(resource.capability_tags_json or ()),
+                status=resource.status,
+                assigned_incident_id=resource.assigned_incident_id,
+                coordinate=resource_coordinate_for_replan(
+                    resource,
+                    active_plan,
+                    incident_id=planning_incident_id or incident.id,
+                ),
+                data_reality=DataReality(
+                    (resource.provenance_json or {}).get(
+                        "data_reality", DataReality.SIMULATED.value
+                    )
+                ),
+                source=(resource.provenance_json or {}).get(
+                    "source", "phase03_simulated_resource"
+                ),
+            )
+            for resource in db.scalars(
+                select(EmergencyResource).order_by(EmergencyResource.id.asc())
+            ).all()
         )
-        for resource in db.scalars(
-            select(EmergencyResource).order_by(EmergencyResource.id.asc())
-        ).all()
-    )
     generated = generate_candidate_combinations(
         graph=graph,
         incident_coordinate=Coordinate(
@@ -574,6 +592,8 @@ def evaluate_phase04_candidate_set(
         traffic_snapshot=traffic_snapshot,
         incident_id=planning_incident_id,
     )
+    travel_times_cache = travel_times_cache if travel_times_cache is not None else {}
+    zone_nodes_cache = zone_nodes_cache if zone_nodes_cache is not None else {}
     evaluated = tuple(
         evaluate_candidate_combination(
             graph=graph,
@@ -584,6 +604,8 @@ def evaluate_phase04_candidate_set(
             traffic_snapshot=traffic_snapshot,
             modeled_at=timestamp,
             incident_id=planning_incident_id,
+            travel_times_cache=travel_times_cache,
+            zone_nodes_cache=zone_nodes_cache,
         )
         for combination in generated.combinations
     )
@@ -598,6 +620,8 @@ def evaluate_phase04_candidate_set(
             candidate=candidate,
             traffic_snapshot=traffic_snapshot,
             modeled_at=timestamp,
+            travel_times_cache=travel_times_cache,
+            zone_nodes_cache=zone_nodes_cache,
         )
         selected_proposal = select_reposition_proposal(repositioning.proposals)
         if selected_proposal is not None:

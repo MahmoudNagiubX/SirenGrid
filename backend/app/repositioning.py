@@ -220,6 +220,8 @@ def _recompute_post_reposition(
     staging_centroid: Coordinate,
     traffic_snapshot: TrafficSnapshot | None,
     modeled_at: datetime,
+    travel_times_cache: dict[tuple[Any, ...], Any] | None = None,
+    zone_nodes_cache: dict[tuple[Any, ...], Any] | None = None,
 ) -> tuple[tuple[CoverageSnapshot, ...], JointCoverageSnapshot]:
     hypothetical_resources = _candidate_resources_after_reposition(
         resources,
@@ -238,6 +240,8 @@ def _recompute_post_reposition(
             ),
             traffic_snapshot=traffic_snapshot,
             modeled_at=modeled_at,
+            travel_times_cache=travel_times_cache,
+            zone_nodes_cache=zone_nodes_cache,
         )
         for requirement in requirements
     )
@@ -303,6 +307,8 @@ def simulate_repositioning(
     candidate: EvaluatedCandidate,
     traffic_snapshot: TrafficSnapshot | None,
     modeled_at: datetime,
+    travel_times_cache: dict[tuple[Any, ...], Any] | None = None,
+    zone_nodes_cache: dict[tuple[Any, ...], Any] | None = None,
 ) -> RepositioningSimulation:
     """Evaluate bounded reserve-to-adjacent-zone moves without operational mutation."""
     zones_tuple = tuple(zones)
@@ -400,6 +406,8 @@ def simulate_repositioning(
                         staging_centroid=staging.centroid,
                         traffic_snapshot=traffic_snapshot,
                         modeled_at=modeled_at,
+                        travel_times_cache=travel_times_cache,
+                        zone_nodes_cache=zone_nodes_cache,
                     )
                     if not _useful_reposition(post_joint, post_reposition_joint):
                         continue

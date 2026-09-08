@@ -8,6 +8,12 @@ from typing import Iterable
 import networkx as nx
 
 from app.candidate_generation import CandidateResource, _is_hard_eligible
+from app.hospitals import (
+    HospitalOperationalSnapshot,
+    HospitalRouteCandidate,
+    HospitalStaticRecord,
+    load_static_hospitals,
+)
 from app.response_requirements import ResponseRequirement
 from app.routing import (
     RouteNotFoundError,
@@ -43,6 +49,56 @@ class BaselineSelection:
     @property
     def max_incident_eta_seconds(self) -> float:
         return max(choice.route.effective_eta for choice in self.choices)
+
+
+def choose_nearest_baseline_hospital(
+    *,
+    graph: nx.Graph,
+    origin: Coordinate,
+    required_capabilities: tuple[str, ...] = (),
+    traffic_snapshot: TrafficSnapshot | None,
+    hospitals: Iterable[HospitalStaticRecord] | None = None,
+    operational_states: dict[str, HospitalOperationalSnapshot] | None = None,
+) -> HospitalRouteCandidate | None:
+    """Choose the feasible hospital with the lowest route ETA.
+
+    This deliberately applies Phase 05 hard truth filters without using its
+    weighted hospital score, matching the architecture's simple baseline.
+    """
+    required = {value.strip().upper() for value in required_capabilities if value.strip()}
+    states = operational_states or {}
+    routeable: list[HospitalRouteCandidate] = []
+    for hospital in hospitals if hospitals is not None else load_static_hospitals():
+        state = states.get(hospital.id) or HospitalOperationalSnapshot.unknown(hospital.id)
+        if state.accepting_state.upper() == "NOT_ACCEPTING":
+            continue
+        if required.intersection(hospital.confirmed_incompatible_capabilities):
+            continue
+        try:
+            route = compute_traffic_aware_route(
+                graph,
+                origin,
+                Coordinate(lat=hospital.latitude, lon=hospital.longitude),
+                traffic_snapshot,
+            )
+        except (RouteNotFoundError, RoutingPointOutsideGraphError, ValueError):
+            continue
+        routeable.append(
+            HospitalRouteCandidate(
+                hospital=hospital,
+                operational_state=state,
+                route=route.model_dump(mode="json"),
+            )
+        )
+    return min(
+        routeable,
+        key=lambda candidate: (
+            float(candidate.route["effective_eta"] if "effective_eta" in candidate.route else candidate.route["eta_seconds"]),
+            float(candidate.route["distance_m"]),
+            candidate.hospital.id,
+        ),
+        default=None,
+    )
 
 
 def _requirement_key(requirement: ResponseRequirement) -> tuple[str, tuple[str, ...]]:

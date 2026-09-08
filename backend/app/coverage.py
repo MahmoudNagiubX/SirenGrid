@@ -270,6 +270,8 @@ def compute_coverage_snapshot(
     cohort: CoverageCohort,
     traffic_snapshot: TrafficSnapshot | None,
     modeled_at: datetime,
+    travel_times_cache: dict[tuple[Any, ...], Any] | None = None,
+    zone_nodes_cache: dict[tuple[Any, ...], Any] | None = None,
 ) -> CoverageSnapshot:
     """Calculate minimum graph ETA coverage without mutating graph or resources."""
     if modeled_at.tzinfo is None or modeled_at.utcoffset() is None:
@@ -283,10 +285,26 @@ def compute_coverage_snapshot(
     }
     if len(population_source_references) > 1:
         raise ValueError("Coverage zones must have one explicit source reference")
+    graph_hash = graph_fingerprint(graph)
     zone_nodes: dict[str, Any] = {}
     for zone in validated_zones:
+        zone_cache_key = (
+            graph_hash,
+            zone.zone_id,
+            zone.centroid.lat,
+            zone.centroid.lon,
+        )
         try:
-            zone_nodes[zone.zone_id], _ = _snap_zone(graph, zone.centroid)
+            snapped = (
+                zone_nodes_cache.get(zone_cache_key)
+                if zone_nodes_cache is not None
+                else None
+            )
+            if snapped is None:
+                snapped, _ = _snap_zone(graph, zone.centroid)
+                if zone_nodes_cache is not None:
+                    zone_nodes_cache[zone_cache_key] = snapped
+            zone_nodes[zone.zone_id] = snapped
         except RoutingPointOutsideGraphError as exc:
             raise ValueError(f"Coverage zone {zone.zone_id} cannot snap to graph") from exc
     selected_resources = sorted(
@@ -296,15 +314,28 @@ def compute_coverage_snapshot(
     trees = []
     excluded_resource_ids: list[str] = []
     for resource in selected_resources:
+        cache_key = (
+            graph_hash,
+            resource.resource_id,
+            resource.coordinate.lat,
+            resource.coordinate.lon,
+            traffic_snapshot.snapshot_id if traffic_snapshot else None,
+            traffic_snapshot.version if traffic_snapshot else None,
+            traffic_snapshot.freshness_status.value if traffic_snapshot else None,
+        )
         try:
-            trees.append(
-                (
-                    resource.resource_id,
-                    compute_single_source_travel_times(
-                        graph, resource.coordinate, traffic_snapshot
-                    ),
-                )
+            tree = (
+                travel_times_cache.get(cache_key)
+                if travel_times_cache is not None
+                else None
             )
+            if tree is None:
+                tree = compute_single_source_travel_times(
+                    graph, resource.coordinate, traffic_snapshot
+                )
+                if travel_times_cache is not None:
+                    travel_times_cache[cache_key] = tree
+            trees.append((resource.resource_id, tree))
         except RoutingPointOutsideGraphError:
             excluded_resource_ids.append(resource.resource_id)
 
@@ -402,7 +433,7 @@ def compute_coverage_snapshot(
         data_reality=DataReality.REAL_DERIVED,
         population_data_reality=next(iter(population_realities)),
         population_source_reference=next(iter(population_source_references), None),
-        graph_fingerprint=graph_fingerprint(graph),
+        graph_fingerprint=graph_hash,
         prototype_target_response_time_seconds=PROTOTYPE_TARGET_RESPONSE_TIME_SECONDS,
         zones=tuple(zone_results),
         eligible_resource_ids=tuple(resource_id for resource_id, _tree in trees),
@@ -457,6 +488,8 @@ def simulate_dispatch_impact(
     traffic_snapshot: TrafficSnapshot | None,
     modeled_at: datetime,
     allowed_precommitted_resource_ids: Iterable[str] = (),
+    travel_times_cache: dict[tuple[Any, ...], Any] | None = None,
+    zone_nodes_cache: dict[tuple[Any, ...], Any] | None = None,
 ) -> DispatchImpactSimulation:
     """Compare coverage before and after a purely hypothetical dispatch.
 
@@ -482,6 +515,8 @@ def simulate_dispatch_impact(
         cohort=cohort,
         traffic_snapshot=traffic_snapshot,
         modeled_at=modeled_at,
+        travel_times_cache=travel_times_cache,
+        zone_nodes_cache=zone_nodes_cache,
     )
     eligible_ids = set(baseline.eligible_resource_ids)
     captured_ids = set(resource_ids)
@@ -513,6 +548,8 @@ def simulate_dispatch_impact(
         cohort=cohort,
         traffic_snapshot=traffic_snapshot,
         modeled_at=modeled_at,
+        travel_times_cache=travel_times_cache,
+        zone_nodes_cache=zone_nodes_cache,
     )
     baseline_by_zone = {zone.zone_id: zone for zone in baseline.zones}
     post_by_zone = {zone.zone_id: zone for zone in post_dispatch.zones}
