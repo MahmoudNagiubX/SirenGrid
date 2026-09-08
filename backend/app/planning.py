@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
+import json
 from typing import Any
 import uuid
 import time
@@ -21,6 +23,7 @@ from app.candidate_generation import (
     generate_candidate_combinations,
 )
 from app.candidate_persistence import persist_candidate_set
+from app.repositioning import select_reposition_proposal, simulate_repositioning
 from app.config import settings
 from app.corridor import corridor_provenance, extract_corridor_signals
 from app.coverage import load_population_zones
@@ -41,7 +44,6 @@ from app.response_requirements import (
     ResponseRequirementsUnavailableError,
     resolve_response_requirements,
 )
-from app.repositioning import select_reposition_proposal, simulate_repositioning
 from app.traffic.runtime import traffic_runtime
 from app.websocket import publish_operations_event
 from app.routing import (
@@ -77,6 +79,50 @@ __all__ = [
 ]
 
 router = APIRouter(tags=["planning"])
+
+
+@dataclass(frozen=True)
+class _Phase04PlanningState:
+    incident: tuple[Any, ...]
+    resources: tuple[tuple[Any, ...], ...]
+
+
+def _capture_phase04_planning_state(
+    incident: Incident,
+    resources: tuple[EmergencyResource, ...],
+) -> _Phase04PlanningState:
+    return _Phase04PlanningState(
+        incident=(
+            incident.id,
+            incident.version,
+            incident.status,
+            incident.incident_type,
+            incident.severity,
+            incident.latitude,
+            incident.longitude,
+            json.dumps(
+                incident.required_resources_json or [],
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            incident.current_plan_id,
+        ),
+        resources=tuple(
+            (
+                resource.id,
+                resource.version,
+                resource.status,
+                resource.assigned_incident_id,
+                resource.latitude,
+                resource.longitude,
+                resource.resource_type,
+                tuple(resource.capability_tags_json or ()),
+                (resource.provenance_json or {}).get("data_reality"),
+                (resource.provenance_json or {}).get("source"),
+            )
+            for resource in resources
+        ),
+    )
 
 SCORE_BREAKDOWN_PHASE01: dict[str, Any] = {
     "algorithm": "MIN_BASE_ROUTE_ETA_WITH_HARD_AVAILABILITY_CONSTRAINTS",
@@ -601,6 +647,16 @@ def generate_phase04_candidate_plans(
                 ),
             )
 
+    resource_records = tuple(
+        db.scalars(
+            select(EmergencyResource).order_by(EmergencyResource.id.asc())
+        ).all()
+    )
+    captured_state = _capture_phase04_planning_state(incident, resource_records)
+    # Candidate routing/coverage is CPU- and I/O-heavy. Release the read
+    # transaction before evaluating so concurrent authoritative mutations can
+    # proceed; the captured state is checked again before persistence.
+    db.rollback()
     try:
         resolution, ranked, reposition_proposals, now_utc = evaluate_phase04_candidate_set(
             db,
@@ -622,9 +678,28 @@ def generate_phase04_candidate_plans(
             detail=f"No feasible Phase 04 candidate set: {exc}",
         ) from exc
 
+    _acquire_write_lock(db)
+    db.expire_all()
+    current_incident = db.get(Incident, incident_id)
+    current_resources = tuple(
+        db.scalars(
+            select(EmergencyResource).order_by(EmergencyResource.id.asc())
+        ).all()
+    )
+    if (
+        current_incident is None
+        or _capture_phase04_planning_state(current_incident, current_resources)
+        != captured_state
+    ):
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Stale planning state: incident or resource inputs changed during candidate generation",
+        )
+
     persisted = persist_candidate_set(
         db,
-        incident,
+        current_incident,
         ranked,
         reposition_proposals=reposition_proposals,
         now_utc=now_utc,
@@ -636,8 +711,8 @@ def generate_phase04_candidate_plans(
     )
     publish_operations_event(
         event="incident.updated",
-        incident_id=incident.id,
-        payload=serialize_incident(incident),
+        incident_id=current_incident.id,
+        payload=serialize_incident(current_incident),
     )
     return [serialize_plan(plan) for plan in persisted]
 

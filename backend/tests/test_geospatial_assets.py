@@ -82,7 +82,11 @@ def test_phase_02_provenance_metadata_and_hashes_match():
         assert metadata["freshness_status"] == "STATIC"
         assert metadata["acquisition_freshness_status"] == "FRESH"
         assert metadata["record_count"] > 0
-        assert metadata["sha256"] == hashlib.sha256(path.read_bytes()).hexdigest()
+        # Provenance hashes describe the canonical UTF-8/LF bytes emitted by
+        # the refresh writers. Git's Windows checkout may materialize tracked
+        # text assets with CRLF, so normalize only line endings for comparison.
+        canonical_bytes = path.read_bytes().replace(b"\r\n", b"\n")
+        assert metadata["sha256"] == hashlib.sha256(canonical_bytes).hexdigest()
 
     retained = provenance["retained_artifacts"]
     for filename in ("nasr_city_boundary.geojson", "nasr_city_grid_500m.geojson"):

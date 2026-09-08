@@ -733,3 +733,40 @@ against remaining resources and fail visibly/require review when insufficient.
 New commitments may invalidate an unapproved pending recommendation, but never
 silently alter an approved assignment. No global optimizer or priority doctrine
 is introduced.
+
+## PD-048 — Phase 04 Reposition Proposal Selection Policy
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner
+
+### Decision
+
+When `simulate_repositioning()` returns multiple accepted proposals for one
+candidate response plan, select exactly one representative proposal by highest
+post-reposition joint population-weighted coverage; then lowest
+post-reposition undercovered-zone count; lowest post-reposition unreachable-
+zone count; lowest reposition ETA; lowest reposition distance; and
+lexicographically ascending target-zone ID, staging-zone ID, and
+repositioned-resource ID.
+
+Only the selected proposal supplies `proposed_reposition_eta_seconds`, the
+reposition penalty and weighted term, and the candidate's persisted
+hypothetical reposition proposal. The coverage score term remains based on
+post-dispatch joint population-weighted coverage. The score remains
+lower-is-better with weights ETA 0.35, coverage 0.40, reserve 0.20,
+reposition 0.05, and hospital 0.00; the selected reposition penalty remains
+selected ETA divided by 600.
+
+### Reason
+
+This makes candidate scoring and persistence deterministic when bounded
+simulation produces more than one valid hypothetical recovery action without
+changing the approved Phase 04 score policy.
+
+### Impact
+
+Production candidate planning selects and scores one representative
+hypothetical reposition proposal before final ranking and persists that same
+proposal. Repositioning remains non-operational and does not mutate resources
+or graph state.

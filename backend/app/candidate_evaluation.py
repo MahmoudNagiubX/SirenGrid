@@ -67,6 +67,16 @@ class EvaluatedCandidate:
     score: CandidateScoreBreakdown
 
 
+def rescore_candidate_for_reposition(
+    candidate: EvaluatedCandidate,
+    proposed_reposition_eta_seconds: float,
+) -> EvaluatedCandidate:
+    return replace(
+        candidate,
+        score=_score(candidate.metrics, proposed_reposition_eta_seconds),
+    )
+
+
 def _coverage_resources(
     resources: Iterable[CandidateResource],
 ) -> tuple[CoverageResource, ...]:

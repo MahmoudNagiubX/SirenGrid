@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from copy import deepcopy
+import concurrent.futures
 from datetime import datetime, timezone
+import threading
 import uuid
 
 import networkx as nx
@@ -107,6 +110,27 @@ def square_zone_geometry(minimum: float, maximum: float) -> dict[str, object]:
             ]
         ],
     }
+
+
+def reposition_zones() -> tuple[CoverageZone, ...]:
+    return tuple(
+        CoverageZone(
+            zone_id,
+            Coordinate(lat=30.0, lon=lon),
+            100.0,
+            square_zone_geometry(low, high),
+        )
+        for zone_id, lon, low, high in (
+            ("zone-west", 31.304, 31.3035, 31.3045),
+            ("zone-target", 31.305, 31.3045, 31.3055),
+            ("zone-east", 31.306, 31.3055, 31.3065),
+        )
+    )
+
+
+def reposition_graph() -> nx.MultiDiGraph:
+    """Reuse the local repositioning fixture under the teammate test name."""
+    return repositioning_persistence_graph()
 
 
 def phase04_candidate_resources() -> tuple[CandidateResource, CandidateResource]:
@@ -224,6 +248,26 @@ def repositioning_persistence_incident(db: Session) -> Incident:
     )
     db.commit()
     return incident
+
+
+def configure_candidate_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(planning, "load_routing_graph", persistence_graph)
+    monkeypatch.setattr(
+        planning,
+        "load_population_zones",
+        lambda _path: (
+            CoverageZone(
+                zone_id="zone",
+                centroid=Coordinate(lat=30.0, lon=31.302),
+                population=100.0,
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        planning.traffic_runtime,
+        "capture_snapshot",
+        lambda *_args, **_kwargs: None,
+    )
 
 
 def test_persist_candidate_set_retains_ranked_phase04_facts_and_single_current_recommendation(
@@ -449,3 +493,246 @@ def test_phase04_candidate_generation_api_persists_selected_reposition_without_m
         for resource in db_session.scalars(select(EmergencyResource)).all()
     }
     assert after_resources == before_resources
+
+
+def test_concurrent_candidate_generations_have_one_winner(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    incident = persistence_incident(db_session)
+    configure_candidate_endpoint(monkeypatch)
+    barrier = threading.Barrier(2)
+    generate = planning.generate_candidate_combinations
+
+    def synchronized_generate(**kwargs: object):
+        barrier.wait(timeout=5.0)
+        return generate(**kwargs)
+
+    monkeypatch.setattr(planning, "generate_candidate_combinations", synchronized_generate)
+
+    def request_generation() -> tuple[int, dict[str, object] | list[object]]:
+        with TestClient(app) as client:
+            response = client.post(
+                f"/api/v1/incidents/{incident.id}/plans/generate-candidates"
+            )
+            return response.status_code, response.json()
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(lambda _: request_generation(), range(2)))
+
+    assert sorted(code for code, _ in results) == [201, 409]
+    assert "stale planning state" in next(
+        body["detail"]
+        for code, body in results
+        if code == 409 and isinstance(body, dict)
+    ).lower()
+    db_session.expire_all()
+    persisted_incident = db_session.get(Incident, incident.id)
+    assert persisted_incident is not None
+    assert persisted_incident.version == 2
+    plans = db_session.scalars(
+        select(ResponsePlan).where(ResponsePlan.incident_id == incident.id)
+    ).all()
+    active = [
+        plan
+        for plan in plans
+        if plan.status in (ResponsePlanStatus.RECOMMENDED, ResponsePlanStatus.ALTERNATIVE)
+    ]
+    assert len(active) == 2
+    assert sum(plan.status == ResponsePlanStatus.RECOMMENDED for plan in plans) == 1
+    assert len({plan.metrics_json["phase04"]["candidate_set_id"] for plan in active}) == 1
+    assert len(db_session.scalars(
+        select(TimelineEvent).where(
+            TimelineEvent.incident_id == incident.id,
+            TimelineEvent.event_type == "PLAN_GENERATED",
+        )
+    ).all()) == 1
+
+
+def test_incident_correction_rejects_stale_candidate_generation(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    incident = persistence_incident(db_session)
+    configure_candidate_endpoint(monkeypatch)
+    captured = threading.Event()
+    resume = threading.Event()
+    generate = planning.generate_candidate_combinations
+
+    def blocked_generate(**kwargs: object):
+        captured.set()
+        assert resume.wait(timeout=5.0)
+        return generate(**kwargs)
+
+    monkeypatch.setattr(planning, "generate_candidate_combinations", blocked_generate)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(
+            lambda: TestClient(app).post(
+                f"/api/v1/incidents/{incident.id}/plans/generate-candidates"
+            )
+        )
+        assert captured.wait(timeout=5.0)
+        with TestClient(app) as client:
+            correction = client.patch(
+                f"/api/v1/incidents/{incident.id}/facts",
+                json={
+                    "expected_incident_version": 1,
+                    "operator_reference": "fix-003-concurrency-test",
+                    "location": {"lat": 30.001, "lon": 31.303},
+                },
+            )
+        resume.set()
+        generation = future.result(timeout=10.0)
+
+    assert correction.status_code == 200, correction.text
+    assert generation.status_code == 409, generation.text
+    db_session.expire_all()
+    persisted_incident = db_session.get(Incident, incident.id)
+    assert persisted_incident is not None
+    assert persisted_incident.version == 2
+    assert (persisted_incident.latitude, persisted_incident.longitude) == (30.001, 31.303)
+    assert persisted_incident.current_plan_id is None
+    assert db_session.scalars(
+        select(ResponsePlan).where(ResponsePlan.incident_id == incident.id)
+    ).all() == []
+
+
+def test_resource_mutation_rejects_stale_candidate_generation(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    incident = persistence_incident(db_session)
+    configure_candidate_endpoint(monkeypatch)
+    captured = threading.Event()
+    resume = threading.Event()
+    generate = planning.generate_candidate_combinations
+
+    def blocked_generate(**kwargs: object):
+        captured.set()
+        assert resume.wait(timeout=5.0)
+        return generate(**kwargs)
+
+    monkeypatch.setattr(planning, "generate_candidate_combinations", blocked_generate)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(
+            lambda: TestClient(app).post(
+                f"/api/v1/incidents/{incident.id}/plans/generate-candidates"
+            )
+        )
+        assert captured.wait(timeout=5.0)
+        with TestClient(app) as client:
+            mutation = client.patch(
+                "/api/v1/resources/resource-a/state",
+                json={
+                    "expected_resource_version": 1,
+                    "status": "OUT_OF_SERVICE",
+                    "operator_reference": "fix-003-concurrency-test",
+                },
+            )
+        resume.set()
+        generation = future.result(timeout=10.0)
+
+    assert mutation.status_code == 200, mutation.text
+    assert generation.status_code == 409, generation.text
+    db_session.expire_all()
+    resource = db_session.get(EmergencyResource, "resource-a")
+    persisted_incident = db_session.get(Incident, incident.id)
+    assert resource is not None
+    assert resource.version == 2
+    assert resource.status == ResourceStatus.OUT_OF_SERVICE
+    assert persisted_incident is not None
+    assert persisted_incident.current_plan_id is None
+    assert db_session.scalars(
+        select(ResponsePlan).where(ResponsePlan.incident_id == incident.id)
+    ).all() == []
+
+
+def test_phase04_candidate_generation_executes_reposition_before_ranking_and_persistence(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    graph = reposition_graph()
+    incident = Incident(
+        id=str(uuid.uuid4()),
+        version=1,
+        incident_type="traffic_collision",
+        severity=Severity.HIGH,
+        confidence_level=ConfidenceLevel.HIGH,
+        status=IncidentStatus.ACTIVE_UNCONFIRMED,
+        latitude=30.0,
+        longitude=31.305,
+        required_resources_json=[
+            {"resource_type": "AMBULANCE", "count": 1},
+            {"resource_type": "FIRE_RESCUE", "count": 1},
+        ],
+        provenance_json={"source": "operator_manual_entry", "data_reality": "SIMULATED"},
+    )
+    resources = [
+        EmergencyResource(
+            id=resource_id,
+            version=1,
+            name=resource_id,
+            resource_type=resource_type,
+            status=ResourceStatus.AVAILABLE,
+            latitude=30.0,
+            longitude=longitude,
+            capability_tags_json=[],
+            provenance_json={"source": "phase03_simulated_resource", "data_reality": "SIMULATED"},
+        )
+        for resource_id, resource_type, longitude in (
+            ("amb-dispatch", ResourceType.AMBULANCE, 31.300),
+            ("fire-dispatch", ResourceType.FIRE_RESCUE, 31.301),
+            ("amb-reserve", ResourceType.AMBULANCE, 31.302),
+            ("fire-reserve", ResourceType.FIRE_RESCUE, 31.303),
+        )
+    ]
+    db_session.add(incident)
+    db_session.add_all(resources)
+    db_session.commit()
+    resource_state = {
+        resource.id: (resource.status, resource.assigned_incident_id, resource.latitude, resource.longitude)
+        for resource in resources
+    }
+    graph_state = deepcopy(list(graph.edges(data=True, keys=True)))
+    calls = 0
+    real_simulate = planning.simulate_repositioning
+
+    def tracked_simulate(**kwargs: object):
+        nonlocal calls
+        calls += 1
+        return real_simulate(**kwargs)
+
+    monkeypatch.setattr(planning, "load_routing_graph", lambda: graph)
+    monkeypatch.setattr(planning, "load_population_zones", lambda _path: reposition_zones())
+    monkeypatch.setattr(planning.traffic_runtime, "capture_snapshot", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(planning, "simulate_repositioning", tracked_simulate)
+
+    with TestClient(app) as client:
+        response = client.post(f"/api/v1/incidents/{incident.id}/plans/generate-candidates")
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert calls == len(body)
+    selected = next(
+        plan for plan in body
+        if plan["metrics"]["phase04"].get("reposition_proposal")
+    )
+    proposal = selected["metrics"]["phase04"]["reposition_proposal"]
+    score = selected["score_breakdown"]
+    assert proposal["target_zone_id"] == "zone-target"
+    assert proposal["staging_zone_id"] == "zone-west"
+    assert proposal["repositioned_resource_id"] == "amb-reserve"
+    assert score["proposed_reposition_eta_seconds"] == proposal["reposition_eta_seconds"] == 600.0
+    assert score["reposition_penalty"] == pytest.approx(1.0)
+    assert score["weighted_terms"]["reposition"] == pytest.approx(0.05)
+    assert score["final_score"] == pytest.approx(sum(score["weighted_terms"].values()))
+    assert [plan["candidate_rank"] for plan in body] == list(range(len(body)))
+    assert [plan["score_breakdown"]["final_score"] for plan in body] == sorted(
+        plan["score_breakdown"]["final_score"] for plan in body
+    )
+    db_session.expire_all()
+    assert {
+        resource.id: (resource.status, resource.assigned_incident_id, resource.latitude, resource.longitude)
+        for resource in db_session.scalars(select(EmergencyResource)).all()
+    } == resource_state
+    assert list(graph.edges(data=True, keys=True)) == graph_state
