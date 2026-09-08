@@ -1071,3 +1071,42 @@ operator to resolve the ambiguity.
 A merged, cancelled, closed, or review-held incident cannot be revived or
 receive responders. Active and replanning states are unaffected, and the
 canonical incident of a merge remains fully plannable.
+
+## PD-066 - Deterministic Timeline Event Ordering
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner (post-audit hardening mission)
+
+### Decision
+
+`TimelineEvent.id` is a time-ordered UUIDv7 rather than a random UUID4. The
+identifier keeps the canonical 36-character UUID form and remains parseable as
+a UUID. The 12 bits after the millisecond timestamp carry a monotonic counter,
+so events created inside the same millisecond still order correctly, and a
+backwards clock step is absorbed rather than reissuing a lower identifier.
+
+Timeline reads continue to order by `created_at` then `id`.
+
+### Reason
+
+Timeline reads order by `created_at` then `id`, and wall-clock resolution is
+coarse enough that consecutive operator commands share a `created_at` value.
+With a random UUID4 tiebreak the audit trail was returned in arbitrary order:
+measured over 40 reproductions of an
+`ASSIGNED -> EN_ROUTE -> ON_SCENE -> TRANSPORTING` sequence, 8 runs produced a
+duplicate timestamp and 4 returned the events out of order, including
+`ON_SCENE` before `EN_ROUTE`.
+
+This is an auditability defect against Master Plan F16, which requires a
+traceable operational history, and it made an existing regression test
+intermittently fail once planning became fast enough for commands to land
+inside one clock tick.
+
+### Impact
+
+The operator timeline, and every audit consumer ordering by `created_at` then
+`id`, now reflects true insertion order. No schema migration is required
+because the column type and format are unchanged, and existing stored events
+keep working; only ordering among identically stamped events changes. No new
+dependency is introduced.

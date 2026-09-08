@@ -9,7 +9,7 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models import Incident, Report, ResponsePlan, TimelineEvent
+from app.models import Incident, Report, ResponsePlan, TimelineEvent, new_timeline_event_id
 from app.schemas import (
     DataReality,
     FreshnessStatus,
@@ -289,7 +289,7 @@ def create_manual_incident(
 
     # Initial timeline event for creation
     timeline_event = TimelineEvent(
-        id=str(uuid.uuid4()),
+        id=new_timeline_event_id(),
         incident_id=incident_id,
         event_type="INCIDENT_CREATED",
         details_json={
@@ -408,7 +408,7 @@ def create_incident_report(
     )
 
     timeline_event = TimelineEvent(
-        id=str(uuid.uuid4()),
+        id=new_timeline_event_id(),
         incident_id=incident_id,
         event_type="REPORT_CREATED",
         details_json={
@@ -524,7 +524,7 @@ def create_standalone_report(
 
     if payload.incident_id:
         timeline_event = TimelineEvent(
-            id=str(uuid.uuid4()),
+            id=new_timeline_event_id(),
             incident_id=payload.incident_id,
             event_type="REPORT_CREATED",
             details_json={
@@ -617,7 +617,7 @@ def transition_incident_lifecycle(
     incident.updated_at = now_utc
 
     timeline_event = TimelineEvent(
-        id=str(uuid.uuid4()),
+        id=new_timeline_event_id(),
         incident_id=incident.id,
         event_type="LIFECYCLE_TRANSITION",
         details_json={
@@ -899,7 +899,7 @@ def patch_incident_facts(
         event_details[field] = change_info
 
     timeline_event = TimelineEvent(
-        id=str(uuid.uuid4()),
+        id=new_timeline_event_id(),
         incident_id=incident.id,
         event_type="FACTS_CORRECTED",
         details_json=event_details,

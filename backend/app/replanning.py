@@ -19,7 +19,7 @@ from app.materiality import (
     build_replan_input_fingerprint,
     evaluate_replan_materiality,
 )
-from app.models import Incident, ReplanEvaluation, ResponsePlan, TimelineEvent
+from app.models import Incident, ReplanEvaluation, ResponsePlan, TimelineEvent, new_timeline_event_id
 from app.planning import evaluate_phase04_candidate_set, serialize_plan
 from app.schemas import (
     ReplanEvaluationRead,
@@ -325,7 +325,7 @@ def record_replan_trigger(
 
     db.add(
         TimelineEvent(
-            id=str(uuid.uuid4()),
+            id=new_timeline_event_id(),
             incident_id=incident.id,
             event_type="REPLAN_TRIGGER_RECORDED",
             details_json={

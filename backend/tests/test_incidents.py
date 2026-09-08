@@ -263,3 +263,61 @@ def test_no_ai_or_provider_call_involved(client: TestClient) -> None:
         response = client.post("/api/v1/intake/manual", json=payload)
         assert response.status_code == 201
         assert mock_url.call_count == 0
+
+
+def test_timeline_event_ids_are_time_ordered_and_valid_uuids() -> None:
+    """Audit event identifiers must sort by creation order.
+
+    Timeline reads order by created_at then id. Wall-clock resolution is coarse
+    enough that consecutive operator commands share a created_at value, so a
+    random identifier would return the audit trail in arbitrary order.
+    """
+    from app.models import new_timeline_event_id
+
+    generated = [new_timeline_event_id() for _ in range(2000)]
+
+    assert generated == sorted(generated), "identifiers must be monotonically ordered"
+    assert len(set(generated)) == len(generated), "identifiers must be unique"
+    for value in (generated[0], generated[-1]):
+        parsed = uuid.UUID(value)
+        assert str(parsed) == value
+        assert parsed.version == 7
+
+
+def test_incident_timeline_preserves_insertion_order_within_one_timestamp(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    """Events sharing an identical created_at must still read back in order."""
+    incident = Incident(
+        id=str(uuid.uuid4()),
+        version=1,
+        incident_type="traffic_collision",
+        severity=Severity.HIGH,
+        confidence_level=ConfidenceLevel.HIGH,
+        status=IncidentStatus.ACTIVE_UNCONFIRMED,
+        latitude=30.0561,
+        longitude=31.3452,
+        required_resources_json=[],
+        provenance_json={},
+    )
+    db_session.add(incident)
+    db_session.commit()
+
+    # Force the exact collision the coarse wall clock produces in production.
+    shared_timestamp = datetime.datetime(2026, 9, 8, tzinfo=datetime.timezone.utc)
+    expected = [f"STEP_{index:02d}" for index in range(12)]
+    for event_type in expected:
+        db_session.add(
+            TimelineEvent(
+                incident_id=incident.id,
+                event_type=event_type,
+                details_json={},
+                created_at=shared_timestamp,
+            )
+        )
+        db_session.commit()
+
+    response = client.get(f"/api/v1/incidents/{incident.id}/timeline")
+    assert response.status_code == 200, response.text
+    assert [event["event_type"] for event in response.json()] == expected

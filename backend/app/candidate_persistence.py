@@ -17,7 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.candidate_evaluation import EvaluatedCandidate
-from app.models import Incident, ReplanEvaluation, ResponsePlan, TimelineEvent
+from app.models import Incident, ReplanEvaluation, ResponsePlan, TimelineEvent, new_timeline_event_id
 from app.schemas import IncidentStatus, ResponsePlanStatus
 
 __all__ = ["persist_candidate_set", "persist_replacement_candidate_set"]
@@ -235,7 +235,7 @@ def persist_candidate_set(
     incident.updated_at = timestamp
     db.add(
         TimelineEvent(
-            id=str(uuid.uuid4()),
+            id=new_timeline_event_id(),
             incident_id=incident.id,
             event_type="PLAN_GENERATED",
             details_json={
@@ -358,7 +358,7 @@ def persist_replacement_candidate_set(
     evaluation.explanation_json = _json_safe(replan_metadata or {})
     db.add(
         TimelineEvent(
-            id=str(uuid.uuid4()),
+            id=new_timeline_event_id(),
             incident_id=incident.id,
             event_type="REPLAN_GENERATED",
             details_json={

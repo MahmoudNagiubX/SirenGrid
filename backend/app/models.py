@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import secrets
+import threading
+import time
 from typing import Any
 import uuid
 
@@ -42,7 +45,50 @@ __all__ = [
     "CorridorState",
     "DriverAlert",
     "ReplanEvaluation",
+    "new_timeline_event_id",
 ]
+
+
+_EVENT_ID_LOCK = threading.Lock()
+_EVENT_ID_LAST_MS = 0
+_EVENT_ID_COUNTER = 0
+_EVENT_ID_MAX_COUNTER = 0xFFF
+
+
+def new_timeline_event_id() -> str:
+    """Return a time-ordered UUIDv7 identifier for an audit timeline event.
+
+    Timeline reads order by ``created_at`` then ``id``. Wall-clock resolution
+    is coarse enough that consecutive operator commands can share a
+    ``created_at`` value, and a random UUID4 tiebreak then returns the audit
+    trail in arbitrary order. A UUIDv7 keeps the identifier a valid UUID while
+    making lexicographic order match insertion order.
+
+    The 12 bits after the millisecond timestamp hold a monotonic counter, so
+    events created inside one millisecond still order correctly. The counter
+    also absorbs a backwards clock step rather than reissuing a lower
+    identifier.
+    """
+    global _EVENT_ID_LAST_MS, _EVENT_ID_COUNTER
+    with _EVENT_ID_LOCK:
+        now_ms = time.time_ns() // 1_000_000
+        if now_ms > _EVENT_ID_LAST_MS:
+            _EVENT_ID_LAST_MS = now_ms
+            _EVENT_ID_COUNTER = 0
+        else:
+            _EVENT_ID_COUNTER += 1
+            if _EVENT_ID_COUNTER > _EVENT_ID_MAX_COUNTER:
+                _EVENT_ID_LAST_MS += 1
+                _EVENT_ID_COUNTER = 0
+        milliseconds = _EVENT_ID_LAST_MS
+        counter = _EVENT_ID_COUNTER
+
+    value = (milliseconds & 0xFFFF_FFFF_FFFF) << 80
+    value |= 0x7 << 76
+    value |= counter << 64
+    value |= 0b10 << 62
+    value |= secrets.randbits(62)
+    return str(uuid.UUID(int=value))
 
 
 class Incident(Base):
@@ -297,7 +343,7 @@ class TimelineEvent(Base):
     id: Mapped[str] = mapped_column(
         String(36),
         primary_key=True,
-        default=lambda: str(uuid.uuid4()),
+        default=new_timeline_event_id,
     )
     incident_id: Mapped[str] = mapped_column(String(36))
     event_type: Mapped[str] = mapped_column(String)
