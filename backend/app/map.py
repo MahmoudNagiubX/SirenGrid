@@ -280,10 +280,12 @@ def preview_route(request: RoutePreviewRequest) -> RoutePreviewResponse:
             detail=f"Failed to load routing graph: {exc}",
         ) from exc
 
-    # 1. Snap coordinates to graph with threshold
+    # 1. Validate both endpoints are inside the routable area. Only the
+    #    snapping failure matters here; the routing engine snaps again and
+    #    owns the resulting nodes.
     try:
-        origin_node, _ = snap_coordinate_to_graph(graph, request.origin)
-        dest_node, _ = snap_coordinate_to_graph(graph, request.destination)
+        snap_coordinate_to_graph(graph, request.origin)
+        snap_coordinate_to_graph(graph, request.destination)
     except RoutingPointOutsideGraphError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
