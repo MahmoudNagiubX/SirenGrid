@@ -92,6 +92,7 @@ class Settings(BaseModel):
     replan_route_edge_overlap_threshold: Literal[0.80] = 0.80
     replan_coverage_drop_trigger: Literal[0.05] = 0.05
     replan_debounce_seconds: Literal[5] = 5
+    simulation_controls_enabled: bool = False
 
     @field_validator("cors_origins")
     @classmethod
@@ -244,6 +245,10 @@ class Settings(BaseModel):
     def REPLAN_DEBOUNCE_SECONDS(self) -> int:
         return self.replan_debounce_seconds
 
+    @property
+    def SIMULATION_CONTROLS_ENABLED(self) -> bool:
+        return self.simulation_controls_enabled
+
 
 def get_settings() -> Settings:
     cors_raw = os.getenv("CORS_ORIGINS")
@@ -346,6 +351,10 @@ def get_settings() -> Settings:
             os.getenv("REPLAN_COVERAGE_DROP_TRIGGER", "0.05")
         ),
         replan_debounce_seconds=int(os.getenv("REPLAN_DEBOUNCE_SECONDS", "5")),
+        simulation_controls_enabled=os.getenv(
+            "SIMULATION_CONTROLS_ENABLED", "false"
+        ).lower()
+        in ("true", "1", "yes"),
     )
 
 
