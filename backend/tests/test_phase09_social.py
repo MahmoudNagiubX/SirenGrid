@@ -294,12 +294,60 @@ def test_operator_can_associate_social_signal_with_insufficient_context(
     current = db_session.get(Incident, incident["id"])
     assert current is not None
     assert current.casualty_count is None
+    assert current.current_plan_id is None
     assert any(
         event.event_type == "SOCIAL_SIGNAL_ASSOCIATED"
         for event in db_session.scalars(
             select(TimelineEvent).where(TimelineEvent.incident_id == incident["id"])
         )
     )
+
+
+def test_associated_social_claims_use_existing_operator_confirmation_path(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    incident = client.post("/api/v1/intake/manual", json=_incident_payload()).json()
+    refreshed = client.post(
+        "/api/v1/social/refresh",
+        json={"provider": "synthetic", "query": "accident Tayaran"},
+    )
+    signal = next(
+        item
+        for item in refreshed.json()["signals"]
+        if item["source_reference"] == "synthetic-near-collision"
+    )
+    associated = client.post(
+        f"/api/v1/social/signals/{signal['id']}/associate",
+        json={
+            "target_incident_id": incident["id"],
+            "expected_incident_version": 1,
+            "operator_reference": "social-reviewer",
+        },
+    )
+    assert associated.status_code == 200
+    current = db_session.get(Incident, incident["id"])
+    assert current is not None
+    assert current.casualty_count is None
+
+    claims = client.get(f"/api/v1/reports/{signal['id']}/claims")
+    assert claims.status_code == 200
+    casualty_claim = next(
+        claim for claim in claims.json()["claims"] if claim["field_name"] == "casualty_count"
+    )
+    resolved = client.post(
+        f"/api/v1/incidents/{incident['id']}/fact-claims/resolve",
+        json={
+            "expected_incident_version": 2,
+            "operator_reference": "social-fact-reviewer",
+            "field_name": "casualty_count",
+            "value": 2,
+            "selected_evidence_id": casualty_claim["evidence_id"],
+        },
+    )
+    assert resolved.status_code == 200, resolved.text
+    assert resolved.json()["incident"]["version"] == 3
+    assert resolved.json()["incident"]["casualty_count"] == 2
 
 
 def test_social_association_is_version_safe_and_idempotent(

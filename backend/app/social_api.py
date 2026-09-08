@@ -82,6 +82,16 @@ def _social_signal_payload(report: Report) -> dict[str, Any]:
     return data
 
 
+def _safe_provider_metadata(metadata: dict[str, Any]) -> dict[str, str]:
+    """Retain only small provider identifiers needed for audit/debugging."""
+    safe: dict[str, str] = {}
+    for key in ("cid", "fixture"):
+        value = metadata.get(key)
+        if isinstance(value, str) and value:
+            safe[key] = value[:300]
+    return safe
+
+
 def _create_social_report(db: Session, signal: NormalizedSocialSignal) -> Report:
     report_id = str(uuid.uuid4())
     evidence_id = f"social-evidence:{signal.provider_post_id}"
@@ -138,7 +148,7 @@ def _create_social_report(db: Session, signal: NormalizedSocialSignal) -> Report
         "normalized_keywords": list(signal.normalized_keywords),
         "location_clues": list(signal.location_clues),
         "unknown_fields": list(signal.unknown_fields),
-        "provider_metadata": signal.provider_metadata,
+        "provider_metadata": _safe_provider_metadata(signal.provider_metadata),
         "normalization_policy": SOCIAL_NORMALIZATION_VERSION,
         "social_signal": {
             "provider": signal.provider,
@@ -315,12 +325,11 @@ def list_social_signals(
     stmt = (
         select(Report)
         .where(Report.source_type == SOCIAL_SOURCE_TYPE)
-        .order_by(Report.created_at.desc(), Report.id.asc())
-        .limit(limit)
     )
-    reports = db.scalars(stmt).all()
     if state:
-        reports = [report for report in reports if report.processing_status == state]
+        stmt = stmt.where(Report.processing_status == state)
+    stmt = stmt.order_by(Report.created_at.desc(), Report.id.asc()).limit(limit)
+    reports = db.scalars(stmt).all()
     return {"signals": [_social_signal_payload(report) for report in reports]}
 
 
