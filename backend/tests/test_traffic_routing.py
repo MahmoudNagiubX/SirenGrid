@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import networkx as nx
 import pytest
@@ -76,6 +76,7 @@ def make_snapshot(
     *,
     freshness: FreshnessStatus = FreshnessStatus.LIVE,
     failure_reason: str | None = None,
+    retrieved_at: datetime = NOW,
 ) -> TrafficSnapshot:
     snapshot_id = "snapshot-1"
     fingerprint = graph_fingerprint(graph)
@@ -86,7 +87,7 @@ def make_snapshot(
         sample_points_fingerprint="sample-fingerprint",
         provider_state=TrafficProviderState.AVAILABLE,
         refresh_attempted_at=NOW,
-        retrieved_at=NOW,
+        retrieved_at=retrieved_at,
         freshness_status=freshness,
         source="TomTom Traffic Flow Segment Data",
         source_reference=f"traffic-flow-snapshot:{snapshot_id}",
@@ -204,6 +205,23 @@ def test_stale_snapshot_falls_back_to_independent_base_route() -> None:
     assert result.routing_source == ROUTING_SOURCE_OSM_BASE_TRAVEL_TIME
     assert result.traffic_fallback_reason == "TOMTOM_SNAPSHOT_STALE"
     assert result.matched_traversed_edge_count == 0
+
+
+def test_future_timestamp_snapshot_cannot_weight_routing() -> None:
+    graph = two_path_graph()
+    snapshot = make_snapshot(
+        graph,
+        (traffic_entry(("a", "d", "0"), factor=4),),
+        freshness=FreshnessStatus.UNKNOWN,
+        failure_reason="TOMTOM_SNAPSHOT_TIMESTAMP_IN_FUTURE",
+        retrieved_at=NOW + timedelta(seconds=1),
+    )
+
+    result = compute_traffic_aware_route(graph, ORIGIN, DESTINATION, snapshot)
+
+    assert result.nodes == ["a", "d"]
+    assert result.routing_source == ROUTING_SOURCE_OSM_BASE_TRAVEL_TIME
+    assert result.traffic_fallback_reason == "TOMTOM_SNAPSHOT_TIMESTAMP_IN_FUTURE"
 
 
 def test_graph_fingerprint_mismatch_falls_back_without_using_overlay() -> None:

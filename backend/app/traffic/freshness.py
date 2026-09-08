@@ -24,7 +24,7 @@ def evaluate_freshness_origin(
     if now.tzinfo is None or now.utcoffset() is None:
         raise ValueError("freshness evaluation time must be timezone-aware")
     if now < origin:
-        raise ValueError("freshness origin is later than evaluation time")
+        return FreshnessStatus.UNKNOWN
 
     age_seconds = (now - origin).total_seconds()
     if age_seconds <= settings.TOMTOM_REFRESH_INTERVAL_SECONDS:

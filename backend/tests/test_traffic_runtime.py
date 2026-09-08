@@ -61,6 +61,26 @@ def make_observation(retrieved_at: datetime = T0) -> TrafficObservation:
     )
 
 
+def make_observation_with_provider_timestamp(
+    retrieved_at: datetime,
+    provider_last_updated: datetime,
+) -> TrafficObservation:
+    return TrafficObservation(
+        observation_id="obs-future-provider",
+        sample_id="tayaran",
+        frc="FRC2",
+        current_speed_kph=35,
+        free_flow_speed_kph=70,
+        current_travel_time_s=20,
+        free_flow_travel_time_s=10,
+        confidence=0.90,
+        road_closure=False,
+        coordinates=((31.3300, 30.06005), (31.3310, 30.06005)),
+        retrieved_at=retrieved_at,
+        provider_last_updated=provider_last_updated,
+    )
+
+
 def make_result(
     state: TrafficProviderState,
     *,
@@ -108,7 +128,7 @@ def make_runtime(client: FakeTomTomClient) -> TrafficRuntime:
     )
 
 
-def test_capture_snapshot_uses_provider_completion_time_for_freshness() -> None:
+def test_future_provider_completion_time_is_not_classified_as_live() -> None:
     client = FakeTomTomClient(
         [make_result(TrafficProviderState.AVAILABLE, observations=(make_observation(),))]
     )
@@ -124,7 +144,8 @@ def test_capture_snapshot_uses_provider_completion_time_for_freshness() -> None:
 
     assert snapshot.refresh_attempted_at == T0
     assert snapshot.retrieved_at == retrieval_time
-    assert snapshot.freshness_status is FreshnessStatus.LIVE
+    assert snapshot.freshness_status is FreshnessStatus.UNKNOWN
+    assert snapshot.failure_reason == "TOMTOM_SNAPSHOT_TIMESTAMP_IN_FUTURE"
 
 
 def test_failed_refresh_is_not_retried_inside_sixty_seconds() -> None:
@@ -255,6 +276,76 @@ def test_current_snapshot_recomputes_stale_status_without_refreshing() -> None:
     assert current is not None
     assert current.freshness_status is FreshnessStatus.STALE
     assert client.refresh_count == 1
+
+
+def test_cached_refresh_clock_rollback_degrades_without_refreshing() -> None:
+    client = FakeTomTomClient(
+        [make_result(TrafficProviderState.AVAILABLE, observations=(make_observation(),))]
+    )
+    runtime = make_runtime(client)
+    first = runtime.capture_snapshot(
+        make_graph(), now=T0, wall_clock=lambda: T0, monotonic=lambda: 1.0
+    )
+
+    current = runtime.capture_snapshot(
+        make_graph(),
+        now=T0 - timedelta(seconds=1),
+        wall_clock=lambda: T0 - timedelta(seconds=1),
+        monotonic=lambda: 2.0,
+    )
+
+    assert current.snapshot_id == first.snapshot_id
+    assert current.freshness_status is FreshnessStatus.UNKNOWN
+    assert current.failure_reason == "TOMTOM_SNAPSHOT_TIMESTAMP_IN_FUTURE"
+    assert client.refresh_count == 1
+
+
+def test_future_retrieval_degrades_successful_snapshot() -> None:
+    future = T0 + timedelta(seconds=1)
+    client = FakeTomTomClient(
+        [make_result(TrafficProviderState.AVAILABLE, observations=(make_observation(),))]
+    )
+    runtime = make_runtime(client)
+
+    snapshot = runtime.capture_snapshot(
+        make_graph(), now=T0, wall_clock=lambda: future, monotonic=lambda: 1.0
+    )
+
+    assert snapshot.retrieved_at == future
+    assert snapshot.freshness_status is FreshnessStatus.UNKNOWN
+    assert snapshot.failure_reason == "TOMTOM_SNAPSHOT_TIMESTAMP_IN_FUTURE"
+
+    caught_up = runtime.current_snapshot(now=future)
+
+    assert caught_up is not None
+    assert caught_up.freshness_status is FreshnessStatus.LIVE
+    assert caught_up.failure_reason is None
+
+
+def test_future_provider_timestamp_degrades_successful_snapshot() -> None:
+    future_retrieval = T0 + timedelta(seconds=2)
+    future_provider = T0 + timedelta(seconds=1)
+    client = FakeTomTomClient(
+        [
+            make_result(
+                TrafficProviderState.AVAILABLE,
+                observations=(
+                    make_observation_with_provider_timestamp(
+                        future_retrieval, future_provider
+                    ),
+                ),
+            )
+        ]
+    )
+    runtime = make_runtime(client)
+
+    snapshot = runtime.capture_snapshot(
+        make_graph(), now=T0, wall_clock=lambda: future_retrieval, monotonic=lambda: 1.0
+    )
+
+    assert snapshot.provider_last_updated == future_provider
+    assert snapshot.freshness_status is FreshnessStatus.UNKNOWN
+    assert snapshot.failure_reason == "TOMTOM_SNAPSHOT_TIMESTAMP_IN_FUTURE"
 
 
 def test_sample_loader_failure_is_visible_and_does_not_call_provider() -> None:
