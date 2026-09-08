@@ -914,3 +914,89 @@ exposed unrestricted on a public deployment.
 
 This Phase 08 coding run is backend, benchmark, and demo-control only. No
 frontend framework or benchmark UI is selected or implemented.
+
+## PD-062 - Phase 09 Public Social Provider Policy
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner
+
+Phase 09 uses the unauthenticated Bluesky Public API as its primary public
+provider and a deterministic synthetic provider for repeatable demo and test
+operation. The optional X adapter remains disabled without `X_BEARER_TOKEN`
+and is not required for Phase 09. No private-content access, browser
+scraping, login-cookie automation, or other social provider is approved.
+Social results are unverified external intelligence and cannot independently
+activate dispatch or mutate operational decisions.
+
+## PD-063 - Phase 09 Social Association Authority
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner
+
+Refresh creates an unverified social signal and deterministic association
+evaluation only. Attachment to an incident requires an explicit,
+version-safe operator action. The operator may attach a signal when context is
+insufficient, but association does not project social claims into incident
+truth or mutate resources, plans, or dispatch. Confirmed facts continue through
+the Phase 06 operator confirmation path.
+
+## PD-064 - Phase 09 Possible New Incident State
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner
+
+`POSSIBLE_NEW_INCIDENT` is a review state only. A social signal never creates
+an Incident row automatically. The operator uses the existing control-room
+manual intake path when a new incident is confirmed.
+
+## PD-065 - Phase 09 Social Geography
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner
+
+Social refresh uses bounded Arabic/English emergency and Nasr City
+keyword/location-clue filtering. Only explicitly supplied trusted provider
+coordinates are retained as coordinates. Vague location text remains a clue
+with unknown coordinates; Phase 09 does not introduce a geocoder and does not
+discard useful signals solely because they lack precise coordinates.
+
+## PD-066 - Phase 09 Social Retention and Privacy
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner
+
+Social signals reuse the append-only Report/Evidence path and retain only
+minimal normalized public content: provider/post identity, bounded review
+text, safe public reference, timestamps, location clues, provenance/reality,
+review state, and bounded safe metadata. Dismissal changes review state but
+does not erase audit history. Profile histories, follower graphs, private
+content, unnecessary personal data, and archival media downloads are not
+stored.
+
+## PD-067 - Phase 09 Social Claims
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner
+
+Only conservative deterministic claims explicitly supported by social text may
+be generated. Claims are immutable, unverified evidence claims and require
+operator confirmation before changing material incident facts. Missing facts
+remain unknown. No new LLM dependency or unsupported inference is permitted.
+
+## PD-068 - Phase 09 Live Traffic Demo Truth
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner
+
+The hackathon demo prefers a valid current TomTom snapshot when
+`TOMTOM_API_KEY` and network access are available. Existing truthful fallback
+behavior remains mandatory, tests must not depend on live TomTom, and fallback
+must never be labeled `REAL_LIVE`. Phase 09 may only verify or minimally fix
+this existing Phase 02 behavior; it must not redesign the traffic subsystem.

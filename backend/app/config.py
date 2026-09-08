@@ -70,6 +70,9 @@ class Settings(BaseModel):
     phase06_max_audio_upload_bytes: Literal[15728640] = 15 * 1024 * 1024
     phase06_max_image_upload_bytes: Literal[10485760] = 10 * 1024 * 1024
     phase06_media_dir: Path = Field(default_factory=lambda: DEFAULT_PHASE06_MEDIA_DIR)
+    social_bluesky_api_url: str = "https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts"
+    social_provider_timeout_seconds: int = Field(default=10, ge=1, le=30)
+    social_max_results: int = Field(default=25, ge=1, le=50)
     nasr_city_data_dir: Path = Field(default_factory=lambda: DEFAULT_DATA_DIR)
     tomtom_api_key: str | None = Field(default=None, exclude=True)
     tomtom_refresh_interval_seconds: Literal[60] = 60
@@ -171,6 +174,18 @@ class Settings(BaseModel):
     @property
     def NASR_CITY_DATA_DIR(self) -> Path:
         return self.nasr_city_data_dir
+
+    @property
+    def SOCIAL_BLUESKY_API_URL(self) -> str:
+        return self.social_bluesky_api_url
+
+    @property
+    def SOCIAL_PROVIDER_TIMEOUT_SECONDS(self) -> int:
+        return self.social_provider_timeout_seconds
+
+    @property
+    def SOCIAL_MAX_RESULTS(self) -> int:
+        return self.social_max_results
 
     @property
     def TOMTOM_API_KEY(self) -> str | None:
@@ -302,6 +317,14 @@ def get_settings() -> Settings:
         phase06_media_dir=Path(
             os.getenv("PHASE06_MEDIA_DIR", str(DEFAULT_PHASE06_MEDIA_DIR))
         ).resolve(),
+        social_bluesky_api_url=os.getenv(
+            "SOCIAL_BLUESKY_API_URL",
+            "https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts",
+        ),
+        social_provider_timeout_seconds=int(
+            os.getenv("SOCIAL_PROVIDER_TIMEOUT_SECONDS", "10")
+        ),
+        social_max_results=int(os.getenv("SOCIAL_MAX_RESULTS", "25")),
         nasr_city_data_dir=nasr_city_data_dir,
         tomtom_api_key=os.getenv("TOMTOM_API_KEY") or None,
         tomtom_refresh_interval_seconds=int(
