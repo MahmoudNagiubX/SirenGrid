@@ -114,3 +114,103 @@ def compare_metric_change(
     else:
         result["median_percent_change"] = None
     return result
+
+
+def aggregate_raw_engine_results(
+    raw_results: Iterable[dict[str, object]],
+    engine: str,
+) -> dict[str, object]:
+    """Aggregate serialized scenario results without filling missing values."""
+    key = engine.casefold()
+    entries = [
+        result[key]
+        for result in raw_results
+        if isinstance(result.get(key), dict)
+    ]
+    outcomes = Counter(
+        str(entry.get("outcome")) for entry in entries if entry.get("outcome")
+    )
+
+    def values(path: tuple[str, ...]) -> list[float]:
+        found: list[float] = []
+        for entry in entries:
+            current: object = entry
+            for part in path:
+                if not isinstance(current, dict):
+                    current = None
+                    break
+                current = current.get(part)
+            if isinstance(current, (int, float)) and not isinstance(current, bool):
+                found.append(float(current))
+        return found
+
+    aggregate: dict[str, object] = {
+        "count": len(entries),
+        "outcome_counts": dict(sorted(outcomes.items())),
+    }
+    for field_name, path in (
+        ("incident_eta_seconds", ("incident_eta_seconds",)),
+        (
+            "baseline_population_weighted_coverage",
+            ("baseline_joint", "population_weighted_coverage"),
+        ),
+        (
+            "post_dispatch_population_weighted_coverage",
+            ("post_dispatch_joint", "population_weighted_coverage"),
+        ),
+        (
+            "post_dispatch_undercovered_zone_count",
+            ("post_dispatch_joint", "undercovered_zone_count"),
+        ),
+        (
+            "post_dispatch_unreachable_zone_count",
+            ("post_dispatch_joint", "unreachable_zone_count"),
+        ),
+    ):
+        aggregate[field_name] = _stats(values(path))
+    hospital_statuses = Counter(
+        str(hospital.get("status"))
+        for entry in entries
+        if isinstance(hospital := entry.get("hospital"), dict)
+        and hospital.get("status")
+    )
+    aggregate["hospital_status_counts"] = dict(sorted(hospital_statuses.items()))
+    aggregate["hospital_eta_seconds"] = _stats(
+        value
+        for entry in entries
+        if isinstance(hospital := entry.get("hospital"), dict)
+        and isinstance(route := hospital.get("route"), dict)
+        and isinstance(value := route.get("eta_seconds"), (int, float))
+        and not isinstance(value, bool)
+    )
+    replan_statuses = Counter(
+        str(replan.get("status"))
+        for entry in entries
+        if isinstance(replan := entry.get("replan"), dict)
+        and replan.get("status")
+    )
+    aggregate["replan_status_counts"] = dict(sorted(replan_statuses.items()))
+    aggregate["replan_eta_delta_seconds"] = _stats(
+        value
+        for entry in entries
+        if isinstance(replan := entry.get("replan"), dict)
+        and isinstance(value := replan.get("eta_delta_seconds"), (int, float))
+        and not isinstance(value, bool)
+    )
+    return aggregate
+
+
+def performance_aggregate(
+    raw_results: Iterable[dict[str, object]],
+    engine: str,
+) -> dict[str, object]:
+    """Aggregate retained wall-clock samples for one performance engine."""
+    key = engine.casefold()
+    values: list[float] = []
+    for result in raw_results:
+        timing = result.get("wall_clock_seconds")
+        if isinstance(timing, dict):
+            value = timing.get(key)
+            if isinstance(value, (int, float)):
+                values.append(float(value))
+    return _stats(values)

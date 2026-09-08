@@ -4,7 +4,9 @@ from collections import Counter, defaultdict
 import hashlib
 import json
 import math
+from threading import RLock
 from typing import Any, Iterable
+from weakref import WeakKeyDictionary
 
 import networkx as nx
 from pyproj import Transformer
@@ -22,6 +24,9 @@ from app.traffic.models import (
     TrafficOverlay,
     TrafficOverlayEntry,
 )
+
+_GRAPH_FINGERPRINT_LOCK = RLock()
+_GRAPH_FINGERPRINT_CACHE: WeakKeyDictionary[nx.Graph, str] = WeakKeyDictionary()
 
 
 def _stable_value(value: Any) -> Any:
@@ -42,6 +47,10 @@ def _stable_value(value: Any) -> Any:
 
 def graph_fingerprint(graph: nx.Graph) -> str:
     """Hash graph truth deterministically without altering graph state."""
+    with _GRAPH_FINGERPRINT_LOCK:
+        cached = _GRAPH_FINGERPRINT_CACHE.get(graph)
+    if cached is not None:
+        return cached
     nodes = [
         (str(node), _stable_value(attrs))
         for node, attrs in graph.nodes(data=True)
@@ -71,7 +80,10 @@ def graph_fingerprint(graph: nx.Graph) -> str:
         sort_keys=True,
         separators=(",", ":"),
     ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
+    fingerprint = hashlib.sha256(encoded).hexdigest()
+    with _GRAPH_FINGERPRINT_LOCK:
+        _GRAPH_FINGERPRINT_CACHE[graph] = fingerprint
+    return fingerprint
 
 
 def _iter_edges(graph: nx.Graph) -> Iterable[tuple[Any, Any, Any, dict[str, Any]]]:

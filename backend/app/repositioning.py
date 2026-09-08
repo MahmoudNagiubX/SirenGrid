@@ -181,6 +181,8 @@ def _route_to_staging(
     resource: CandidateResource,
     staging_zone: CoverageZone,
     traffic_snapshot: TrafficSnapshot | None,
+    *,
+    include_alternatives: bool = True,
 ) -> TrafficAwareRouteResult | None:
     try:
         return compute_traffic_aware_route(
@@ -188,6 +190,7 @@ def _route_to_staging(
             resource.coordinate,
             staging_zone.centroid,
             traffic_snapshot,
+            include_alternatives=include_alternatives,
         )
     except (RouteNotFoundError, RoutingPointOutsideGraphError, ValueError):
         return None
@@ -309,6 +312,7 @@ def simulate_repositioning(
     modeled_at: datetime,
     travel_times_cache: dict[tuple[Any, ...], Any] | None = None,
     zone_nodes_cache: dict[tuple[Any, ...], Any] | None = None,
+    include_route_alternatives: bool = True,
 ) -> RepositioningSimulation:
     """Evaluate bounded reserve-to-adjacent-zone moves without operational mutation."""
     zones_tuple = tuple(zones)
@@ -366,7 +370,11 @@ def simulate_repositioning(
             for resource in eligible_reserves:
                 for staging in staging_zones:
                     route = _route_to_staging(
-                        graph, resource, staging, traffic_snapshot
+                        graph,
+                        resource,
+                        staging,
+                        traffic_snapshot,
+                        include_alternatives=include_route_alternatives,
                     )
                     if route is not None:
                         route_options.setdefault(resource.resource_id, {})[

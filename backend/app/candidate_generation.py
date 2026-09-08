@@ -129,6 +129,7 @@ def generate_candidate_combinations(
     requirements: Iterable[ResponseRequirement],
     traffic_snapshot: TrafficSnapshot | None,
     incident_id: str | None = None,
+    include_route_alternatives: bool = True,
 ) -> CandidateGenerationResult:
     """Return bounded feasible combinations without mutating resources or graph.
 
@@ -157,6 +158,7 @@ def generate_candidate_combinations(
                         resource.coordinate,
                         incident_coordinate,
                         traffic_snapshot,
+                        include_alternatives=include_route_alternatives,
                     )
                 except (RouteNotFoundError, RoutingPointOutsideGraphError, ValueError):
                     route = None

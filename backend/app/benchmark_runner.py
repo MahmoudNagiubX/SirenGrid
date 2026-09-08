@@ -6,6 +6,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import time
 from typing import Any, Iterable
 
 import networkx as nx
@@ -14,6 +15,7 @@ from app.benchmark_baseline import (
     BaselineInsufficientResourcesError,
     BaselineSelection,
     choose_greedy_baseline_resources,
+    choose_nearest_baseline_hospital,
 )
 from app.benchmark_scenarios import (
     BenchmarkManifest,
@@ -32,10 +34,22 @@ from app.candidate_generation import (
 )
 from app.config import REPO_ROOT, settings
 from app.coverage import CoverageZone, JointCoverageSnapshot, CoverageSnapshot, load_population_zones
+from app.hospitals import (
+    HospitalOperationalSnapshot,
+    HospitalRouteCandidate,
+    load_static_hospitals,
+    rank_hospital_candidates,
+)
 from app.models import Incident
 from app.planning import evaluate_phase04_candidate_set
+from app.materiality import evaluate_replan_materiality
 from app.schemas import ConfidenceLevel, DataReality, IncidentStatus, ResourceStatus
-from app.routing import load_routing_graph
+from app.routing import (
+    RouteNotFoundError,
+    RoutingPointOutsideGraphError,
+    compute_traffic_aware_route,
+    load_routing_graph,
+)
 
 
 DEFAULT_PHASE08_POPULATION_ZONES = (
@@ -56,6 +70,8 @@ class EngineRunResult:
     post_dispatch_joint: JointCoverageSnapshot | None = None
     score: dict[str, Any] | None = None
     reposition_proposal: dict[str, Any] | None = None
+    hospital: dict[str, Any] | None = None
+    replan: dict[str, Any] | None = None
     error: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -69,6 +85,8 @@ class EngineRunResult:
             "post_dispatch_joint": _joint_snapshot_to_dict(self.post_dispatch_joint),
             "score": self.score,
             "reposition_proposal": self.reposition_proposal,
+            "hospital": self.hospital,
+            "replan": self.replan,
             "error": self.error,
         }
 
@@ -212,6 +230,194 @@ def _error_result(engine: str, error: Exception) -> EngineRunResult:
     )
 
 
+def _hospital_state_to_dict(state: HospitalOperationalSnapshot) -> dict[str, Any]:
+    return {
+        "hospital_id": state.hospital_id,
+        "accepting_state": state.accepting_state,
+        "simulated_load_ratio": state.simulated_load_ratio,
+        "simulated_free_capacity": state.simulated_free_capacity,
+        "incoming_cases": state.incoming_cases,
+        "freshness_status": state.freshness_status,
+        "data_reality": state.data_reality,
+        "last_updated": state.last_updated,
+        "source": state.source,
+    }
+
+
+def _hospital_result(
+    *,
+    graph: nx.Graph,
+    resources: tuple[CandidateResource, ...],
+    scenario: BenchmarkScenario,
+    primary: EngineRunResult,
+    traffic_snapshot: Any,
+    engine: str,
+) -> dict[str, Any] | None:
+    """Measure hospital choice using the same static and routing inputs.
+
+    Hospital operational state is deliberately unknown unless a scenario later
+    supplies an explicit fixture.  This keeps the benchmark from turning
+    missing public facts into fabricated live capacity or acceptance state.
+    """
+    if scenario.incident.transport_required is False:
+        return {"status": "NOT_APPLICABLE", "data_reality": "SIMULATED"}
+    if scenario.incident.transport_required is None:
+        return {
+            "status": "REQUIRES_REVIEW",
+            "reason": "TRANSPORT_REQUIREMENT_UNKNOWN",
+            "data_reality": "SIMULATED",
+        }
+    if primary.outcome != "PLAN_GENERATED" or not primary.resource_ids:
+        return {"status": "NOT_AVAILABLE", "reason": "NO_TRANSPORT_ORIGIN"}
+
+    resources_by_id = {resource.resource_id: resource for resource in resources}
+    origin_resource = resources_by_id.get(primary.resource_ids[0])
+    if origin_resource is None:
+        return {"status": "NOT_AVAILABLE", "reason": "ORIGIN_RESOURCE_NOT_FOUND"}
+    hospitals = load_static_hospitals()
+    states = {
+        hospital.id: HospitalOperationalSnapshot.unknown(hospital.id)
+        for hospital in hospitals
+    }
+    origin = origin_resource.coordinate
+    if engine == "BASELINE":
+        selected = choose_nearest_baseline_hospital(
+            graph=graph,
+            origin=origin,
+            required_capabilities=tuple(
+                scenario.incident.required_hospital_capabilities
+            ),
+            traffic_snapshot=traffic_snapshot,
+            hospitals=hospitals,
+            operational_states=states,
+            include_route_alternatives=False,
+        )
+        if selected is None:
+            return {"status": "NOT_AVAILABLE", "reason": "NO_REACHABLE_HOSPITAL"}
+        return {
+            "status": "SELECTED",
+            "hospital_id": selected.hospital.id,
+            "route": selected.route,
+            "score": None,
+            "score_breakdown": {},
+            "operational_state": _hospital_state_to_dict(selected.operational_state),
+            "selection_policy": "BASELINE_NEAREST_FEASIBLE_HOSPITAL_V1",
+            "data_reality": "REAL_DERIVED",
+        }
+
+    candidates: list[HospitalRouteCandidate] = []
+    for hospital in hospitals:
+        try:
+            route = compute_traffic_aware_route(
+                graph,
+                origin,
+                type(origin)(lat=hospital.latitude, lon=hospital.longitude),
+                traffic_snapshot,
+                include_alternatives=False,
+            )
+        except (RouteNotFoundError, RoutingPointOutsideGraphError, ValueError):
+            continue
+        candidates.append(
+            HospitalRouteCandidate(
+                hospital=hospital,
+                operational_state=states[hospital.id],
+                route=route.model_dump(mode="json"),
+            )
+        )
+    ranked = rank_hospital_candidates(
+        candidates,
+        required_capabilities=tuple(scenario.incident.required_hospital_capabilities),
+    )
+    if not ranked:
+        return {"status": "NOT_AVAILABLE", "reason": "NO_REACHABLE_HOSPITAL"}
+    selected = ranked[0]
+    return {
+        "status": "SELECTED",
+        "hospital_id": selected.hospital.id,
+        "route": selected.route,
+        "score": selected.score,
+        "score_breakdown": selected.score_breakdown,
+        "operational_state": _hospital_state_to_dict(selected.operational_state),
+        "selection_policy": "SIRENGRID_PROTOTYPE_HOSPITAL_SCORE_V1",
+        "data_reality": "REAL_DERIVED",
+    }
+
+
+def _replan_result(
+    *,
+    graph: nx.Graph,
+    resources: tuple[CandidateResource, ...],
+    scenario: BenchmarkScenario,
+    primary: EngineRunResult,
+    traffic_snapshot: Any,
+) -> dict[str, Any] | None:
+    """Compare a fixed current traffic state with the approved base route.
+
+    This is a measurement-only replan check.  It does not persist a
+    replacement plan or mutate an operational resource; the production
+    ``evaluate_replan_materiality`` policy remains the authority for the
+    material/no-material result.
+    """
+    if primary.outcome != "PLAN_GENERATED" or not primary.resource_ids:
+        return None
+    resource = next(
+        (item for item in resources if item.resource_id == primary.resource_ids[0]),
+        None,
+    )
+    if resource is None:
+        return None
+    try:
+        old_route = compute_traffic_aware_route(
+            graph,
+            resource.coordinate,
+            scenario.incident.coordinate,
+            None,
+            include_alternatives=False,
+        )
+    except (RouteNotFoundError, RoutingPointOutsideGraphError, ValueError) as exc:
+        return {
+            "status": "NO_MATERIAL_CHANGE",
+            "reason": "BASE_ROUTE_UNAVAILABLE",
+            "error": str(exc),
+        }
+    new_eta = primary.incident_eta_seconds
+    old_keys = {tuple(edge) for edge in old_route.edge_keys}
+    new_keys = {
+        tuple(edge)
+        for route in primary.routes
+        for edge in route.get("edge_keys", [])
+    }
+    overlap = len(old_keys.intersection(new_keys)) / len(old_keys) if old_keys else None
+    closure_keys = {
+        tuple(entry.edge_key)
+        for entry in (traffic_snapshot.overlay.entries if traffic_snapshot and traffic_snapshot.overlay else ())
+        if entry.road_closure
+    }
+    materiality = evaluate_replan_materiality(
+        old_eta_seconds=old_route.effective_eta,
+        new_eta_seconds=new_eta,
+        route_edge_overlap_ratio=overlap,
+        active_route_closure=bool(old_keys.intersection(closure_keys)),
+    )
+    delta = new_eta - old_route.effective_eta if new_eta is not None else None
+    return {
+        "status": "MATERIAL" if materiality.material else "NO_MATERIAL_CHANGE",
+        "materiality_policy_version": "SIRENGRID_REPLAN_MATERIALITY_V1",
+        "reasons": list(materiality.reasons),
+        "previous_eta_seconds": old_route.effective_eta,
+        "proposed_eta_seconds": new_eta,
+        "eta_delta_seconds": delta,
+        "route_edge_overlap_ratio": overlap,
+        "traffic_snapshot_id": traffic_snapshot.snapshot_id if traffic_snapshot else None,
+        "traffic_freshness_status": (
+            traffic_snapshot.freshness_status.value
+            if traffic_snapshot is not None
+            else "UNKNOWN"
+        ),
+        "data_reality": "DERIVED_FROM_FIXED_BENCHMARK_INPUTS",
+    }
+
+
 def _baseline_result(
     *,
     graph: nx.Graph,
@@ -229,6 +435,7 @@ def _baseline_result(
             resources=resources,
             requirements=scenario.incident.response_requirements(),
             traffic_snapshot=traffic_snapshot,
+            include_route_alternatives=False,
         )
     except BaselineInsufficientResourcesError as exc:
         return _error_result("BASELINE", exc)
@@ -249,7 +456,7 @@ def _baseline_result(
         travel_times_cache=travel_times_cache,
         zone_nodes_cache=zone_nodes_cache,
     )
-    return EngineRunResult(
+    result = EngineRunResult(
         engine="BASELINE",
         outcome="PLAN_GENERATED",
         resource_ids=selection.resource_ids,
@@ -257,6 +464,24 @@ def _baseline_result(
         routes=tuple(choice.route.model_dump(mode="json") for choice in selection.choices),
         baseline_joint=evaluated.metrics.baseline_joint,
         post_dispatch_joint=evaluated.metrics.post_dispatch_joint,
+    )
+    return replace(
+        result,
+        hospital=_hospital_result(
+            graph=graph,
+            resources=resources,
+            scenario=scenario,
+            primary=result,
+            traffic_snapshot=traffic_snapshot,
+            engine="BASELINE",
+        ),
+        replan=_replan_result(
+            graph=graph,
+            resources=resources,
+            scenario=scenario,
+            primary=result,
+            traffic_snapshot=traffic_snapshot,
+        ),
     )
 
 
@@ -305,13 +530,14 @@ def _sirengrid_result(
                 resources_override=resources,
                 travel_times_cache=travel_times_cache,
                 zone_nodes_cache=zone_nodes_cache,
+                include_route_alternatives=False,
             )
         )
     except (NoFeasibleCandidateError, ValueError) as exc:
         return _error_result("SIRENGRID", exc)
     selected = ranked[0]
     proposal = reposition_proposals.get(selected.combination.resource_ids)
-    return EngineRunResult(
+    result = EngineRunResult(
         engine="SIRENGRID",
         outcome="PLAN_GENERATED",
         resource_ids=selected.combination.resource_ids,
@@ -324,6 +550,24 @@ def _sirengrid_result(
         post_dispatch_joint=selected.metrics.post_dispatch_joint,
         score=_score_to_dict(selected.score),
         reposition_proposal=_reposition_to_dict(proposal),
+    )
+    return replace(
+        result,
+        hospital=_hospital_result(
+            graph=graph,
+            resources=resources,
+            scenario=scenario,
+            primary=result,
+            traffic_snapshot=traffic_snapshot,
+            engine="SIRENGRID",
+        ),
+        replan=_replan_result(
+            graph=graph,
+            resources=resources,
+            scenario=scenario,
+            primary=result,
+            traffic_snapshot=traffic_snapshot,
+        ),
     )
 
 
@@ -415,6 +659,7 @@ class Phase08ScenarioRunner:
             self.graph,
             scenario.traffic_fixture,
         )
+        baseline_started = time.perf_counter()
         baseline = _baseline_result(
             graph=self.graph,
             zones=self.zones,
@@ -424,6 +669,8 @@ class Phase08ScenarioRunner:
             travel_times_cache=self._travel_times_cache,
             zone_nodes_cache=self._zone_nodes_cache,
         )
+        baseline_wall_clock = time.perf_counter() - baseline_started
+        sirengrid_started = time.perf_counter()
         sirengrid = _sirengrid_result(
             graph=self.graph,
             zones=self.zones,
@@ -433,6 +680,7 @@ class Phase08ScenarioRunner:
             travel_times_cache=self._travel_times_cache,
             zone_nodes_cache=self._zone_nodes_cache,
         )
+        sirengrid_wall_clock = time.perf_counter() - sirengrid_started
         secondary: list[dict[str, Any]] = []
         for event in sorted(scenario.events, key=lambda item: (item.at_seconds, item.event_index)):
             if event.event_type == "RESOURCE_STATE":
@@ -482,6 +730,10 @@ class Phase08ScenarioRunner:
             },
             "baseline": baseline.to_dict(),
             "sirengrid": sirengrid.to_dict(),
+            "wall_clock_seconds": {
+                "baseline": baseline_wall_clock,
+                "sirengrid": sirengrid_wall_clock,
+            },
             "secondary_incidents": secondary,
             "model_timestamp": PHASE08_FIXED_MODEL_TIME.isoformat(),
         }

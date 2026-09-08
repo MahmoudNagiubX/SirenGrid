@@ -47,6 +47,7 @@ class ScenarioIncident(BaseModel):
     coordinate: Coordinate
     requirements: list[ScenarioRequirement] = Field(min_length=1)
     transport_required: bool | None = None
+    required_hospital_capabilities: list[str] = Field(default_factory=list)
 
     def response_requirements(self) -> tuple[ResponseRequirement, ...]:
         return tuple(

@@ -518,6 +518,7 @@ def evaluate_phase04_candidate_set(
     resources_override: tuple[CandidateResource, ...] | None = None,
     travel_times_cache: dict[tuple[Any, ...], Any] | None = None,
     zone_nodes_cache: dict[tuple[Any, ...], Any] | None = None,
+    include_route_alternatives: bool = True,
 ) -> tuple[Any, tuple[Any, ...], dict[tuple[str, ...], Any], datetime]:
     """Evaluate one coherent Phase 04 candidate set without persisting it.
 
@@ -591,6 +592,7 @@ def evaluate_phase04_candidate_set(
         requirements=resolution.requirements,
         traffic_snapshot=traffic_snapshot,
         incident_id=planning_incident_id,
+        include_route_alternatives=include_route_alternatives,
     )
     travel_times_cache = travel_times_cache if travel_times_cache is not None else {}
     zone_nodes_cache = zone_nodes_cache if zone_nodes_cache is not None else {}
@@ -622,6 +624,7 @@ def evaluate_phase04_candidate_set(
             modeled_at=timestamp,
             travel_times_cache=travel_times_cache,
             zone_nodes_cache=zone_nodes_cache,
+            include_route_alternatives=include_route_alternatives,
         )
         selected_proposal = select_reposition_proposal(repositioning.proposals)
         if selected_proposal is not None:

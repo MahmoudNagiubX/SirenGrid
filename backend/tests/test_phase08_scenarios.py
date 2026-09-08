@@ -215,7 +215,9 @@ def test_phase08_runner_replays_a_real_asset_scenario_deterministically() -> Non
     first = runner.run_scenario(scenario)
     second = runner.run_scenario(scenario)
 
-    assert first == second
+    first_model = {key: value for key, value in first.items() if key != "wall_clock_seconds"}
+    second_model = {key: value for key, value in second.items() if key != "wall_clock_seconds"}
+    assert first_model == second_model
     assert first["baseline"]["outcome"] == "PLAN_GENERATED"
     assert first["sirengrid"]["outcome"] == "PLAN_GENERATED"
     assert first["traffic_fixture"]["benchmark_reality"] == "SYNTHETIC"

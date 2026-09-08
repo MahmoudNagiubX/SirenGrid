@@ -51,6 +51,31 @@ class BaselineSelection:
         return max(choice.route.effective_eta for choice in self.choices)
 
 
+def _compute_baseline_route(
+    graph: nx.Graph,
+    origin: Coordinate,
+    destination: Coordinate,
+    traffic_snapshot: TrafficSnapshot | None,
+    *,
+    include_alternatives: bool,
+) -> TrafficAwareRouteResult:
+    """Calculate a baseline route while keeping simple test doubles compatible."""
+    try:
+        return compute_traffic_aware_route(
+            graph,
+            origin,
+            destination,
+            traffic_snapshot,
+            include_alternatives=include_alternatives,
+        )
+    except TypeError as exc:
+        # Existing focused tests use four-argument route doubles.  The fallback
+        # is limited to that compatibility shape and never hides other errors.
+        if "include_alternatives" not in str(exc):
+            raise
+        return compute_traffic_aware_route(graph, origin, destination, traffic_snapshot)
+
+
 def choose_nearest_baseline_hospital(
     *,
     graph: nx.Graph,
@@ -59,6 +84,7 @@ def choose_nearest_baseline_hospital(
     traffic_snapshot: TrafficSnapshot | None,
     hospitals: Iterable[HospitalStaticRecord] | None = None,
     operational_states: dict[str, HospitalOperationalSnapshot] | None = None,
+    include_route_alternatives: bool = True,
 ) -> HospitalRouteCandidate | None:
     """Choose the feasible hospital with the lowest route ETA.
 
@@ -75,11 +101,12 @@ def choose_nearest_baseline_hospital(
         if required.intersection(hospital.confirmed_incompatible_capabilities):
             continue
         try:
-            route = compute_traffic_aware_route(
+            route = _compute_baseline_route(
                 graph,
                 origin,
                 Coordinate(lat=hospital.latitude, lon=hospital.longitude),
                 traffic_snapshot,
+                include_alternatives=include_route_alternatives,
             )
         except (RouteNotFoundError, RoutingPointOutsideGraphError, ValueError):
             continue
@@ -127,6 +154,7 @@ def choose_greedy_baseline_resources(
     requirements: Iterable[ResponseRequirement],
     traffic_snapshot: TrafficSnapshot | None,
     incident_id: str | None = None,
+    include_route_alternatives: bool = True,
 ) -> BaselineSelection:
     """Choose eligible resources using the approved simple greedy policy.
 
@@ -151,11 +179,12 @@ def choose_greedy_baseline_resources(
                 continue
             if resource.resource_id not in routes:
                 try:
-                    routes[resource.resource_id] = compute_traffic_aware_route(
+                    routes[resource.resource_id] = _compute_baseline_route(
                         graph,
                         resource.coordinate,
                         incident_coordinate,
                         traffic_snapshot,
+                        include_alternatives=include_route_alternatives,
                     )
                 except (RouteNotFoundError, RoutingPointOutsideGraphError, ValueError):
                     routes[resource.resource_id] = None

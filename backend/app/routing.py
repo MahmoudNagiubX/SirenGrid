@@ -3,7 +3,9 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from pathlib import Path
+from threading import RLock
 from typing import Any, Callable
+from weakref import WeakKeyDictionary
 
 import networkx as nx
 from pydantic import BaseModel, Field
@@ -29,6 +31,11 @@ __all__ = [
 
 ROUTING_SOURCE_OSM_BASE_TRAVEL_TIME = "OSM_BASE_TRAVEL_TIME"
 ROUTING_SOURCE_TOMTOM_TRAFFIC_ADJUSTED = "TOMTOM_TRAFFIC_ADJUSTED"
+
+_GRAPH_CACHE_LOCK = RLock()
+_GRAPH_SNAP_CACHE: WeakKeyDictionary[
+    nx.Graph, dict[tuple[float, float, float], tuple[Any, float]]
+] = WeakKeyDictionary()
 
 
 class RoutingPointOutsideGraphError(ValueError):
@@ -229,6 +236,12 @@ def snap_coordinate_to_graph(
 
     Rejects points farther than max_distance_m with RoutingPointOutsideGraphError.
     """
+    cache_key = (float(coordinate.lat), float(coordinate.lon), float(max_distance_m))
+    with _GRAPH_CACHE_LOCK:
+        cached = _GRAPH_SNAP_CACHE.setdefault(graph, {}).get(cache_key)
+    if cached is not None:
+        return cached
+
     if graph.number_of_nodes() == 0:
         raise RoutingPointOutsideGraphError("Routing graph contains no nodes")
 
@@ -260,7 +273,10 @@ def snap_coordinate_to_graph(
             f"exceeding max snap distance {max_distance_m:.1f}m"
         )
 
-    return best_node, min_dist
+    result = (best_node, min_dist)
+    with _GRAPH_CACHE_LOCK:
+        _GRAPH_SNAP_CACHE.setdefault(graph, {})[cache_key] = result
+    return result
 
 
 def _edge_key(u: Any, v: Any, key: Any) -> EdgeKey:
@@ -580,6 +596,7 @@ def compute_traffic_aware_route(
     destination: Coordinate,
     snapshot: TrafficSnapshot | None,
     max_snap_distance_m: float | None = None,
+    include_alternatives: bool = True,
 ) -> TrafficAwareRouteResult:
     """Compare immutable OSM routing with one captured, validated traffic overlay."""
     origin_node, destination_node, origin_distance, destination_distance = (
@@ -642,8 +659,12 @@ def compute_traffic_aware_route(
     covered_length = sum(edge.length_m for edge in covered_edges)
     coverage = covered_length / selected_route.distance_m
     active_overlay = overlay if fallback_reason is None else None
-    alternatives = _edge_disjoint_alternative(
-        graph, selected_route, origin_node, destination_node, active_overlay
+    alternatives = (
+        _edge_disjoint_alternative(
+            graph, selected_route, origin_node, destination_node, active_overlay
+        )
+        if include_alternatives
+        else []
     )
 
     return TrafficAwareRouteResult(
