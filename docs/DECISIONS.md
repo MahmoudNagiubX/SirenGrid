@@ -770,3 +770,147 @@ Production candidate planning selects and scores one representative
 hypothetical reposition proposal before final ranking and persists that same
 proposal. Repositioning remains non-operational and does not mutate resources
 or graph state.
+
+## PD-049 - Phase 08 Scenario Dataset
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner
+
+Phase 08 uses exactly 36 benchmark scenarios: one executable scenario for
+each Master Plan case T01-T15 and 21 distinct cross-cutting scenarios. The
+dataset is a SirenGrid fixture, not a model of Egyptian incident frequency.
+
+## PD-050 - Phase 08 Baseline Multi-Resource Selection
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner
+
+The baseline is greedy. It processes the most constrained required cohort
+first, where constrained means fewest currently eligible physical resources.
+Ties use canonical cohort ordering. Resources are selected by route ETA,
+route distance, and resource ID; selected physical resources are removed from
+the remaining pool. There is no backtracking or network optimization.
+Insufficient results are visible expected failures.
+
+## PD-051 - Phase 08 Fair Traffic Input
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner
+
+Baseline and SirenGrid receive identical scenario-captured traffic snapshots,
+closures, freshness state, and fallback condition. Neither engine refreshes
+TomTom during a comparison.
+
+## PD-052 - Phase 08 Baseline Coverage Measurement
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner
+
+Baseline selection does not use coverage. Its selected resources are evaluated
+afterward with the existing Phase 04 coverage engine and
+`JOINT_ALL_REQUIRED_COHORTS_V1`, including the same population denominator and
+unreachable-zone semantics.
+
+## PD-053 - Phase 08 Baseline Hospital Policy
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner
+
+The baseline uses the same OSM registry, simulated state, graph, traffic
+state, hard filters, and UNKNOWN semantics as SirenGrid, then chooses the
+feasible hospital with the lowest route ETA, followed by route distance and
+hospital ID. It does not use the SirenGrid weighted hospital score.
+
+## PD-054 - Phase 08 Multi-Incident Event Order
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner
+
+Scenario manifests define event timestamps and explicit event indexes. Both
+engines replay the same sequence. Committed resources remain unavailable;
+there is no severity-based preemption or resource stealing.
+
+## PD-055 - Phase 08 Traffic Fixture Mode
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner
+
+The official benchmark uses fixed reproducible traffic fixtures and makes no
+external traffic-provider calls. Fixture metadata retains source,
+provenance, original reality, fallback status, freshness semantics, and a
+hash/version. Historical live captures are replay fixtures, not current live
+data. Optional live-provider smoke is reported separately.
+
+## PD-056 - Phase 08 Repetition and Aggregation
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner
+
+All 36 scenarios run exactly once per engine for authoritative functional and
+model metrics. A separate ten-scenario performance subset runs one excluded
+warm-up and three isolated measured repetitions per engine. Functional
+aggregates include count, outcome counts, mean where useful, median, minimum,
+maximum, and dataset-level p95 where meaningful. Performance samples are
+retained individually; laptop timings are not production SLAs.
+
+## PD-057 - Phase 08 Benchmark Pass Semantics
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner
+
+A scenario passes when its declared expected outcome is reached without
+violating safety, data, or product contracts. Truthful expected failures,
+review states, provider-unavailable states, no-path results, conflicts, and
+idempotent no-ops can therefore pass. Comparative superiority is reported
+separately from correctness.
+
+## PD-058 - Phase 08 Benchmark Dimensions
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner
+
+Phase 08 does not create a composite benchmark score. ETA, coverage, reserve
+resilience, hospital result, replanning, workflow success, latency, and
+failure handling are reported as separate dimensions.
+
+## PD-059 - Phase 08 Scenario Population and Provenance
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner
+
+Scenarios are balanced synthetic/simulated fixtures grounded in available
+real OSM, WorldPop, hospital, and road assets. Incident facts and operational
+states are synthetic or simulated. CAPMAS calibration is not required, and no
+real incident-frequency claim is made.
+
+## PD-060 - Phase 08 Scenario Runner and Demo Controls
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner
+
+Phase 08 provides an internal deterministic scenario runner and minimal local
+demo REST controls under `/api/v1/simulation`: reset, load, events, and
+status. Controls are explicitly simulated/demo-only, gated by configuration,
+disabled by default, and have no background scheduler. They must not be
+exposed unrestricted on a public deployment.
+
+## PD-061 - Phase 08 Frontend Boundary
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner
+
+This Phase 08 coding run is backend, benchmark, and demo-control only. No
+frontend framework or benchmark UI is selected or implemented.
