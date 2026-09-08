@@ -1028,27 +1028,3 @@ action may transition `REQUIRES_REVIEW` back to `ACTIVE_UNCONFIRMED`. Terminal
 states remain terminal and cannot be reopened; no automatic review resolution
 or artificial `RESPONSE_PROPOSED` persistence is required for canonical
 planning.
-
-## PD-071 - Frontend Stack Selection (High-Fidelity Design Implementation)
-
-**Date:** 2026-09-08
-**Status:** Approved
-**Owner:** Project owner (frontend/architecture owner)
-
-Supersedes the deferral in PD-009 for the design-implementation phase. The
-frontend owner approved the exact stack: **Vite + React 18 + TypeScript**, plain
-CSS custom properties for the design tokens (no CSS framework), and
-`lucide-react` for icons. No other runtime dependencies.
-
-Scope of this phase is frontend-only and visual: implement the approved
-SirenGrid Claude Design system (`claude.ai/design` project
-`be6b3892-1609-4aa6-b86a-49cdad7abadf`) faithfully — landing plus the Operations
-Center shell and its seven operational states, Resources, Benchmark and Demo
-controls. All demo values are isolated in `frontend/src/data/mock.ts` for later
-replacement by real API responses. No operational logic (ETA, routing, plan
-ranking, coverage, hospital suitability, replan materiality, confidence) is
-implemented in the frontend; it only displays those values. Backend contracts
-are unchanged and backend integration is deferred to a later dedicated phase.
-
-Work lives on branch `feature/frontend-design-implementation` (worktree
-`SirenGrid-Frontend`), based on `feature/phase-01-golden-flow`.
