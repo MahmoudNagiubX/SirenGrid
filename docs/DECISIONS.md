@@ -1028,3 +1028,21 @@ action may transition `REQUIRES_REVIEW` back to `ACTIVE_UNCONFIRMED`. Terminal
 states remain terminal and cannot be reopened; no automatic review resolution
 or artificial `RESPONSE_PROPOSED` persistence is required for canonical
 planning.
+
+## PD-071 - Simulated Hospital Capability Overlay
+
+**Date:** 2026-09-09
+**Status:** Approved
+**Owner:** Project owner
+
+Hospital operational state may include an explicit `SIMULATED` capability
+overlay for demo and simulation use. The overlay is stored separately from
+the immutable REAL_PUBLIC OSM registry and is never presented as a published
+hospital fact. Missing overlay data remains UNKNOWN and never becomes a
+confirmed incompatibility.
+
+Ranking explanations distinguish `NOT_REQUIRED`, `REAL_PUBLIC_REGISTRY`,
+`SIMULATED_OVERLAY`, and `UNKNOWN`, including static capabilities, simulated
+tags, capability source, and capability data reality. The existing Phase 05
+score weights and capacity semantics remain unchanged; a simulated overlay
+may influence ranking only during explicitly simulated operational state.

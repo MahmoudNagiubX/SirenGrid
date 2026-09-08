@@ -357,3 +357,30 @@ def test_hospital_simulation_state_uses_unknown_defaults_and_versioned_updates(
         },
     )
     assert stale.status_code == 409
+
+
+def test_hospital_simulation_state_persists_separate_capability_overlay(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    hospital_id = client.get("/api/v1/hospitals").json()[0]["id"]
+
+    response = client.patch(
+        f"/api/v1/hospitals/{hospital_id}/simulation-state",
+        json={
+            "simulated_capability_tags": [" burn care ", "TRAUMA", "burn care"],
+            "operator_reference": "fixture-overlay",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    hospital = response.json()
+    assert hospital["simulated_capability_tags"] == ["BURN_CARE", "TRAUMA"]
+    assert hospital["static_capabilities"] == []
+    assert hospital["operational_provenance"]["data_reality"] == "SIMULATED"
+
+    from app.models import HospitalOperationalState
+
+    row = db_session.get(HospitalOperationalState, hospital_id)
+    assert row is not None
+    assert row.simulated_capability_tags_json == ["BURN_CARE", "TRAUMA"]

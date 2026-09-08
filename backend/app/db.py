@@ -113,6 +113,20 @@ def _ensure_sqlite_phase07_columns(target: Engine) -> None:
                 )
             )
 
+    if "hospital_operational_states" in inspector.get_table_names():
+        hospital_columns = {
+            column["name"]
+            for column in inspector.get_columns("hospital_operational_states")
+        }
+        if "simulated_capability_tags_json" not in hospital_columns:
+            with target.begin() as connection:
+                connection.execute(
+                    text(
+                        "ALTER TABLE hospital_operational_states "
+                        "ADD COLUMN simulated_capability_tags_json JSON"
+                    )
+                )
+
 
 def get_db() -> Generator[Session, None, None]:
     """Yield an active database session and close it reliably after use."""

@@ -1323,6 +1323,7 @@ class HospitalRead(BaseModel):
     simulated_load_ratio: float | None = None
     simulated_free_capacity: int | None = None
     incoming_cases: int | None = None
+    simulated_capability_tags: list[str] = Field(default_factory=list)
     operational_freshness_status: FreshnessStatus
     static_provenance: dict[str, Any] = Field(default_factory=dict)
     operational_provenance: dict[str, Any] = Field(default_factory=dict)
@@ -1334,6 +1335,7 @@ class HospitalOperationalStatePatchRequest(BaseModel):
     simulated_load_ratio: float | None = Field(default=None, ge=0.0, le=1.0)
     simulated_free_capacity: int | None = Field(default=None, ge=0)
     incoming_cases: int | None = Field(default=None, ge=0)
+    simulated_capability_tags: list[str] | None = None
     freshness_status: FreshnessStatus | None = None
     operator_reference: str = Field(min_length=1)
 

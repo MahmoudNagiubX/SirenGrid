@@ -108,3 +108,85 @@ def test_confirmed_incompatible_and_not_accepting_candidates_are_filtered() -> N
     ]
 
     assert rank_hospital_candidates(candidates, required_capabilities=("TRAUMA",)) == []
+
+
+def _route(eta_seconds: float) -> dict[str, object]:
+    return {"eta_seconds": eta_seconds, "distance_m": eta_seconds * 10.0}
+
+
+def test_farther_hospital_wins_on_simulated_burn_capability() -> None:
+    hospitals = load_static_hospitals()
+    nearer, farther = hospitals[0], hospitals[1]
+    candidates = [
+        HospitalRouteCandidate(
+            hospital=nearer,
+            operational_state=HospitalOperationalSnapshot(
+                hospital_id=nearer.id,
+                accepting_state="ACCEPTING",
+                simulated_load_ratio=0.9,
+                freshness_status="FRESH",
+            ),
+            route=_route(300.0),
+        ),
+        HospitalRouteCandidate(
+            hospital=farther,
+            operational_state=HospitalOperationalSnapshot(
+                hospital_id=farther.id,
+                accepting_state="ACCEPTING",
+                simulated_load_ratio=0.1,
+                simulated_capability_tags=("BURN_CARE",),
+                freshness_status="FRESH",
+            ),
+            route=_route(420.0),
+        ),
+    ]
+
+    ranked = rank_hospital_candidates(candidates, required_capabilities=("burn care",))
+
+    assert [candidate.hospital.id for candidate in ranked] == [farther.id, nearer.id]
+    winner = ranked[0].score_breakdown
+    assert winner["capability_status"] == "CONFIRMED"
+    assert winner["capability_source"] == "SIMULATED_OVERLAY"
+    assert winner["capability_data_reality"] == "SIMULATED"
+    assert winner["simulated_capability_tags"] == ["BURN_CARE"]
+    assert winner["route_eta_seconds"] > ranked[1].score_breakdown["route_eta_seconds"]
+    assert ranked[0].score < ranked[1].score
+
+
+def test_without_a_simulated_overlay_capability_remains_unknown() -> None:
+    hospital = load_static_hospitals()[0]
+    ranked = rank_hospital_candidates(
+        [
+            HospitalRouteCandidate(
+                hospital=hospital,
+                operational_state=HospitalOperationalSnapshot.unknown(hospital.id),
+                route=_route(300.0),
+            )
+        ],
+        required_capabilities=("burn care",),
+    )
+
+    breakdown = ranked[0].score_breakdown
+    assert breakdown["capability_status"] == "UNKNOWN"
+    assert breakdown["capability_source"] == "UNKNOWN"
+    assert breakdown["simulated_capability_tags"] == []
+    assert len(ranked) == 1
+
+
+def test_real_registry_capability_is_labelled_real_not_simulated() -> None:
+    hospital = next(hospital for hospital in load_static_hospitals() if hospital.static_capabilities)
+    ranked = rank_hospital_candidates(
+        [
+            HospitalRouteCandidate(
+                hospital=hospital,
+                operational_state=HospitalOperationalSnapshot.unknown(hospital.id),
+                route=_route(300.0),
+            )
+        ],
+        required_capabilities=(hospital.static_capabilities[0],),
+    )
+
+    breakdown = ranked[0].score_breakdown
+    assert breakdown["capability_status"] == "CONFIRMED"
+    assert breakdown["capability_source"] == "REAL_PUBLIC_REGISTRY"
+    assert breakdown["capability_data_reality"] == "REAL_PUBLIC"

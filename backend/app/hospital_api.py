@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import re
 import time
 from typing import Any
 import uuid
@@ -86,6 +87,7 @@ def _snapshot(db: Session, hospital_id: str) -> HospitalOperationalSnapshot:
         simulated_load_ratio=row.simulated_load_ratio,
         simulated_free_capacity=row.simulated_free_capacity,
         incoming_cases=row.incoming_cases,
+        simulated_capability_tags=tuple(row.simulated_capability_tags_json or ()),
         freshness_status=row.freshness_status,
         data_reality=(row.data_reality.value if hasattr(row.data_reality, "value") else str(row.data_reality)),
         last_updated=row.last_updated.isoformat() if row.last_updated else None,
@@ -110,6 +112,7 @@ def _serialize_hospital(
         simulated_load_ratio=state.simulated_load_ratio,
         simulated_free_capacity=state.simulated_free_capacity,
         incoming_cases=state.incoming_cases,
+        simulated_capability_tags=list(state.simulated_capability_tags),
         operational_freshness_status=state.freshness_status,
         static_provenance=hospital.provenance,
         operational_provenance={
@@ -346,6 +349,14 @@ def patch_hospital_simulation_state(
         row.simulated_free_capacity = payload.simulated_free_capacity
     if "incoming_cases" in payload.model_fields_set:
         row.incoming_cases = payload.incoming_cases
+    if "simulated_capability_tags" in payload.model_fields_set:
+        row.simulated_capability_tags_json = sorted(
+            {
+                re.sub(r"\s+", "_", tag.strip().upper())
+                for tag in (payload.simulated_capability_tags or [])
+                if tag.strip()
+            }
+        )
     row.freshness_status = (
         payload.freshness_status.value
         if payload.freshness_status is not None

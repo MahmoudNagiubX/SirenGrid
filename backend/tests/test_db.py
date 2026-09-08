@@ -85,6 +85,53 @@ def test_non_sqlite_database_url_has_no_sqlite_connect_args() -> None:
     assert db_module._connect_args_for_database_url("postgresql://db/test") == {}
 
 
+def test_existing_hospital_state_gets_overlay_column_additively(tmp_path: Path) -> None:
+    target_engine = db_module.create_engine(
+        f"sqlite:///{tmp_path / 'legacy-hospital.db'}",
+        connect_args={"check_same_thread": False},
+    )
+    try:
+        with target_engine.begin() as conn:
+            conn.execute(
+                text(
+                    "CREATE TABLE hospital_operational_states ("
+                    "hospital_id VARCHAR(255) PRIMARY KEY, "
+                    "version INTEGER, accepting_state VARCHAR, "
+                    "simulated_load_ratio FLOAT, simulated_free_capacity INTEGER, "
+                    "incoming_cases INTEGER, freshness_status VARCHAR, "
+                    "last_updated DATETIME, source VARCHAR, data_reality VARCHAR, "
+                    "provenance_json JSON)"
+                )
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO hospital_operational_states "
+                    "(hospital_id, version, accepting_state) "
+                    "VALUES ('osm:legacy', 3, 'UNKNOWN')"
+                )
+            )
+
+        db_module.init_db(target_engine=target_engine)
+
+        columns = {
+            column["name"]
+            for column in db_module.inspect(target_engine).get_columns(
+                "hospital_operational_states"
+            )
+        }
+        assert "simulated_capability_tags_json" in columns
+        with target_engine.connect() as conn:
+            row = conn.execute(
+                text(
+                    "SELECT hospital_id, version, accepting_state "
+                    "FROM hospital_operational_states"
+                )
+            ).one()
+        assert tuple(row) == ("osm:legacy", 3, "UNKNOWN")
+    finally:
+        target_engine.dispose()
+
+
 def test_isolated_temporary_db(isolated_engine: Engine, tmp_db_file: Path) -> None:
     """Verify tests run against an isolated temporary database, not a persistent repo DB."""
     repo_root = Path(__file__).resolve().parents[2]
