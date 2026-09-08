@@ -1,0 +1,97 @@
+/* SirenGrid design tokens — ported verbatim from the Claude Design project
+   (tokens/colors.css, tokens/typography.css, tokens/spacing.css, tokens/effects.css).
+   Do not retune these values; they are the canonical design system. */
+
+@import url('https://fonts.googleapis.com/css2?family=Lexend:wght@300;400;500;600;700;800&family=Rubik:wght@300;400;500;600;700&display=swap');
+
+:root {
+  --gray-0: #F7F8FA; --gray-50: #F1F3F6; --gray-100: #E7EAF0; --gray-200: #DDE1E9;
+  --gray-300: #C7CCD8; --gray-400: #A7AEBD; --gray-500: #8992A6; --gray-600: #6B7386;
+  --gray-700: #4F5568; --gray-800: #383D4E; --navy-900: #1B1D2B;
+  --blue-50: #F0F3FA; --blue-100: #D5DEEF; --blue-200: #B1C9EF; --blue-300: #8AAEE0;
+  --blue-400: #628ECB; --blue-500: #4A76AE; --blue-600: #395886; --blue-700: #2C4468; --blue-800: #21324D;
+  --slate-300: #AEB9CC; --slate-400: #7A8CA3; --slate-500: #5D7089; --slate-600: #46586F;
+  --red-50: #FDEBEC; --red-100: #FAD0D4; --red-200: #F3909B; --red-300: #F45C6C;
+  --red-400: #EF3C50; --red-500: #EF233C; --red-600: #D90429; --red-700: #A5081F; --red-800: #7A0A1E;
+
+  --color-bg-app: var(--gray-0);
+  --color-bg-surface: #FFFFFF;
+  --color-bg-sunken: var(--gray-50);
+  --color-bg-glass: rgba(255, 255, 255, .40);
+  --color-bg-glass-strong: rgba(255, 255, 255, .66);
+  --color-glass-tint: rgba(223, 232, 245, .38);
+  --color-border-glass: rgba(255, 255, 255, .62);
+  --color-border-glass-inner: rgba(255, 255, 255, .9);
+  --color-border-hairline: var(--gray-200);
+  --color-border-strong: var(--gray-300);
+
+  --color-text-primary: var(--navy-900);
+  --color-text-secondary: var(--gray-800);
+  --color-text-muted: var(--gray-700);
+  --color-text-on-accent: #FFFFFF;
+
+  --color-accent: var(--blue-600);
+  --color-accent-hover: var(--blue-700);
+  --color-accent-soft: var(--blue-50);
+  --color-accent-strong: var(--blue-800);
+  --color-accent-secondary: var(--slate-400);
+
+  --color-critical: var(--red-600);
+  --color-critical-strong: var(--red-800);
+  --color-critical-soft: var(--red-50);
+  --color-siren: var(--red-500);
+  --color-attention: var(--red-400);
+  --color-attention-soft: var(--red-50);
+
+  --color-confirmed: var(--blue-700);
+  --color-confirmed-soft: var(--blue-50);
+  --color-info: var(--blue-400);
+
+  --sev-low: var(--blue-300);
+  --sev-moderate: var(--blue-700);
+  --sev-high: var(--red-400);
+  --sev-critical: var(--red-600);
+
+  --conf-low: var(--gray-400);
+  --conf-medium: var(--blue-300);
+  --conf-high: var(--blue-600);
+
+  --map-bg: #E7EBF1; --map-water: #CBDBEA; --map-land: #EDEFF4; --map-block: #DBE1EC;
+  --map-road-minor: #FBFCFE; --map-road-major: #C3CCDD; --map-road-highway: #A8B4C9;
+  --map-label: #3A4557; --map-label-halo: #FFFFFF;
+  --map-route-primary: #2F7DE1; --map-route-alt: #93A4BE;
+  --map-congestion-med: var(--red-300); --map-congestion-high: var(--red-600);
+  --map-incident: var(--red-600); --map-hospital: var(--blue-600); --map-responder: var(--blue-500);
+  --map-coverage-fill: rgba(57, 88, 134, .13); --map-coverage-line: rgba(57, 88, 134, .42);
+  --map-gap-fill: rgba(165, 8, 31, .14); --map-gap-line: rgba(165, 8, 31, .5);
+  --map-corridor: var(--blue-400);
+
+  --font-en: 'Lexend', -apple-system, sans-serif;
+  --font-ar: 'Rubik', 'Lexend', sans-serif;
+  --fs-display: 40px; --lh-display: 46px;
+  --fs-h1: 28px; --lh-h1: 34px;
+  --fs-h2: 22px; --lh-h2: 28px;
+  --fs-h3: 18px; --lh-h3: 24px;
+  --fs-body-lg: 16px; --lh-body-lg: 24px;
+  --fs-body: 14px; --lh-body: 20px;
+  --fs-caption: 13px; --lh-caption: 18px;
+  --fs-micro: 12px; --lh-micro: 16px;
+  --fw-regular: 400; --fw-medium: 500; --fw-semibold: 600; --fw-bold: 700;
+  --ls-tight: -0.01em; --ls-normal: 0; --ls-wide: 0.02em;
+
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 20px; --sp-6: 24px;
+  --sp-8: 32px; --sp-10: 40px; --sp-12: 48px; --sp-16: 64px;
+  --radius-sm: 8px; --radius-md: 12px; --radius-lg: 16px; --radius-xl: 24px; --radius-pill: 999px;
+
+  --blur-glass: 40px; --blur-glass-light: 20px;
+  --shadow-xs: 0 1px 2px rgba(27, 29, 43, .06);
+  --shadow-sm: 0 2px 8px rgba(27, 29, 43, .07);
+  --shadow-md: 0 8px 24px rgba(27, 29, 43, .10);
+  --shadow-lg: 0 20px 48px rgba(27, 29, 43, .14);
+  --shadow-glass: 0 1px 1px rgba(27, 29, 43, .04), 0 2px 6px rgba(35, 44, 68, .06), 0 18px 40px -14px rgba(35, 44, 68, .22), inset 0 1px 0 rgba(255, 255, 255, .9), inset 0 -1px 0 rgba(27, 29, 43, .05), inset 0 0 0 .5px rgba(255, 255, 255, .4);
+  --shadow-glass-strong: 0 2px 3px rgba(27, 29, 43, .05), 0 8px 18px rgba(27, 29, 43, .08), 0 34px 68px -18px rgba(27, 29, 43, .28), inset 0 1.5px 0 rgba(255, 255, 255, .95), inset 0 -1px 0 rgba(27, 29, 43, .06);
+  --shadow-focus: 0 0 0 3px var(--blue-200);
+  --ease-standard: cubic-bezier(.2, .7, .2, 1);
+  --ease-out: cubic-bezier(.2, .7, .2, 1);
+  --dur-fast: 120ms; --dur-base: 200ms; --dur-slow: 320ms;
+}
