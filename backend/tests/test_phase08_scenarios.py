@@ -269,3 +269,68 @@ def test_coverage_reuses_immutable_travel_trees_for_repeated_snapshots(
 
     assert first == second
     assert call_count == 1
+
+
+def test_coverage_cache_identity_includes_traffic_overlay_contents(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    graph = nx.MultiDiGraph()
+    graph.add_node("resource", x=31.3, y=30.0)
+    graph.add_node("zone", x=31.31, y=30.0)
+    graph.add_edge("resource", "zone", key="0", length=1000.0, travel_time=120.0)
+    resource = coverage.CoverageResource(
+        resource_id="amb-cache-overlay",
+        resource_type=ResourceType.AMBULANCE,
+        capability_tags=(),
+        status=ResourceStatus.AVAILABLE,
+        coordinate=Coordinate(lat=30.0, lon=31.3),
+        data_reality=DataReality.SIMULATED,
+        source="phase08_test_fixture",
+    )
+    zone = CoverageZone(
+        zone_id="zone",
+        centroid=Coordinate(lat=30.0, lon=31.31),
+        population=100.0,
+    )
+    fast_fixture = TrafficFixture(
+        fixture_id="same-snapshot-id",
+        mode="CONGESTION",
+        source_reference="phase08-test-fixture",
+        congestion_factor=2.0,
+    )
+    slow_fixture = fast_fixture.model_copy(update={"congestion_factor": 6.0})
+    fast_snapshot = build_fixed_traffic_snapshot(graph, fast_fixture)
+    slow_snapshot = build_fixed_traffic_snapshot(graph, slow_fixture)
+    assert fast_snapshot is not None
+    assert slow_snapshot is not None
+    assert fast_snapshot.snapshot_id == slow_snapshot.snapshot_id
+    original = coverage.compute_single_source_travel_times
+    call_count = 0
+
+    def counted(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(coverage, "compute_single_source_travel_times", counted)
+    cache: dict[tuple[object, ...], object] = {}
+    common = {
+        "graph": graph,
+        "zones": (zone,),
+        "resources": (resource,),
+        "cohort": coverage.CoverageCohort(ResourceType.AMBULANCE),
+        "modeled_at": datetime(2026, 9, 8, tzinfo=timezone.utc),
+        "travel_times_cache": cache,
+    }
+
+    fast = coverage.compute_coverage_snapshot(
+        **common,
+        traffic_snapshot=fast_snapshot,
+    )
+    slow = coverage.compute_coverage_snapshot(
+        **common,
+        traffic_snapshot=slow_snapshot,
+    )
+
+    assert call_count == 2
+    assert fast.zones[0].eta_seconds < slow.zones[0].eta_seconds

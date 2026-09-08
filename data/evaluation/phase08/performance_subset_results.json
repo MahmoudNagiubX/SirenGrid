@@ -1,0 +1,275 @@
+{
+  "aggregate": {
+    "baseline": {
+      "available_count": 30,
+      "max": 7.599314199993387,
+      "mean": 0.9343419766616231,
+      "median": 0.20513784998911433,
+      "min": 0.009684400050900877,
+      "p95": 6.6173940799781095
+    },
+    "sirengrid": {
+      "available_count": 30,
+      "max": 9.91402589995414,
+      "mean": 3.61529810000211,
+      "median": 2.030670550011564,
+      "min": 0.004563900001812726,
+      "p95": 9.680361165016075
+    }
+  },
+  "measured_repetitions": [
+    {
+      "repetition": 1,
+      "scenario_id": "T01_urgent_activation",
+      "wall_clock_seconds": {
+        "baseline": 7.000492399965879,
+        "sirengrid": 0.15780600003199652
+      }
+    },
+    {
+      "repetition": 1,
+      "scenario_id": "T11_hospital_prealert",
+      "wall_clock_seconds": {
+        "baseline": 0.8312847999623045,
+        "sirengrid": 4.877612200041767
+      }
+    },
+    {
+      "repetition": 1,
+      "scenario_id": "X02_multi_resource",
+      "wall_clock_seconds": {
+        "baseline": 0.2710166000179015,
+        "sirengrid": 9.91402589995414
+      }
+    },
+    {
+      "repetition": 1,
+      "scenario_id": "X04_reposition_useful",
+      "wall_clock_seconds": {
+        "baseline": 0.046236999973189086,
+        "sirengrid": 2.0077268999884836
+      }
+    },
+    {
+      "repetition": 1,
+      "scenario_id": "X07_valid_closure",
+      "wall_clock_seconds": {
+        "baseline": 0.5694840999785811,
+        "sirengrid": 8.083426100027282
+      }
+    },
+    {
+      "repetition": 1,
+      "scenario_id": "X08_no_path",
+      "wall_clock_seconds": {
+        "baseline": 0.0541168000199832,
+        "sirengrid": 0.048357499996200204
+      }
+    },
+    {
+      "repetition": 1,
+      "scenario_id": "X10_insufficient_resources",
+      "wall_clock_seconds": {
+        "baseline": 0.01166469999589026,
+        "sirengrid": 0.005290400004014373
+      }
+    },
+    {
+      "repetition": 1,
+      "scenario_id": "X11_hospital_unknown",
+      "wall_clock_seconds": {
+        "baseline": 0.1463948999880813,
+        "sirengrid": 2.128168400027789
+      }
+    },
+    {
+      "repetition": 1,
+      "scenario_id": "X15_material_eta_replan",
+      "wall_clock_seconds": {
+        "baseline": 0.5631513999542221,
+        "sirengrid": 8.160416700004134
+      }
+    },
+    {
+      "repetition": 1,
+      "scenario_id": "X19_two_incidents_available",
+      "wall_clock_seconds": {
+        "baseline": 0.020076400018297136,
+        "sirengrid": 1.9802368000382558
+      }
+    },
+    {
+      "repetition": 2,
+      "scenario_id": "T01_urgent_activation",
+      "wall_clock_seconds": {
+        "baseline": 6.149162799993064,
+        "sirengrid": 0.14946549996966496
+      }
+    },
+    {
+      "repetition": 2,
+      "scenario_id": "T11_hospital_prealert",
+      "wall_clock_seconds": {
+        "baseline": 0.7464568999712355,
+        "sirengrid": 3.4604859999963082
+      }
+    },
+    {
+      "repetition": 2,
+      "scenario_id": "X02_multi_resource",
+      "wall_clock_seconds": {
+        "baseline": 0.2762708000373095,
+        "sirengrid": 9.670917500043288
+      }
+    },
+    {
+      "repetition": 2,
+      "scenario_id": "X04_reposition_useful",
+      "wall_clock_seconds": {
+        "baseline": 0.0463418000144884,
+        "sirengrid": 1.925936100014951
+      }
+    },
+    {
+      "repetition": 2,
+      "scenario_id": "X07_valid_closure",
+      "wall_clock_seconds": {
+        "baseline": 0.555013399978634,
+        "sirengrid": 7.687517500016838
+      }
+    },
+    {
+      "repetition": 2,
+      "scenario_id": "X08_no_path",
+      "wall_clock_seconds": {
+        "baseline": 0.04130759998224676,
+        "sirengrid": 0.03943900001468137
+      }
+    },
+    {
+      "repetition": 2,
+      "scenario_id": "X10_insufficient_resources",
+      "wall_clock_seconds": {
+        "baseline": 0.009684400050900877,
+        "sirengrid": 0.005061299947556108
+      }
+    },
+    {
+      "repetition": 2,
+      "scenario_id": "X11_hospital_unknown",
+      "wall_clock_seconds": {
+        "baseline": 0.14549310004804283,
+        "sirengrid": 2.0536142000346445
+      }
+    },
+    {
+      "repetition": 2,
+      "scenario_id": "X15_material_eta_replan",
+      "wall_clock_seconds": {
+        "baseline": 0.5395023999735713,
+        "sirengrid": 7.808358600013889
+      }
+    },
+    {
+      "repetition": 2,
+      "scenario_id": "X19_two_incidents_available",
+      "wall_clock_seconds": {
+        "baseline": 0.020775899989530444,
+        "sirengrid": 1.9130309000029229
+      }
+    },
+    {
+      "repetition": 3,
+      "scenario_id": "T01_urgent_activation",
+      "wall_clock_seconds": {
+        "baseline": 7.599314199993387,
+        "sirengrid": 0.15794499998446554
+      }
+    },
+    {
+      "repetition": 3,
+      "scenario_id": "T11_hospital_prealert",
+      "wall_clock_seconds": {
+        "baseline": 0.7579903000150807,
+        "sirengrid": 4.753711499972269
+      }
+    },
+    {
+      "repetition": 3,
+      "scenario_id": "X02_multi_resource",
+      "wall_clock_seconds": {
+        "baseline": 0.2619740999653004,
+        "sirengrid": 9.68808779999381
+      }
+    },
+    {
+      "repetition": 3,
+      "scenario_id": "X04_reposition_useful",
+      "wall_clock_seconds": {
+        "baseline": 0.047286199987865984,
+        "sirengrid": 1.945990799984429
+      }
+    },
+    {
+      "repetition": 3,
+      "scenario_id": "X07_valid_closure",
+      "wall_clock_seconds": {
+        "baseline": 0.5495681999600492,
+        "sirengrid": 7.8504872000194155
+      }
+    },
+    {
+      "repetition": 3,
+      "scenario_id": "X08_no_path",
+      "wall_clock_seconds": {
+        "baseline": 0.04489720001583919,
+        "sirengrid": 0.042319699947256595
+      }
+    },
+    {
+      "repetition": 3,
+      "scenario_id": "X10_insufficient_resources",
+      "wall_clock_seconds": {
+        "baseline": 0.010581999958958477,
+        "sirengrid": 0.004563900001812726
+      }
+    },
+    {
+      "repetition": 3,
+      "scenario_id": "X11_hospital_unknown",
+      "wall_clock_seconds": {
+        "baseline": 0.14830160001292825,
+        "sirengrid": 2.065438399964478
+      }
+    },
+    {
+      "repetition": 3,
+      "scenario_id": "X15_material_eta_replan",
+      "wall_clock_seconds": {
+        "baseline": 0.5463793000089936,
+        "sirengrid": 7.9484585000318475
+      }
+    },
+    {
+      "repetition": 3,
+      "scenario_id": "X19_two_incidents_available",
+      "wall_clock_seconds": {
+        "baseline": 0.020038000016938895,
+        "sirengrid": 1.9250466999947093
+      }
+    }
+  ],
+  "scenario_ids": [
+    "T01_urgent_activation",
+    "X02_multi_resource",
+    "X04_reposition_useful",
+    "X07_valid_closure",
+    "X08_no_path",
+    "X10_insufficient_resources",
+    "X11_hospital_unknown",
+    "X15_material_eta_replan",
+    "X19_two_incidents_available",
+    "T11_hospital_prealert"
+  ],
+  "warmup_excluded": true
+}
