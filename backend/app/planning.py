@@ -69,6 +69,7 @@ from app.schemas import (
 __all__ = [
     "router",
     "generate_response_plan",
+    "generate_canonical_candidate_set",
     "generate_phase04_candidate_plans",
     "serialize_plan",
     "approve_response_plan",
@@ -166,26 +167,15 @@ def serialize_plan(plan: ResponsePlan) -> dict[str, Any]:
     }
 
 
-@router.post(
-    "/incidents/{incident_id}/plans/generate",
-    status_code=status.HTTP_201_CREATED,
-    response_model=ResponsePlanRead,
-)
-def generate_response_plan(
+def generate_canonical_candidate_set(
+    db: Session,
     incident_id: str,
-    db: Session = Depends(get_db),
-) -> dict[str, Any]:
-    """Generate a minimal deterministic candidate response plan for an incident.
+) -> list[ResponsePlan]:
+    """Generate and persist the canonical Phase 04 candidate comparison set.
 
-    Algorithm:
-    1. Query eligible AVAILABLE unassigned resources for each required resource type.
-    2. Compute real base OSM route from each eligible resource to the incident coordinate.
-    3. Exclude route infeasible candidates. Fail clearly with HTTP 409 if routeable candidates < count.
-    4. Sort routeable candidates by eta_seconds ascending and select exact count. Never reuse a resource.
-    5. Construct ResponsePlan with actual computed metrics and strict score breakdown.
-    6. In one atomic DB transaction: persist ResponsePlan with incident_version matching the post-generation
-       incident version, mark prior current RECOMMENDED plan SUPERSEDED, set incident status AWAITING_APPROVAL,
-       increment incident version, set current_plan_id, and log PLAN_GENERATED timeline event.
+    Expensive routing, coverage, and ranking run after the initial read
+    transaction is released. The captured incident/resource state is checked
+    again under SQLite's immediate write lock before any plan is persisted.
     """
     incident = db.get(Incident, incident_id)
     if incident is None:
@@ -193,11 +183,13 @@ def generate_response_plan(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Incident '{incident_id}' not found",
         )
-
-    if incident.status in (IncidentStatus.CLOSED, IncidentStatus.CANCELLED_FALSE_REPORT):
+    if incident.status in (
+        IncidentStatus.CLOSED,
+        IncidentStatus.CANCELLED_FALSE_REPORT,
+    ):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Cannot generate response plan for incident with status {incident.status.value}",
+            detail=f"Cannot generate response plans for incident with status {incident.status.value}",
         )
     if incident.current_plan_id:
         active_plan = db.get(ResponsePlan, incident.current_plan_id)
@@ -210,205 +202,97 @@ def generate_response_plan(
                 ),
             )
 
-    requirements = incident.required_resources_json or []
-    if not requirements:
+    resource_records = tuple(
+        db.scalars(
+            select(EmergencyResource).order_by(EmergencyResource.id.asc())
+        ).all()
+    )
+    captured_state = _capture_phase04_planning_state(incident, resource_records)
+    # Candidate routing/coverage is CPU- and I/O-heavy. Release the read
+    # transaction before evaluating so concurrent authoritative mutations can
+    # proceed; the captured state is checked again before persistence.
+    db.rollback()
+    try:
+        resolution, ranked, reposition_proposals, now_utc = evaluate_phase04_candidate_set(
+            db,
+            incident,
+        )
+    except ResponseRequirementsUnavailableError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Incident has no required resources specified",
-        )
+            detail=str(exc),
+        ) from exc
+    except (OSError, RuntimeError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Phase 04 planning assets unavailable: {exc}",
+        ) from exc
+    except (NoFeasibleCandidateError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"No feasible Phase 04 candidate set: {exc}",
+        ) from exc
 
-    # Load routing graph once for candidate route evaluation
-    graph = load_routing_graph()
-    destination = Coordinate(lat=incident.latitude, lon=incident.longitude)
-
-    selected_resources: list[EmergencyResource] = []
-    selected_routes: list[RouteResult] = []
-    selected_resource_ids: set[str] = set()
-
-    for req in requirements:
-        raw_type = req.get("resource_type")
-        count = int(req.get("count", 0))
-        if count <= 0:
-            continue
-
-        try:
-            target_type = (
-                ResourceType(raw_type)
-                if isinstance(raw_type, str)
-                else raw_type
-            )
-        except ValueError:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"Unknown resource type: {raw_type}",
-            )
-
-        # 1. Query only EmergencyResource with matching type, status AVAILABLE, unassigned
-        stmt = (
-            select(EmergencyResource)
-            .where(
-                EmergencyResource.resource_type == target_type,
-                EmergencyResource.status == ResourceStatus.AVAILABLE,
-            )
-            .order_by(EmergencyResource.id.asc())
-        )
-        candidates = db.scalars(stmt).all()
-
-        # Filter strictly with is_planner_eligible and exclude resources selected earlier in this generation
-        eligible_candidates = [
-            res for res in candidates
-            if res.id not in selected_resource_ids and is_planner_eligible(res)
-        ]
-
-        # 2 & 3. Compute route from candidate to incident coordinate, excluding infeasible routes
-        routeable_candidates: list[tuple[EmergencyResource, RouteResult]] = []
-        for candidate in eligible_candidates:
-            origin = Coordinate(lat=candidate.latitude, lon=candidate.longitude)
-            try:
-                route = compute_route_on_graph(graph, origin, destination)
-            except (RoutingPointOutsideGraphError, RouteNotFoundError, ValueError):
-                continue
-
-            routeable_candidates.append((candidate, route))
-
-        # Check sufficiency: if fewer routeable candidates remain than required count, fail clearly
-        if len(routeable_candidates) < count:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=(
-                    f"Insufficient eligible routeable resources for {target_type.value}: "
-                    f"required {count}, available {len(routeable_candidates)}"
-                ),
-            )
-
-        # 4. Sort by eta_seconds ascending (tie-breaking deterministically by distance_m then resource id)
-        routeable_candidates.sort(
-            key=lambda item: (item[1].eta_seconds, item[1].distance_m, item[0].id)
-        )
-
-        chosen = routeable_candidates[:count]
-        for res, route in chosen:
-            selected_resources.append(res)
-            selected_routes.append(route)
-            selected_resource_ids.add(res.id)
-
-    # 5. Build routes records preserving full data for approval without recomputation
-    routes_records: list[dict[str, Any]] = []
-    for res, route in zip(selected_resources, selected_routes):
-        type_str = (
-            res.resource_type.value
-            if hasattr(res.resource_type, "value")
-            else str(res.resource_type)
-        )
-        routes_records.append({
-            "resource_id": res.id,
-            "resource_type": type_str,
-            "resource_name": res.name,
-            "origin": {
-                "lat": res.latitude,
-                "lon": res.longitude,
-            },
-            "destination": {
-                "lat": incident.latitude,
-                "lon": incident.longitude,
-            },
-            "route_geometry": route.geometry,
-            "geometry": route.geometry,
-            "distance_m": round(route.distance_m, 2),
-            "eta_seconds": round(route.eta_seconds, 2),
-            "origin_snap_distance_m": round(route.origin_snap_distance_m, 2),
-            "destination_snap_distance_m": round(route.destination_snap_distance_m, 2),
-            "snap_distances": {
-                "origin_snap_distance_m": round(route.origin_snap_distance_m, 2),
-                "destination_snap_distance_m": round(route.destination_snap_distance_m, 2),
-            },
-            "routing_source": route.routing_source,
-            "nodes": route.nodes,
-        })
-
-    # 6. Compute actual metrics
-    etas = [r.eta_seconds for r in selected_routes]
-    max_eta = round(max(etas), 2)
-    mean_eta = round(sum(etas) / len(etas), 2)
-    selected_count = len(selected_resources)
-
-    metrics_record = {
-        "max_arrival_eta_seconds": max_eta,
-        "mean_arrival_eta_seconds": mean_eta,
-        "selected_resource_count": selected_count,
-        "routing_source": "OSM_BASE_TRAVEL_TIME",
-    }
-
-    # 7. Plan versioning and metadata
-    post_gen_incident_version = incident.version + 1
-
-    # Minimally and atomically mark prior current RECOMMENDED plan SUPERSEDED
-    if incident.current_plan_id:
-        prev_plan = db.get(ResponsePlan, incident.current_plan_id)
-        if prev_plan and prev_plan.status == ResponsePlanStatus.RECOMMENDED:
-            prev_plan.status = ResponsePlanStatus.SUPERSEDED
-
-    existing_plans = db.scalars(
-        select(ResponsePlan).where(ResponsePlan.incident_id == incident.id)
-    ).all()
-    plan_version = (
-        max(p.plan_version for p in existing_plans) + 1
-        if existing_plans
-        else 1
+    _acquire_write_lock(db)
+    db.expire_all()
+    current_incident = db.get(Incident, incident_id)
+    current_resources = tuple(
+        db.scalars(
+            select(EmergencyResource).order_by(EmergencyResource.id.asc())
+        ).all()
     )
+    if (
+        current_incident is None
+        or _capture_phase04_planning_state(current_incident, current_resources)
+        != captured_state
+    ):
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Stale planning state: incident or resource inputs changed during candidate generation",
+        )
 
-    now_utc = datetime.now(timezone.utc)
-    plan_id = str(uuid.uuid4())
-
-    plan = ResponsePlan(
-        id=plan_id,
-        incident_id=incident.id,
-        incident_version=post_gen_incident_version,
-        plan_version=plan_version,
-        status=ResponsePlanStatus.RECOMMENDED,
-        resource_ids_json=[res.id for res in selected_resources],
-        routes_json=routes_records,
-        metrics_json=metrics_record,
-        score_breakdown_json=dict(SCORE_BREAKDOWN_PHASE01),
-        created_at=now_utc,
-    )
-
-    # 8. Atomic single-transaction commit
-    incident.status = IncidentStatus.AWAITING_APPROVAL
-    incident.version = post_gen_incident_version
-    incident.current_plan_id = plan_id
-    incident.updated_at = now_utc
-
-    timeline_event = TimelineEvent(
-        id=str(uuid.uuid4()),
-        incident_id=incident.id,
-        event_type="PLAN_GENERATED",
-        details_json={
-            "plan_id": plan_id,
-            "plan_version": plan_version,
-            "incident_version": post_gen_incident_version,
-            "resource_ids": [res.id for res in selected_resources],
-            "selected_resource_count": selected_count,
-            "max_arrival_eta_seconds": max_eta,
-            "mean_arrival_eta_seconds": mean_eta,
-            "routing_source": "OSM_BASE_TRAVEL_TIME",
+    persisted = persist_candidate_set(
+        db,
+        current_incident,
+        ranked,
+        reposition_proposals=reposition_proposals,
+        now_utc=now_utc,
+        requirements_metadata={
+            "source": resolution.source.value,
+            "matrix_version": resolution.matrix_version,
+            "prototype_policy_label": resolution.prototype_policy_label,
         },
-        created_at=now_utc,
     )
-
-    db.add(plan)
-    db.add(timeline_event)
-    db.commit()
-    db.refresh(plan)
-    db.refresh(incident)
-
     publish_operations_event(
         event="incident.updated",
-        incident_id=incident.id,
-        payload=serialize_incident(incident),
+        incident_id=current_incident.id,
+        payload=serialize_incident(current_incident),
     )
+    return persisted
 
-    return serialize_plan(plan)
+
+@router.post(
+    "/incidents/{incident_id}/plans/generate",
+    status_code=status.HTTP_201_CREATED,
+    response_model=ResponsePlanRead,
+)
+def generate_response_plan(
+    incident_id: str,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Preserve the legacy single-plan response over the canonical planner."""
+    persisted = generate_canonical_candidate_set(db, incident_id)
+    recommended = next(
+        (plan for plan in persisted if plan.status == ResponsePlanStatus.RECOMMENDED),
+        None,
+    )
+    if recommended is None:  # pragma: no cover - persistence invariant
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Canonical planner persisted no RECOMMENDED response plan",
+        )
+    return serialize_plan(recommended)
 
 
 def _phase04_source_requirements(
@@ -649,99 +533,10 @@ def generate_phase04_candidate_plans(
     db: Session = Depends(get_db),
 ) -> list[dict[str, Any]]:
     """Generate and persist the bounded Phase 04 comparison candidate set."""
-    incident = db.get(Incident, incident_id)
-    if incident is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Incident '{incident_id}' not found",
-        )
-    if incident.status in (
-        IncidentStatus.CLOSED,
-        IncidentStatus.CANCELLED_FALSE_REPORT,
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Cannot generate response plans for incident with status {incident.status.value}",
-        )
-    if incident.current_plan_id:
-        active_plan = db.get(ResponsePlan, incident.current_plan_id)
-        if active_plan is not None and active_plan.status == ResponsePlanStatus.APPROVED:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=(
-                    "Incident already has an active APPROVED plan; use the Phase 07 "
-                    "replan trigger/evaluation flow"
-                ),
-            )
-
-    resource_records = tuple(
-        db.scalars(
-            select(EmergencyResource).order_by(EmergencyResource.id.asc())
-        ).all()
-    )
-    captured_state = _capture_phase04_planning_state(incident, resource_records)
-    # Candidate routing/coverage is CPU- and I/O-heavy. Release the read
-    # transaction before evaluating so concurrent authoritative mutations can
-    # proceed; the captured state is checked again before persistence.
-    db.rollback()
-    try:
-        resolution, ranked, reposition_proposals, now_utc = evaluate_phase04_candidate_set(
-            db,
-            incident,
-        )
-    except ResponseRequirementsUnavailableError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=str(exc),
-        ) from exc
-    except (OSError, RuntimeError) as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Phase 04 planning assets unavailable: {exc}",
-        ) from exc
-    except (NoFeasibleCandidateError, ValueError) as exc:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"No feasible Phase 04 candidate set: {exc}",
-        ) from exc
-
-    _acquire_write_lock(db)
-    db.expire_all()
-    current_incident = db.get(Incident, incident_id)
-    current_resources = tuple(
-        db.scalars(
-            select(EmergencyResource).order_by(EmergencyResource.id.asc())
-        ).all()
-    )
-    if (
-        current_incident is None
-        or _capture_phase04_planning_state(current_incident, current_resources)
-        != captured_state
-    ):
-        db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Stale planning state: incident or resource inputs changed during candidate generation",
-        )
-
-    persisted = persist_candidate_set(
-        db,
-        current_incident,
-        ranked,
-        reposition_proposals=reposition_proposals,
-        now_utc=now_utc,
-        requirements_metadata={
-            "source": resolution.source.value,
-            "matrix_version": resolution.matrix_version,
-            "prototype_policy_label": resolution.prototype_policy_label,
-        },
-    )
-    publish_operations_event(
-        event="incident.updated",
-        incident_id=current_incident.id,
-        payload=serialize_incident(current_incident),
-    )
-    return [serialize_plan(plan) for plan in persisted]
+    return [
+        serialize_plan(plan)
+        for plan in generate_canonical_candidate_set(db, incident_id)
+    ]
 
 
 @router.get(
