@@ -1030,6 +1030,15 @@ class IncidentCloseRequest(BaseModel):
     reason: str | None = None
 
 
+class IncidentCancelRequest(BaseModel):
+    """Operator cancellation for a report confirmed to be false."""
+
+    expected_incident_version: int = Field(ge=1)
+    operator_reference: str = Field(min_length=1)
+    reason_code: str = Field(default="FALSE_REPORT", min_length=1, max_length=64)
+    reason: str | None = Field(default=None, max_length=500)
+
+
 class TimelineEventRead(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={

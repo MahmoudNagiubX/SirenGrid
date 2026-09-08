@@ -19,9 +19,7 @@ from app.coverage import CoverageZone
 from app.main import app
 from app.models import EmergencyResource, Incident, ResponsePlan, TimelineEvent
 from app.routing import (
-    RouteNotFoundError,
     RouteResult,
-    RoutingPointOutsideGraphError,
 )
 from app.schemas import (
     ConfidenceLevel,
@@ -831,3 +829,175 @@ def test_generate_plan_real_osm_routing_integration(
         }
         assert r["geometry"]["type"] == "LineString"
         assert len(r["geometry"]["coordinates"]) >= 2
+
+
+def _cancel_false_report(client: TestClient, incident_id: str, version: int) -> Any:
+    return client.post(
+        f"/api/v1/incidents/{incident_id}/cancel",
+        json={
+            "expected_incident_version": version,
+            "operator_reference": "dispatcher-cancel",
+            "reason": "Caller confirmed no emergency",
+        },
+    )
+
+
+def test_cancel_false_report_before_any_plan(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    incident = create_test_incident(db=db_session)
+
+    response = _cancel_false_report(client, incident.id, 1)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == IncidentStatus.CANCELLED_FALSE_REPORT.value
+    assert response.json()["version"] == 2
+    db_session.expire_all()
+    reloaded = db_session.get(Incident, incident.id)
+    assert reloaded is not None
+    assert reloaded.current_plan_id is None
+    event = db_session.scalars(
+        select(TimelineEvent).where(
+            TimelineEvent.incident_id == incident.id,
+            TimelineEvent.event_type == "INCIDENT_CANCELLED",
+        )
+    ).one()
+    assert event.details_json["operator_reference"] == "dispatcher-cancel"
+
+
+def test_cancel_false_report_supersedes_unapproved_candidate_plans(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    configure_canonical_planner(
+        monkeypatch,
+        planner_graph([("amb-cancel", 30.0610, 31.3410, 100.0)]),
+    )
+    incident = create_test_incident(db=db_session)
+    create_test_resource(
+        db=db_session,
+        resource_id="amb-cancel",
+        name="Cancel Ambulance",
+        lat=30.0610,
+        lon=31.3410,
+    )
+    generated = client.post(f"/api/v1/incidents/{incident.id}/plans/generate")
+    assert generated.status_code == 201, generated.text
+    plan = generated.json()
+
+    response = _cancel_false_report(client, incident.id, plan["incident_version"])
+
+    assert response.status_code == 200, response.text
+    db_session.expire_all()
+    plans = db_session.scalars(
+        select(ResponsePlan).where(ResponsePlan.incident_id == incident.id)
+    ).all()
+    assert plans
+    assert all(item.status == ResponsePlanStatus.SUPERSEDED for item in plans)
+    approval = client.post(
+        f"/api/v1/plans/{plan['id']}/approve",
+        json={
+            "expected_incident_version": plan["incident_version"] + 1,
+            "expected_plan_version": plan["plan_version"],
+            "operator_reference": "dispatcher-cancel",
+        },
+    )
+    assert approval.status_code == 409
+    assert client.post(
+        f"/api/v1/incidents/{incident.id}/plans/generate"
+    ).status_code == 409
+
+
+def test_cancel_false_report_rejects_stale_version_and_repeat(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    incident = create_test_incident(db=db_session)
+
+    stale = _cancel_false_report(client, incident.id, 99)
+    assert stale.status_code == 409
+    assert "version mismatch" in stale.json()["detail"].lower()
+    assert _cancel_false_report(client, incident.id, 1).status_code == 200
+    repeat = _cancel_false_report(client, incident.id, 2)
+    assert repeat.status_code == 409
+    assert "INCIDENT_NOT_CANCELLABLE" in repeat.json()["detail"]
+    db_session.expire_all()
+    assert db_session.get(Incident, incident.id).version == 2
+
+
+def test_cancel_false_report_rejects_committed_response_without_release(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    configure_canonical_planner(
+        monkeypatch,
+        planner_graph([("amb-committed", 30.0610, 31.3410, 100.0)]),
+    )
+    incident = create_test_incident(db=db_session)
+    resource = create_test_resource(
+        db=db_session,
+        resource_id="amb-committed",
+        name="Committed Ambulance",
+        lat=30.0610,
+        lon=31.3410,
+    )
+    generated = client.post(f"/api/v1/incidents/{incident.id}/plans/generate")
+    assert generated.status_code == 201, generated.text
+    plan = generated.json()
+    approved = client.post(
+        f"/api/v1/plans/{plan['id']}/approve",
+        json={
+            "expected_incident_version": plan["incident_version"],
+            "expected_plan_version": plan["plan_version"],
+            "operator_reference": "dispatcher-approve",
+        },
+    )
+    assert approved.status_code == 200, approved.text
+    db_session.expire_all()
+    active = db_session.get(Incident, incident.id)
+    assert active is not None
+    response = _cancel_false_report(client, incident.id, active.version)
+    assert response.status_code == 409
+    assert "RESPONSE_ALREADY_COMMITTED" in response.json()["detail"]
+    db_session.expire_all()
+    reloaded_resource = db_session.get(EmergencyResource, resource.id)
+    assert reloaded_resource is not None
+    assert reloaded_resource.status == ResourceStatus.ASSIGNED
+    assert reloaded_resource.assigned_incident_id == incident.id
+
+
+def test_concurrent_false_report_cancellation_has_one_winner(
+    db_session: Session,
+) -> None:
+    incident = create_test_incident(db=db_session)
+    worker_count = 3
+    start_barrier = threading.Barrier(worker_count)
+
+    def cancel(_: int) -> int:
+        with TestClient(app) as worker_client:
+            start_barrier.wait(timeout=30.0)
+            return _cancel_false_report(worker_client, incident.id, 1).status_code
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=worker_count) as executor:
+        codes = sorted(
+            future.result(timeout=60.0)
+            for future in [executor.submit(cancel, i) for i in range(worker_count)]
+        )
+
+    assert codes == [200, 409, 409]
+    db_session.expire_all()
+    reloaded = db_session.get(Incident, incident.id)
+    assert reloaded is not None
+    assert reloaded.status == IncidentStatus.CANCELLED_FALSE_REPORT
+    assert reloaded.version == 2
+    assert len(
+        db_session.scalars(
+            select(TimelineEvent).where(
+                TimelineEvent.incident_id == incident.id,
+                TimelineEvent.event_type == "INCIDENT_CANCELLED",
+            )
+        ).all()
+    ) == 1
