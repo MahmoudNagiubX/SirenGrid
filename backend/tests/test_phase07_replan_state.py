@@ -21,6 +21,7 @@ from app.models import (
     Incident,
     ReplanEvaluation,
     ResponsePlan,
+    TimelineEvent,
 )
 from app.replanning import merge_pending_trigger
 from app.planning import resource_coordinate_for_replan
@@ -1586,3 +1587,123 @@ def test_concurrent_identical_replan_flushes_persist_one_set(
     assert len(pending_plans) == 1
     assert len(evaluations) == 1
     assert evaluations[0].status == "RECOMMENDED"
+
+
+def _approved_incident_for_atomicity(db_session: Session) -> Incident:
+    incident = Incident(
+        id=str(uuid.uuid4()),
+        version=3,
+        incident_type="traffic_collision",
+        severity=Severity.HIGH,
+        confidence_level=ConfidenceLevel.HIGH,
+        status=IncidentStatus.RESPONSE_ACTIVE,
+        latitude=30.0561,
+        longitude=31.3452,
+        required_resources_json=[{"resource_type": "AMBULANCE", "count": 1}],
+        current_plan_id=None,
+    )
+    plan = ResponsePlan(
+        id=f"plan-{incident.id}",
+        incident_id=incident.id,
+        incident_version=3,
+        plan_version=1,
+        status=ResponsePlanStatus.APPROVED,
+        resource_ids_json=[],
+        routes_json=[],
+        metrics_json={},
+        score_breakdown_json={},
+    )
+    incident.current_plan_id = plan.id
+    db_session.add_all([incident, plan])
+    db_session.commit()
+    return incident
+
+
+def test_fact_correction_and_replan_trigger_commit_atomically(
+    isolated_engine: Engine,
+    db_session: Session,
+) -> None:
+    """A correction and its replan trigger are one transaction.
+
+    Previously the correction committed first and the trigger committed
+    second, so a failure in the second step left the incident silently
+    changed behind an error response.
+    """
+    init_db(isolated_engine)
+    incident = _approved_incident_for_atomicity(db_session)
+
+    client = TestClient(app)
+    response = client.patch(
+        f"/api/v1/incidents/{incident.id}/facts",
+        json={
+            "expected_incident_version": 3,
+            "operator_reference": "dispatcher-atomic",
+            "casualty_count": 7,
+            "location": {"lat": 30.0600, "lon": 31.3500},
+        },
+    )
+    assert response.status_code == 200, response.text
+
+    db_session.expire_all()
+    reloaded = db_session.get(Incident, incident.id)
+    assert reloaded is not None
+    # Exactly one version bump for the whole authoritative action.
+    assert reloaded.version == 4
+    assert reloaded.casualty_count == 7
+
+    events = sorted(
+        event.event_type
+        for event in db_session.scalars(
+            select(TimelineEvent).where(TimelineEvent.incident_id == incident.id)
+        ).all()
+    )
+    assert events == ["FACTS_CORRECTED", "REPLAN_TRIGGER_RECORDED"]
+
+    triggers = db_session.scalars(
+        select(ReplanEvaluation).where(ReplanEvaluation.incident_id == incident.id)
+    ).all()
+    assert len(triggers) == 1
+    assert triggers[0].trigger_reasons_json == ["INCIDENT_FACT_CHANGED"]
+
+
+def test_failed_replan_trigger_rolls_back_the_fact_correction(
+    isolated_engine: Engine,
+    db_session: Session,
+    monkeypatch,
+) -> None:
+    """A failure recording the trigger must leave no partially applied change."""
+    init_db(isolated_engine)
+    incident = _approved_incident_for_atomicity(db_session)
+
+    import app.replanning as replanning_module
+
+    def failing_apply(*_args, **_kwargs):
+        raise RuntimeError("simulated failure recording the replan trigger")
+
+    monkeypatch.setattr(replanning_module, "apply_replan_trigger", failing_apply)
+
+    client = TestClient(app, raise_server_exceptions=False)
+    response = client.patch(
+        f"/api/v1/incidents/{incident.id}/facts",
+        json={
+            "expected_incident_version": 3,
+            "operator_reference": "dispatcher-atomic",
+            "casualty_count": 7,
+            "location": {"lat": 30.0600, "lon": 31.3500},
+        },
+    )
+    assert response.status_code >= 500
+
+    db_session.expire_all()
+    reloaded = db_session.get(Incident, incident.id)
+    assert reloaded is not None
+    # Nothing was applied: no version bump, no fact change, no audit event.
+    assert reloaded.version == 3
+    assert reloaded.casualty_count is None
+    assert reloaded.latitude == 30.0561
+    assert (
+        db_session.scalars(
+            select(TimelineEvent).where(TimelineEvent.incident_id == incident.id)
+        ).all()
+        == []
+    )

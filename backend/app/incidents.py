@@ -1142,18 +1142,21 @@ def patch_incident_facts(
 
     db.add(incident)
     db.add(timeline_event)
-    db.commit()
-    db.refresh(incident)
 
     if downstream_inputs_dirty and incident.current_plan_id:
         active_plan = db.get(ResponsePlan, incident.current_plan_id)
         if active_plan is not None and getattr(active_plan.status, "value", active_plan.status) == "APPROVED":
+            # Recorded inside this endpoint's own write transaction so the
+            # correction and its trigger commit together. Previously the
+            # correction was committed first and a failure here left the
+            # incident silently changed behind an error response.
+            #
             # Corrections are already authoritative and versioned by this
             # endpoint. Replanning is a separate pending evaluation and does
             # not mutate the active approved plan.
-            from app.replanning import record_replan_trigger
+            from app.replanning import apply_replan_trigger
 
-            record_replan_trigger(
+            apply_replan_trigger(
                 db,
                 incident_id=incident.id,
                 expected_incident_version=incident.version,
@@ -1165,6 +1168,11 @@ def patch_incident_facts(
                 },
                 now=now_utc,
             )
+
+    # One commit for the correction and its trigger together. The write lock is
+    # released here, before any notification work.
+    db.commit()
+    db.refresh(incident)
 
     serialized_incident = serialize_incident(incident)
     publish_operations_event(

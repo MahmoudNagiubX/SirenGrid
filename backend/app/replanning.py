@@ -248,12 +248,44 @@ def record_replan_trigger(
     input_references: dict[str, Any],
     now: datetime | None = None,
 ) -> tuple[ReplanEvaluation, bool]:
-    """Record/coalesce a trigger without changing incident version.
+    """Acquire the write lock, record/coalesce a trigger, and commit.
 
-    Returns ``(evaluation, idempotent)``. The caller owns the transaction and
-    can use this helper from both the REST command and future domain events.
+    Returns ``(evaluation, idempotent)``. Use this from a REST command that
+    owns the whole request. A caller that is already inside its own write
+    transaction must call :func:`apply_replan_trigger` instead so the work
+    joins that transaction rather than committing separately.
     """
     _acquire_write_lock(db)
+    evaluation, idempotent = apply_replan_trigger(
+        db,
+        incident_id=incident_id,
+        expected_incident_version=expected_incident_version,
+        trigger_reasons=trigger_reasons,
+        input_references=input_references,
+        now=now,
+    )
+    db.commit()
+    db.refresh(evaluation)
+    return evaluation, idempotent
+
+
+def apply_replan_trigger(
+    db: Session,
+    *,
+    incident_id: str,
+    expected_incident_version: int,
+    trigger_reasons: list[str],
+    input_references: dict[str, Any],
+    now: datetime | None = None,
+) -> tuple[ReplanEvaluation, bool]:
+    """Record/coalesce a trigger inside the caller's open write transaction.
+
+    Acquires no lock and performs no commit, so a command that already changed
+    authoritative state can record its trigger atomically with that change
+    instead of leaving a partially applied correction behind on failure.
+
+    Does not change the incident version.
+    """
     incident = db.get(Incident, incident_id)
     if incident is None:
         raise HTTPException(
@@ -338,8 +370,8 @@ def record_replan_trigger(
             created_at=now_utc,
         )
     )
-    db.commit()
-    db.refresh(evaluation)
+    # No commit here: the caller owns the transaction.
+    db.flush()
     return evaluation, idempotent
 
 

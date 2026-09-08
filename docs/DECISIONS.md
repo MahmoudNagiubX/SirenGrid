@@ -1363,3 +1363,39 @@ Ambiguous pairs fall back to `REQUIRES_REVIEW` rather than merging. Genuine
 corroboration is unaffected: an exact phrase match, two or more shared
 significant tokens, or a shared trusted source reference still auto-associate.
 Fusion remains a non-activation gate.
+
+## PD-073 - Atomic Fact Correction and Replan Trigger
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner (post-audit hardening mission, HD-014)
+
+### Decision
+
+Recording a replan trigger is split by transaction ownership:
+
+- `record_replan_trigger()` acquires the write lock, records, and commits. It
+  is for a REST command that owns the whole request.
+- `apply_replan_trigger()` acquires no lock and does not commit. It is for a
+  command already inside its own write transaction.
+
+`PATCH /incidents/{id}/facts` uses `apply_replan_trigger()`, so the fact
+correction and its trigger commit together in one transaction with one
+incident-version increment. The WebSocket event is published after the commit,
+with no write lock held during notification.
+
+### Reason
+
+The correction previously committed first and the trigger committed second.
+Reproduced with a controlled failure in the second step: the endpoint returned
+500 while the correction was durably applied, the incident version had already
+advanced from 3 to 4, the facts had changed, a `FACTS_CORRECTED` event was
+written, and no WebSocket event was published. The operator saw a failure
+while the incident had silently changed.
+
+### Impact
+
+A failure recording the trigger now rolls the whole request back: no version
+bump, no fact change, no audit event. The five-second debounce and
+idempotency rules are unchanged, and the REST trigger endpoint keeps its
+existing commit behaviour.
