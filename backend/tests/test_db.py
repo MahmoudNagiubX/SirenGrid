@@ -35,7 +35,7 @@ def test_sqlite_engine_connect_args(default_db_engine: Engine | None) -> None:
 
 
 def test_sqlite_pragmas_enabled(isolated_engine: Engine) -> None:
-    """Verify PRAGMA foreign_keys=ON and PRAGMA journal_mode=WAL are active."""
+    """Verify SQLite safety and concurrency pragmas are active."""
     with isolated_engine.connect() as conn:
         fk_status = conn.execute(text("PRAGMA foreign_keys;")).scalar()
         assert fk_status == 1
@@ -43,6 +43,7 @@ def test_sqlite_pragmas_enabled(isolated_engine: Engine) -> None:
         journal_mode = conn.execute(text("PRAGMA journal_mode;")).scalar()
         assert journal_mode is not None
         assert str(journal_mode).lower() == "wal"
+        assert conn.execute(text("PRAGMA busy_timeout;")).scalar() == 5000
 
         # Verify foreign keys are actively enforced
         conn.execute(
@@ -64,6 +65,24 @@ def test_sqlite_pragmas_enabled(isolated_engine: Engine) -> None:
                 text("INSERT INTO child_test (id, parent_id) VALUES (1, 999);")
             )
             conn.commit()
+
+
+def test_sqlite_busy_timeout_is_explicit_when_driver_default_is_disabled(
+    tmp_path: Path,
+) -> None:
+    target_engine = db_module.create_engine(
+        f"sqlite:///{tmp_path / 'busy-timeout.db'}",
+        connect_args={"timeout": 0},
+    )
+    try:
+        with target_engine.connect() as conn:
+            assert conn.execute(text("PRAGMA busy_timeout;")).scalar() == 5000
+    finally:
+        target_engine.dispose()
+
+
+def test_non_sqlite_database_url_has_no_sqlite_connect_args() -> None:
+    assert db_module._connect_args_for_database_url("postgresql://db/test") == {}
 
 
 def test_isolated_temporary_db(isolated_engine: Engine, tmp_db_file: Path) -> None:

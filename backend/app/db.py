@@ -25,14 +25,15 @@ def _set_sqlite_pragma(
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA foreign_keys=ON;")
         cursor.execute("PRAGMA journal_mode=WAL;")
+        cursor.execute("PRAGMA busy_timeout=5000;")
         cursor.close()
 
 
-connect_args = (
-    {"check_same_thread": False}
-    if settings.DATABASE_URL.startswith("sqlite")
-    else {}
-)
+def _connect_args_for_database_url(database_url: str) -> dict[str, object]:
+    return {"check_same_thread": False} if database_url.startswith("sqlite") else {}
+
+
+connect_args = _connect_args_for_database_url(settings.DATABASE_URL)
 
 engine = create_engine(
     settings.DATABASE_URL,

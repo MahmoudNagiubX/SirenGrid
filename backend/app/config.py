@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 try:
     from dotenv import load_dotenv
@@ -15,6 +15,12 @@ except ImportError:  # pragma: no cover
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DATA_DIR = REPO_ROOT / "data" / "processed" / "nasr_city"
 DEFAULT_PHASE06_MEDIA_DIR = REPO_ROOT / "backend" / ".runtime" / "media"
+DEFAULT_CORS_ORIGINS = (
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+)
 
 ENV_PATH = REPO_ROOT / "backend" / ".env"
 if load_dotenv is not None and ENV_PATH.exists():
@@ -23,7 +29,7 @@ if load_dotenv is not None and ENV_PATH.exists():
 
 def _parse_cors_origins(raw: str | None) -> list[str]:
     if not raw:
-        return ["*"]
+        return list(DEFAULT_CORS_ORIGINS)
     raw = raw.strip()
     if raw.startswith("[") and raw.endswith("]"):
         try:
@@ -39,7 +45,7 @@ class Settings(BaseModel):
     app_name: str = Field(default="SirenGrid API")
     api_prefix: str = Field(default="/api/v1")
     database_url: str = Field(default="sqlite:///./sirengrid.db")
-    cors_origins: list[str] = Field(default_factory=lambda: ["*"])
+    cors_origins: list[str] = Field(default_factory=lambda: list(DEFAULT_CORS_ORIGINS))
     max_route_snap_distance_m: float = Field(default=1500.0)
     prototype_target_response_time_seconds: Literal[600] = 600
     max_candidate_responders_per_cohort: Literal[5] = 5
@@ -90,6 +96,13 @@ class Settings(BaseModel):
     replan_coverage_drop_trigger: Literal[0.05] = 0.05
     replan_debounce_seconds: Literal[5] = 5
     simulation_controls_enabled: bool = False
+
+    @field_validator("cors_origins")
+    @classmethod
+    def reject_credentialed_cors_wildcard(cls, origins: list[str]) -> list[str]:
+        if "*" in origins:
+            raise ValueError("CORS_ORIGINS wildcard is not allowed with credentials")
+        return origins
 
     @property
     def APP_NAME(self) -> str:
@@ -254,7 +267,7 @@ class Settings(BaseModel):
 
 def get_settings() -> Settings:
     cors_raw = os.getenv("CORS_ORIGINS")
-    cors_origins = _parse_cors_origins(cors_raw) if cors_raw else ["*"]
+    cors_origins = _parse_cors_origins(cors_raw)
 
     data_dir_env = os.getenv("NASR_CITY_DATA_DIR")
     nasr_city_data_dir = (
