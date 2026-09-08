@@ -34,7 +34,11 @@ def client() -> TestClient:
     return TestClient(app)
 
 
-def test_phase01_golden_flow(client: TestClient, db_session: Session) -> None:
+def test_phase01_golden_flow(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Execute the end-to-end Phase 01 Golden Flow integration test.
 
     Sequence:
@@ -128,6 +132,12 @@ def test_phase01_golden_flow(client: TestClient, db_session: Session) -> None:
         assert item["assigned_incident_id"] is None
         assert item["is_planner_eligible"] is True
 
+    # Keep the regression deterministic even when a local demo key is configured.
+    monkeypatch.setattr(
+        "app.planning.traffic_runtime.capture_snapshot",
+        lambda *_args, **_kwargs: None,
+    )
+
     # 5. POST /api/v1/incidents/{incident_id}/plans/generate with real OSM base routing
     with patch("urllib.request.urlopen") as mock_url:
         generate_res = client.post(f"/api/v1/incidents/{incident_id}/plans/generate")
@@ -172,8 +182,8 @@ def test_phase01_golden_flow(client: TestClient, db_session: Session) -> None:
     assert plan_data["metrics"]["selected_resource_count"] == 2
     assert plan_data["metrics"]["max_arrival_eta_seconds"] > 0
     assert plan_data["metrics"]["mean_arrival_eta_seconds"] > 0
-    assert plan_data["score_breakdown"]["algorithm"] == (
-        "MIN_BASE_ROUTE_ETA_WITH_HARD_AVAILABILITY_CONSTRAINTS"
+    assert plan_data["score_breakdown"]["policy_version"] == (
+        "SIRENGRID_PROTOTYPE_PLAN_SCORE_V1"
     )
 
     # 6. GET incident and assert status AWAITING_APPROVAL, version 2, current_plan_id equals plan ID
@@ -230,8 +240,18 @@ def test_phase01_golden_flow(client: TestClient, db_session: Session) -> None:
     assert list_plans_res.status_code == 200
     plans_list = list_plans_res.json()
     assert any(p["id"] == plan_id for p in plans_list)
-    assert len(plans_list) == 1
-    assert plans_list[0]["status"] == ResponsePlanStatus.APPROVED.value
+    assert len(plans_list) == plan_data["candidate_count"]
+    assert sum(
+        plan["status"] == ResponsePlanStatus.APPROVED.value for plan in plans_list
+    ) == 1
+    assert all(
+        plan["status"] in {
+            ResponsePlanStatus.APPROVED.value,
+            ResponsePlanStatus.ALTERNATIVE.value,
+            ResponsePlanStatus.SUPERSEDED.value,
+        }
+        for plan in plans_list
+    )
 
     timeline_stmt = (
         select(TimelineEvent)

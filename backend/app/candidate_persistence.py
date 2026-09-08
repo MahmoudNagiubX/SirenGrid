@@ -59,6 +59,9 @@ def _route_record(candidate: EvaluatedCandidate) -> list[dict[str, Any]]:
                 "source": responder.resource.source,
             }
         )
+        # Keep the Phase 01 route field available to legacy consumers while
+        # retaining the canonical Phase 04 ``geometry`` field.
+        route["route_geometry"] = route["geometry"]
         records.append(route)
     return records
 

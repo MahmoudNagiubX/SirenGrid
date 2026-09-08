@@ -236,7 +236,7 @@ def generate_canonical_candidate_set(
     except (NoFeasibleCandidateError, ValueError) as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"No feasible Phase 04 candidate set: {exc}",
+            detail=f"Insufficient eligible resources or no feasible Phase 04 candidate set: {exc}",
         ) from exc
 
     _acquire_write_lock(db)
