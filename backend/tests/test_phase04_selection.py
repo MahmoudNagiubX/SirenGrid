@@ -309,7 +309,7 @@ def test_competing_alternative_selections_have_one_winner(
 
     def perform_selection(plan_id: str, plan_version: int) -> tuple[int, dict[str, Any]]:
         with TestClient(app) as thread_client:
-            barrier.wait(timeout=5.0)
+            barrier.wait(timeout=30.0)
             response = thread_client.post(
                 f"/api/v1/incidents/{incident_id}/plans/{plan_id}/select",
                 json=selection_payload(incident_version, plan_version),

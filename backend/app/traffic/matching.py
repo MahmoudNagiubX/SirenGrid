@@ -26,7 +26,15 @@ from app.traffic.models import (
 )
 
 _GRAPH_FINGERPRINT_LOCK = RLock()
-_GRAPH_FINGERPRINT_CACHE: WeakKeyDictionary[nx.Graph, str] = WeakKeyDictionary()
+_GRAPH_FINGERPRINT_CACHE: WeakKeyDictionary[
+    nx.Graph, tuple[int, int, str]
+] = WeakKeyDictionary()
+
+
+def clear_graph_fingerprint_cache() -> None:
+    """Drop memoized graph fingerprints for tests or explicit asset refreshes."""
+    with _GRAPH_FINGERPRINT_LOCK:
+        _GRAPH_FINGERPRINT_CACHE.clear()
 
 
 def _stable_value(value: Any) -> Any:
@@ -49,8 +57,13 @@ def graph_fingerprint(graph: nx.Graph) -> str:
     """Hash graph truth deterministically without altering graph state."""
     with _GRAPH_FINGERPRINT_LOCK:
         cached = _GRAPH_FINGERPRINT_CACHE.get(graph)
-    if cached is not None:
-        return cached
+        if cached is not None:
+            node_count, edge_count, fingerprint = cached
+            if (
+                node_count == graph.number_of_nodes()
+                and edge_count == graph.number_of_edges()
+            ):
+                return fingerprint
     nodes = [
         (str(node), _stable_value(attrs))
         for node, attrs in graph.nodes(data=True)
@@ -82,7 +95,11 @@ def graph_fingerprint(graph: nx.Graph) -> str:
     ).encode("utf-8")
     fingerprint = hashlib.sha256(encoded).hexdigest()
     with _GRAPH_FINGERPRINT_LOCK:
-        _GRAPH_FINGERPRINT_CACHE[graph] = fingerprint
+        _GRAPH_FINGERPRINT_CACHE[graph] = (
+            graph.number_of_nodes(),
+            graph.number_of_edges(),
+            fingerprint,
+        )
     return fingerprint
 
 

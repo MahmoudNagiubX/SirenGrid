@@ -83,6 +83,17 @@ __all__ = [
 router = APIRouter(tags=["planning"])
 
 
+# Zone centroids and the immutable base graph are stable across planning calls.
+# The graph fingerprint in each key prevents a refreshed graph from reusing a
+# node snap computed against an older graph.
+_ZONE_NODE_CACHE: dict[tuple[Any, ...], Any] = {}
+
+
+def clear_zone_node_cache() -> None:
+    """Drop cached zone centroid snaps for tests or explicit asset refreshes."""
+    _ZONE_NODE_CACHE.clear()
+
+
 @dataclass(frozen=True)
 class _Phase04PlanningState:
     incident: tuple[Any, ...]
@@ -474,7 +485,9 @@ def evaluate_phase04_candidate_set(
         include_route_alternatives=include_route_alternatives,
     )
     travel_times_cache = travel_times_cache if travel_times_cache is not None else {}
-    zone_nodes_cache = zone_nodes_cache if zone_nodes_cache is not None else {}
+    zone_nodes_cache = (
+        zone_nodes_cache if zone_nodes_cache is not None else _ZONE_NODE_CACHE
+    )
     evaluated = tuple(
         evaluate_candidate_combination(
             graph=graph,

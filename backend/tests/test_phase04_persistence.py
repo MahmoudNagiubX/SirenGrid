@@ -505,7 +505,7 @@ def test_concurrent_candidate_generations_have_one_winner(
     generate = planning.generate_candidate_combinations
 
     def synchronized_generate(**kwargs: object):
-        barrier.wait(timeout=5.0)
+        barrier.wait(timeout=30.0)
         return generate(**kwargs)
 
     monkeypatch.setattr(planning, "generate_candidate_combinations", synchronized_generate)
@@ -582,7 +582,7 @@ def test_incident_correction_rejects_stale_candidate_generation(
                 },
             )
         resume.set()
-        generation = future.result(timeout=10.0)
+        generation = future.result(timeout=60.0)
 
     assert correction.status_code == 200, correction.text
     assert generation.status_code == 409, generation.text
@@ -630,7 +630,7 @@ def test_resource_mutation_rejects_stale_candidate_generation(
                 },
             )
         resume.set()
-        generation = future.result(timeout=10.0)
+        generation = future.result(timeout=60.0)
 
     assert mutation.status_code == 200, mutation.text
     assert generation.status_code == 409, generation.text

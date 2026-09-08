@@ -23,6 +23,7 @@ __all__ = [
     "SingleSourceTravelTimes",
     "haversine_distance_m",
     "load_routing_graph",
+    "clear_routing_graph_cache",
     "snap_coordinate_to_graph",
     "compute_route_on_graph",
     "compute_traffic_aware_route",
@@ -33,6 +34,7 @@ ROUTING_SOURCE_OSM_BASE_TRAVEL_TIME = "OSM_BASE_TRAVEL_TIME"
 ROUTING_SOURCE_TOMTOM_TRAFFIC_ADJUSTED = "TOMTOM_TRAFFIC_ADJUSTED"
 
 _GRAPH_CACHE_LOCK = RLock()
+_GRAPH_CACHE: dict[str, tuple[int, int, nx.MultiDiGraph]] = {}
 _GRAPH_SNAP_CACHE: WeakKeyDictionary[
     nx.Graph, dict[tuple[float, float, float], tuple[Any, float]]
 ] = WeakKeyDictionary()
@@ -224,7 +226,30 @@ def load_routing_graph(graph_path: Path | str | None = None) -> nx.MultiDiGraph:
     if not target_path.is_file():
         raise FileNotFoundError(f"Routing graph file not found: {target_path}")
 
-    return nx.read_graphml(target_path)
+    stats = target_path.stat()
+    cache_key = str(target_path.resolve())
+    with _GRAPH_CACHE_LOCK:
+        cached = _GRAPH_CACHE.get(cache_key)
+        if cached is not None:
+            mtime_ns, size, graph = cached
+            if mtime_ns == stats.st_mtime_ns and size == stats.st_size:
+                return graph
+
+    graph = nx.read_graphml(target_path)
+    refreshed_stats = target_path.stat()
+    with _GRAPH_CACHE_LOCK:
+        _GRAPH_CACHE[cache_key] = (
+            refreshed_stats.st_mtime_ns,
+            refreshed_stats.st_size,
+            graph,
+        )
+    return graph
+
+
+def clear_routing_graph_cache() -> None:
+    """Drop the immutable GraphML cache for tests or an explicit asset refresh."""
+    with _GRAPH_CACHE_LOCK:
+        _GRAPH_CACHE.clear()
 
 
 def snap_coordinate_to_graph(

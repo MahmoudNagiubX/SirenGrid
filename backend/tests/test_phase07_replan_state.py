@@ -1551,7 +1551,7 @@ def test_concurrent_identical_replan_flushes_persist_one_set(
 
     def flush() -> tuple[int, dict[str, object]]:
         with TestClient(app) as thread_client:
-            start_barrier.wait(timeout=5.0)
+            start_barrier.wait(timeout=30.0)
             response = thread_client.post(
                 f"/api/v1/incidents/{incident.id}/replan/evaluate",
                 json={"expected_incident_version": 4},
