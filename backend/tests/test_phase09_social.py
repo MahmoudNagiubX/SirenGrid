@@ -233,6 +233,7 @@ def test_social_refresh_evaluates_but_does_not_attach_to_incident(
     assert matching["provenance"]["association_evaluation"]
     assert matching["provenance"]["association_outcome"] == "POSSIBLE_EXISTING_INCIDENT"
     assert matching["provenance"]["verification_status"] == "UNVERIFIED"
+    assert matching["provenance"]["provider_policy"] == "SIRENGRID_SOCIAL_PROVIDER_V1"
 
 
 def test_bluesky_provider_failure_does_not_silently_use_synthetic(
@@ -260,6 +261,31 @@ def test_bluesky_provider_failure_does_not_silently_use_synthetic(
     assert response.status_code == 200
     assert response.json()["provider_status"] == "UNAVAILABLE"
     assert response.json()["signals"] == []
+
+
+def test_social_review_actions_publish_existing_operations_events(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    published: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        "app.social_api.publish_operations_event",
+        lambda **event: published.append(event),
+    )
+    refreshed = client.post(
+        "/api/v1/social/refresh",
+        json={"provider": "synthetic", "query": "vague location"},
+    )
+    signal = refreshed.json()["signals"][0]
+    assert published[0]["event"] == "social.signal_detected"
+    assert published[0]["incident_id"] is None
+
+    dismissed = client.post(
+        f"/api/v1/social/signals/{signal['id']}/dismiss",
+        json={"operator_reference": "social-reviewer"},
+    )
+    assert dismissed.status_code == 200
+    assert published[-1]["event"] == "social.signal_reviewed"
 
 
 def test_operator_can_associate_social_signal_with_insufficient_context(

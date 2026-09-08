@@ -468,6 +468,7 @@ def normalize_social_post(post: SocialPost) -> NormalizedSocialSignal:
             "source": post.provider,
             "provider_post_id": post.post_id,
             "data_reality": post.data_reality.value,
+            "provider_policy": SOCIAL_PROVIDER_VERSION,
             "normalization_policy": SOCIAL_NORMALIZATION_VERSION,
             "coordinates_trusted": post.coordinates_trusted,
         },

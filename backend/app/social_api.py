@@ -27,6 +27,7 @@ from app.phase06_api import _incident_fusion_view, _report_fusion_view
 from app.schemas import DataReality
 from app.social import (
     SOCIAL_NORMALIZATION_VERSION,
+    SOCIAL_PROVIDER_VERSION,
     SOCIAL_SOURCE_TYPE,
     BlueskyPublicProvider,
     DeterministicSyntheticSocialProvider,
@@ -99,6 +100,7 @@ def _create_social_report(db: Session, signal: NormalizedSocialSignal) -> Report
         **signal.provenance,
         "source": signal.provider,
         "verification_status": "UNVERIFIED",
+        "provider_policy": SOCIAL_PROVIDER_VERSION,
         "data_reality": signal.data_reality.value,
         "observed_at": signal.posted_at.isoformat(),
     }
