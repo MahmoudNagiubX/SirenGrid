@@ -427,6 +427,10 @@ class HospitalOperationalState(Base):
     simulated_load_ratio: Mapped[float | None] = mapped_column(Float, nullable=True, default=None)
     simulated_free_capacity: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
     incoming_cases: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
+    # Explicitly SIMULATED capability overlay, kept separate from the real
+    # public OSM registry so a demo capability can never be mistaken for a
+    # published hospital fact.
+    simulated_capability_tags_json: Mapped[list[str]] = mapped_column(JSON, default=list)
     freshness_status: Mapped[str] = mapped_column(String, default="UNKNOWN")
     last_updated: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, default=None)
     source: Mapped[str] = mapped_column(String, default="SIMULATED_HOSPITAL_GATEWAY")

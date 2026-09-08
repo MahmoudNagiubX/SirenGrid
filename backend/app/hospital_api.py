@@ -86,6 +86,7 @@ def _snapshot(db: Session, hospital_id: str) -> HospitalOperationalSnapshot:
         simulated_load_ratio=row.simulated_load_ratio,
         simulated_free_capacity=row.simulated_free_capacity,
         incoming_cases=row.incoming_cases,
+        simulated_capability_tags=tuple(row.simulated_capability_tags_json or ()),
         freshness_status=row.freshness_status,
         data_reality=(row.data_reality.value if hasattr(row.data_reality, "value") else str(row.data_reality)),
         last_updated=row.last_updated.isoformat() if row.last_updated else None,
@@ -346,6 +347,10 @@ def patch_hospital_simulation_state(
         row.simulated_free_capacity = payload.simulated_free_capacity
     if "incoming_cases" in payload.model_fields_set:
         row.incoming_cases = payload.incoming_cases
+    if "simulated_capability_tags" in payload.model_fields_set:
+        row.simulated_capability_tags_json = sorted(
+            {tag.strip() for tag in (payload.simulated_capability_tags or []) if tag.strip()}
+        )
     row.freshness_status = (
         payload.freshness_status.value
         if payload.freshness_status is not None

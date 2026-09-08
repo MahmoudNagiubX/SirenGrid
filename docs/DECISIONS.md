@@ -1288,3 +1288,44 @@ No straight-line or otherwise fabricated travel is introduced; a zero route is
 a real measurement of zero distance. Malformed stored geometry, such as
 non-numeric or out-of-bounds coordinates, is still rejected visibly. Only the
 zero-length case, which is now legitimate, became valid.
+
+## PD-071 - Simulated Hospital Capability Overlay
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner (post-audit hardening mission, HD-009)
+
+### Decision
+
+Hospital operational state gains an explicitly `SIMULATED` capability overlay,
+`simulated_capability_tags`, stored on `HospitalOperationalState` and set
+through `PATCH /hospitals/{id}/simulation-state`.
+
+The static OSM registry is never modified. Ranking confirms a required
+capability from the real public registry first and consults the simulated
+overlay only when the registry does not already confirm it. Every score
+breakdown records `capability_source`
+(`NOT_REQUIRED`, `REAL_PUBLIC_REGISTRY`, `SIMULATED_OVERLAY`, or `UNKNOWN`),
+`capability_data_reality`, and the static and simulated tag sets separately,
+so a demo capability can never be read as a published hospital fact.
+
+Absence of an overlay remains `UNKNOWN`, never a confirmed incompatibility.
+
+### Reason
+
+Of the 27 OSM hospitals in the Nasr City asset, only one carries any
+`healthcare:speciality`, none declares a confirmed incompatibility, and none
+publishes capacity. With static capacity weighted 0.00, every non-ETA term was
+a uniform constant, so hospital ranking collapsed to nearest-by-ETA and Master
+Plan F13, preferring a farther but more suitable hospital, could not be
+demonstrated at all.
+
+Inventing specialties in the OSM asset was rejected outright: it would present
+simulated data as real public fact.
+
+### Impact
+
+A deterministic fixture can now show a farther hospital winning because it
+carries the required burn-care capability, is accepting, and has a lighter
+modeled load, with the explanation naming the simulated source. Existing local
+databases receive the column through the additive migration path.

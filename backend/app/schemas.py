@@ -1359,6 +1359,8 @@ class HospitalOperationalStatePatchRequest(BaseModel):
     simulated_load_ratio: float | None = Field(default=None, ge=0.0, le=1.0)
     simulated_free_capacity: int | None = Field(default=None, ge=0)
     incoming_cases: int | None = Field(default=None, ge=0)
+    # Explicitly SIMULATED demo capability overlay; never a public OSM fact.
+    simulated_capability_tags: list[str] | None = None
     freshness_status: FreshnessStatus | None = None
     operator_reference: str = Field(min_length=1)
 

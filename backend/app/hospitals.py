@@ -53,6 +53,9 @@ class HospitalOperationalSnapshot(BaseModel):
     simulated_load_ratio: float | None = Field(default=None, ge=0.0, le=1.0)
     simulated_free_capacity: int | None = Field(default=None, ge=0)
     incoming_cases: int | None = Field(default=None, ge=0)
+    # Explicitly simulated capability overlay. Empty means no demo capability
+    # was supplied, which is not the same as a confirmed absence.
+    simulated_capability_tags: tuple[str, ...] = ()
     freshness_status: str = "UNKNOWN"
     data_reality: str = "SIMULATED"
     last_updated: str | None = None
@@ -218,9 +221,29 @@ def rank_hospital_candidates(
         if eta_seconds < 0 or not eta_seconds < float("inf"):
             continue
 
-        confirmed_capability = not required or required.issubset(
-            set(hospital.static_capabilities)
-        )
+        # Required capability may be confirmed by the real public registry or
+        # by an explicitly simulated demo overlay. The overlay is consumed only
+        # when the static registry does not already confirm it, and the score
+        # explanation always records which source confirmed it so a simulated
+        # capability can never be read as a published hospital fact.
+        static_capabilities = set(hospital.static_capabilities)
+        simulated_capabilities = {
+            _normalize_capability(value)
+            for value in state.simulated_capability_tags
+            if value.strip()
+        }
+        if not required:
+            confirmed_capability = True
+            capability_source = "NOT_REQUIRED"
+        elif required.issubset(static_capabilities):
+            confirmed_capability = True
+            capability_source = "REAL_PUBLIC_REGISTRY"
+        elif required.issubset(static_capabilities | simulated_capabilities):
+            confirmed_capability = True
+            capability_source = "SIMULATED_OVERLAY"
+        else:
+            confirmed_capability = False
+            capability_source = "UNKNOWN"
         capability_penalty = 0.0 if confirmed_capability else 0.5
         load_penalty = (
             _clamp(float(state.simulated_load_ratio))
@@ -250,6 +273,16 @@ def rank_hospital_candidates(
             "capacity_penalty": capacity_penalty,
             "required_capabilities": sorted(required),
             "capability_status": "CONFIRMED" if confirmed_capability else "UNKNOWN",
+            "capability_source": capability_source,
+            "capability_data_reality": (
+                "REAL_PUBLIC"
+                if capability_source == "REAL_PUBLIC_REGISTRY"
+                else "SIMULATED"
+                if capability_source == "SIMULATED_OVERLAY"
+                else None
+            ),
+            "static_capabilities": sorted(static_capabilities),
+            "simulated_capability_tags": sorted(simulated_capabilities),
             "load_status": "KNOWN" if state.simulated_load_ratio is not None else "UNKNOWN",
             "freshness_status": state.freshness_status,
             "static_capacity": hospital.static_capacity,
