@@ -1151,3 +1151,57 @@ the queue accumulated incidents that could still be planned against.
 
 Cancelled incidents are non-actionable under PD-065, so they cannot be planned
 or approved afterwards. No emergency demobilization doctrine is introduced.
+
+## PD-068 - Incident Lifecycle Contract
+
+**Date:** 2026-09-08
+**Status:** Approved
+**Owner:** Project owner (post-audit hardening mission, HD-005/HD-006)
+
+### Decision
+
+Incident status reaches the database by two explicit paths:
+
+1. **Operator lifecycle progression** through
+   `POST /incidents/{id}/transition`, governed by the locked transition table.
+2. **Domain commands** that own a status as part of a larger atomic change:
+   canonical planning persisting a candidate set (`AWAITING_APPROVAL`), plan
+   approval (`RESPONSE_ACTIVE`), duplicate merge (`DUPLICATE_MERGED`), and
+   false-report cancellation (`CANCELLED_FALSE_REPORT`).
+
+The canonical path is:
+
+```text
+ACTIVE_UNCONFIRMED -> AWAITING_APPROVAL -> RESPONSE_ACTIVE -> EN_ROUTE
+-> ON_SCENE -> TRANSPORT_ACTIVE or HANDOVER -> HANDOVER -> CLOSED
+```
+
+`ACTIVE_UNCONFIRMED -> AWAITING_APPROVAL` is now legal on the transition table
+as well, matching what production persists.
+
+`REQUIRES_REVIEW` is an operator pre-dispatch hold with an explicit entry and
+exit: `ACTIVE_UNCONFIRMED <-> REQUIRES_REVIEW`, and it may be terminated
+through the cancellation command.
+
+`DUPLICATE_MERGED` and `CANCELLED_FALSE_REPORT` are terminal and are not
+reachable as transition targets, because their owning commands carry safety
+guards (committed operational state, committed response) that a bare
+transition would bypass.
+
+`RESPONSE_PROPOSED` is deprecated/reserved. Production never persists it and
+it is not on the canonical path; it remains in the enum and the transition
+table only so existing API clients keep working.
+
+### Reason
+
+The transition table previously required `ACTIVE_UNCONFIRMED ->
+RESPONSE_PROPOSED -> AWAITING_APPROVAL`, while production set
+`AWAITING_APPROVAL` directly, so the documented lifecycle did not describe the
+system and `RESPONSE_PROPOSED` was unreachable in practice. `REQUIRES_REVIEW`
+had no entry or exit at all, leaving the approved review hold unusable.
+
+### Impact
+
+No extra database write is introduced to visit `RESPONSE_PROPOSED`. The review
+hold is now usable and, being non-actionable under PD-065, stops automated
+planning until the operator resolves it.

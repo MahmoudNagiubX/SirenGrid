@@ -112,10 +112,32 @@ def serialize_incident(incident: Incident) -> dict[str, Any]:
     }
 
 
+# Operator-driven lifecycle progression through POST /incidents/{id}/transition.
+#
+# Incident status changes reach the database by two distinct paths:
+#
+# 1. this table, for operator lifecycle progression, and
+# 2. domain commands that own a status as part of a larger atomic change:
+#    canonical planning persisting a candidate set (AWAITING_APPROVAL), plan
+#    approval (RESPONSE_ACTIVE), duplicate merge (DUPLICATE_MERGED), and
+#    false-report cancellation (CANCELLED_FALSE_REPORT).
+#
+# Terminal statuses are deliberately absent as targets here. Cancellation is
+# owned by POST /incidents/{id}/cancel because that command carries the
+# committed-response guard, and routing it through a bare transition would
+# bypass that safety check.
 LOCKED_FORWARD_TRANSITIONS: dict[IncidentStatus, set[IncidentStatus]] = {
     IncidentStatus.RECEIVED: {IncidentStatus.INTERPRETING},
     IncidentStatus.INTERPRETING: {IncidentStatus.ACTIVE_UNCONFIRMED},
-    IncidentStatus.ACTIVE_UNCONFIRMED: {IncidentStatus.RESPONSE_PROPOSED},
+    IncidentStatus.ACTIVE_UNCONFIRMED: {
+        # Canonical: reached when a candidate set is persisted.
+        IncidentStatus.AWAITING_APPROVAL,
+        # Operator review hold for unresolved ambiguity.
+        IncidentStatus.REQUIRES_REVIEW,
+        # Deprecated/reserved; retained for API backward compatibility only.
+        IncidentStatus.RESPONSE_PROPOSED,
+    },
+    # Deprecated/reserved: production never persists RESPONSE_PROPOSED.
     IncidentStatus.RESPONSE_PROPOSED: {IncidentStatus.AWAITING_APPROVAL},
     IncidentStatus.AWAITING_APPROVAL: {IncidentStatus.RESPONSE_ACTIVE},
     IncidentStatus.RESPONSE_ACTIVE: {IncidentStatus.EN_ROUTE},
@@ -124,7 +146,9 @@ LOCKED_FORWARD_TRANSITIONS: dict[IncidentStatus, set[IncidentStatus]] = {
     IncidentStatus.TRANSPORT_ACTIVE: {IncidentStatus.HANDOVER},
     IncidentStatus.HANDOVER: {IncidentStatus.CLOSED},
     IncidentStatus.CLOSED: set(),
-    IncidentStatus.REQUIRES_REVIEW: set(),
+    # A review hold is released back to the active flow once the operator
+    # resolves the ambiguity, or terminated through the cancellation command.
+    IncidentStatus.REQUIRES_REVIEW: {IncidentStatus.ACTIVE_UNCONFIRMED},
     IncidentStatus.DUPLICATE_MERGED: set(),
     IncidentStatus.CANCELLED_FALSE_REPORT: set(),
 }

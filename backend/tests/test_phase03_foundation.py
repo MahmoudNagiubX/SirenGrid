@@ -419,28 +419,36 @@ def test_transition_from_closed_terminal_returns_409(client: TestClient, db_sess
 
 
 def test_exceptional_states_rejected_with_409(client: TestClient, db_session: Session) -> None:
-    """Client-supplied transitions to exceptional states or from exceptional states return 409."""
+    """Command-owned terminal states are not reachable by a bare transition.
+
+    ``DUPLICATE_MERGED`` and ``CANCELLED_FALSE_REPORT`` belong to the duplicate
+    merge and cancellation commands, which carry their own safety guards, so a
+    plain transition must not be able to reach them and bypass those guards.
+    ``REQUIRES_REVIEW`` is a different case: it is an operator pre-dispatch
+    hold with an explicit entry and exit, so it is reachable here.
+    """
     inc = create_test_incident(db_session, status=IncidentStatus.ACTIVE_UNCONFIRMED, version=1)
 
-    for exceptional in [
-        IncidentStatus.REQUIRES_REVIEW,
+    for command_owned in [
         IncidentStatus.DUPLICATE_MERGED,
         IncidentStatus.CANCELLED_FALSE_REPORT,
     ]:
         res = client.post(
             f"/api/v1/incidents/{inc.id}/transition",
             json={
-                "target_status": exceptional.value,
+                "target_status": command_owned.value,
                 "expected_incident_version": 1,
                 "operator_reference": "dispatcher-01",
             },
         )
-        assert res.status_code == 409, f"Expected 409 for {exceptional.value}"
+        assert res.status_code == 409, f"Expected 409 for {command_owned.value}"
 
-    # Also verify transition out of exceptional state is rejected
-    inc_review = create_test_incident(db_session, status=IncidentStatus.REQUIRES_REVIEW, version=2)
+    # A merged incident is terminal and cannot be transitioned back out.
+    inc_merged = create_test_incident(
+        db_session, status=IncidentStatus.DUPLICATE_MERGED, version=2
+    )
     res_out = client.post(
-        f"/api/v1/incidents/{inc_review.id}/transition",
+        f"/api/v1/incidents/{inc_merged.id}/transition",
         json={
             "target_status": IncidentStatus.ACTIVE_UNCONFIRMED.value,
             "expected_incident_version": 2,

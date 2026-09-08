@@ -265,6 +265,90 @@ def test_no_ai_or_provider_call_involved(client: TestClient) -> None:
         assert mock_url.call_count == 0
 
 
+def _transition(
+    client: TestClient, incident_id: str, target: IncidentStatus, version: int
+) -> Any:
+    return client.post(
+        f"/api/v1/incidents/{incident_id}/transition",
+        json={
+            "target_status": target.value,
+            "expected_incident_version": version,
+            "operator_reference": "dispatcher-lifecycle",
+        },
+    )
+
+
+def _new_incident(db: Session, status: IncidentStatus) -> Incident:
+    incident = Incident(
+        id=str(uuid.uuid4()),
+        version=1,
+        incident_type="traffic_collision",
+        severity=Severity.HIGH,
+        confidence_level=ConfidenceLevel.HIGH,
+        status=status,
+        latitude=30.0561,
+        longitude=31.3452,
+        required_resources_json=[],
+        provenance_json={},
+    )
+    db.add(incident)
+    db.commit()
+    db.refresh(incident)
+    return incident
+
+
+def test_active_unconfirmed_reaches_awaiting_approval_without_response_proposed(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    """The canonical planning transition must be legal on the lifecycle itself.
+
+    Production persists ACTIVE_UNCONFIRMED -> AWAITING_APPROVAL directly, so
+    the operator transition table must not require the deprecated
+    RESPONSE_PROPOSED hop.
+    """
+    incident = _new_incident(db_session, IncidentStatus.ACTIVE_UNCONFIRMED)
+
+    response = _transition(client, incident.id, IncidentStatus.AWAITING_APPROVAL, 1)
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == IncidentStatus.AWAITING_APPROVAL.value
+    assert response.json()["version"] == 2
+
+
+def test_review_hold_round_trip_and_terminal_states_are_closed(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    """REQUIRES_REVIEW is an exitable pre-dispatch hold; merges are terminal."""
+    incident = _new_incident(db_session, IncidentStatus.ACTIVE_UNCONFIRMED)
+
+    held = _transition(client, incident.id, IncidentStatus.REQUIRES_REVIEW, 1)
+    assert held.status_code == 200, held.text
+    assert held.json()["status"] == IncidentStatus.REQUIRES_REVIEW.value
+
+    # A review hold must stop automated planning until it is resolved.
+    blocked = client.post(f"/api/v1/incidents/{incident.id}/plans/generate")
+    assert blocked.status_code == 409
+
+    released = _transition(client, incident.id, IncidentStatus.ACTIVE_UNCONFIRMED, 2)
+    assert released.status_code == 200, released.text
+    assert released.json()["status"] == IncidentStatus.ACTIVE_UNCONFIRMED.value
+
+    # Cancellation is owned by the cancel command, not a bare transition, so
+    # that its committed-response guard cannot be bypassed.
+    bypass = _transition(
+        client, incident.id, IncidentStatus.CANCELLED_FALSE_REPORT, 3
+    )
+    assert bypass.status_code == 409
+
+    merged = _new_incident(db_session, IncidentStatus.DUPLICATE_MERGED)
+    for target in (
+        IncidentStatus.ACTIVE_UNCONFIRMED,
+        IncidentStatus.AWAITING_APPROVAL,
+    ):
+        assert _transition(client, merged.id, target, 1).status_code == 409
+
+
 def test_timeline_event_ids_are_time_ordered_and_valid_uuids() -> None:
     """Audit event identifiers must sort by creation order.
 

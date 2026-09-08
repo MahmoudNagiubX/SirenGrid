@@ -100,9 +100,19 @@ class ConfidenceLevel(str, Enum):
 
 
 class IncidentStatus(str, Enum):
+    """Incident lifecycle states.
+
+    The canonical planning transition is ``ACTIVE_UNCONFIRMED`` directly to
+    ``AWAITING_APPROVAL`` when a candidate set is persisted.
+    ``RESPONSE_PROPOSED`` is deprecated/reserved: production never persists it
+    and it is not part of the canonical path. It is retained only so existing
+    API clients keep working.
+    """
+
     RECEIVED = "RECEIVED"
     INTERPRETING = "INTERPRETING"
     ACTIVE_UNCONFIRMED = "ACTIVE_UNCONFIRMED"
+    # Deprecated/reserved. See the class docstring.
     RESPONSE_PROPOSED = "RESPONSE_PROPOSED"
     AWAITING_APPROVAL = "AWAITING_APPROVAL"
     RESPONSE_ACTIVE = "RESPONSE_ACTIVE"
