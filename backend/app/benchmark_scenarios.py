@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import networkx as nx
 from pydantic import BaseModel, ConfigDict, Field
@@ -71,6 +71,17 @@ class ScenarioResourceOverride(BaseModel):
     capability_tags: list[str] | None = None
 
 
+class ScenarioHospitalOverride(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    hospital_id: str = Field(min_length=1)
+    accepting_state: str | None = None
+    simulated_load_ratio: float | None = Field(default=None, ge=0.0, le=1.0)
+    simulated_free_capacity: int | None = Field(default=None, ge=0)
+    incoming_cases: int | None = Field(default=None, ge=0)
+    freshness_status: str | None = None
+
+
 class TrafficFixture(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -109,6 +120,7 @@ class BenchmarkScenario(BaseModel):
     tags: list[str] = Field(min_length=1)
     incident: ScenarioIncident
     resource_overrides: list[ScenarioResourceOverride] = Field(default_factory=list)
+    hospital_overrides: list[ScenarioHospitalOverride] = Field(default_factory=list)
     traffic_fixture: TrafficFixture
     events: list[ScenarioEvent] = Field(default_factory=list)
     expected: ScenarioExpected
@@ -208,6 +220,36 @@ def build_candidate_resources(
             + ", ".join(sorted(overrides))
         )
     return tuple(sorted(result, key=lambda resource: resource.resource_id))
+
+
+def build_hospital_operational_states(
+    scenario: BenchmarkScenario,
+) -> dict[str, Any]:
+    """Build explicit simulated hospital state overrides for one scenario."""
+    from app.hospitals import HospitalOperationalSnapshot
+
+    result: dict[str, HospitalOperationalSnapshot] = {}
+    for override in scenario.hospital_overrides:
+        if override.hospital_id in result:
+            raise ValueError(
+                "Scenario hospital overrides must have unique hospital IDs"
+            )
+        values = {
+            name: value
+            for name, value in (
+                ("accepting_state", override.accepting_state),
+                ("simulated_load_ratio", override.simulated_load_ratio),
+                ("simulated_free_capacity", override.simulated_free_capacity),
+                ("incoming_cases", override.incoming_cases),
+                ("freshness_status", override.freshness_status),
+            )
+            if name in override.model_fields_set
+        }
+        result[override.hospital_id] = HospitalOperationalSnapshot(
+            hospital_id=override.hospital_id,
+            **values,
+        )
+    return result
 
 
 def _graph_edges(graph: nx.Graph) -> list[tuple[str, str, str]]:

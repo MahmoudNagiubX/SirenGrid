@@ -23,6 +23,7 @@ from app.benchmark_scenarios import (
     DEFAULT_SCENARIO_MANIFEST,
     build_candidate_resources,
     build_fixed_traffic_snapshot,
+    build_hospital_operational_states,
     load_scenario_manifest,
 )
 from app.candidate_evaluation import evaluate_candidate_combination
@@ -276,7 +277,9 @@ def _hospital_result(
         return {"status": "NOT_AVAILABLE", "reason": "ORIGIN_RESOURCE_NOT_FOUND"}
     hospitals = load_static_hospitals()
     states = {
-        hospital.id: HospitalOperationalSnapshot.unknown(hospital.id)
+        hospital.id: build_hospital_operational_states(scenario).get(
+            hospital.id, HospitalOperationalSnapshot.unknown(hospital.id)
+        )
         for hospital in hospitals
     }
     origin = origin_resource.coordinate

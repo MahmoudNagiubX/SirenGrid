@@ -153,13 +153,31 @@ def generate_candidate_combinations(
             route = route_cache.get(resource.resource_id)
             if resource.resource_id not in route_cache:
                 try:
-                    route = compute_traffic_aware_route(
-                        graph,
-                        resource.coordinate,
-                        incident_coordinate,
-                        traffic_snapshot,
-                        include_alternatives=include_route_alternatives,
-                    )
+                    if include_route_alternatives:
+                        route = compute_traffic_aware_route(
+                            graph,
+                            resource.coordinate,
+                            incident_coordinate,
+                            traffic_snapshot,
+                        )
+                    else:
+                        try:
+                            route = compute_traffic_aware_route(
+                                graph,
+                                resource.coordinate,
+                                incident_coordinate,
+                                traffic_snapshot,
+                                include_alternatives=False,
+                            )
+                        except TypeError as exc:
+                            if "include_alternatives" not in str(exc):
+                                raise
+                            route = compute_traffic_aware_route(
+                                graph,
+                                resource.coordinate,
+                                incident_coordinate,
+                                traffic_snapshot,
+                            )
                 except (RouteNotFoundError, RoutingPointOutsideGraphError, ValueError):
                     route = None
                 route_cache[resource.resource_id] = route
