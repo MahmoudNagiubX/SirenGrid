@@ -350,13 +350,15 @@ def create_manual_incident(
     now_utc = datetime.now(timezone.utc)
 
     # Required resources as JSON-safe enum strings and counts
-    required_resources = [
-        {
+    required_resources = []
+    for req in payload.required_resources:
+        requirement = {
             "resource_type": req.resource_type.value,
             "count": req.count,
         }
-        for req in payload.required_resources
-    ]
+        if req.required_capability_tags is not None:
+            requirement["required_capability_tags"] = list(req.required_capability_tags)
+        required_resources.append(requirement)
 
     # Provenance for manual simulated demo world
     provenance = {
@@ -1057,10 +1059,12 @@ def _patch_incident_facts(
                 new_values[field] = new_val
         elif field == "required_resources":
             old_val = list(incident.required_resources_json or [])
-            new_val = [
-                {"resource_type": req.resource_type.value, "count": req.count}
-                for req in payload.required_resources
-            ]
+            new_val = []
+            for req in payload.required_resources:
+                requirement = {"resource_type": req.resource_type.value, "count": req.count}
+                if req.required_capability_tags is not None:
+                    requirement["required_capability_tags"] = list(req.required_capability_tags)
+                new_val.append(requirement)
             if new_val != old_val:
                 changed_fields.append(field)
                 old_values[field] = old_val
