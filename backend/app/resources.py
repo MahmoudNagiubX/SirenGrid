@@ -71,6 +71,38 @@ def is_planner_eligible(resource: EmergencyResource | dict[str, Any]) -> bool:
     return bool(is_available and is_unassigned)
 
 
+def _record_resource_outage_trigger(
+    db: Session,
+    resource: EmergencyResource,
+    incident: Incident | None,
+    now_utc: datetime,
+) -> None:
+    """Record the required assigned-resource outage trigger without committing."""
+    if incident is None or resource.status != ResourceStatus.OUT_OF_SERVICE:
+        return
+    active_plan = db.get(ResponsePlan, incident.current_plan_id) if incident.current_plan_id else None
+    if (
+        active_plan is None
+        or active_plan.status != ResponsePlanStatus.APPROVED
+        or resource.id not in (active_plan.resource_ids_json or [])
+    ):
+        return
+    from app.replanning import apply_replan_trigger
+
+    apply_replan_trigger(
+        db,
+        incident_id=incident.id,
+        expected_incident_version=incident.version,
+        trigger_reasons=["RESOURCE_UNAVAILABLE"],
+        input_references={
+            "resource_id": resource.id,
+            "resource_version": resource.version,
+            "resource_status": resource.status.value,
+        },
+        now=now_utc,
+    )
+
+
 def interpolate_route_progress(
     coordinates: list[list[float]],
     progress: float,
@@ -490,38 +522,13 @@ def patch_resource_state(
         db.add(timeline_event)
 
     try:
+        _record_resource_outage_trigger(db, resource, incident, now_utc)
         db.commit()
     except Exception:
         db.rollback()
         raise
 
     db.refresh(resource)
-    active_plan = None
-    if incident is not None and incident.current_plan_id:
-        active_plan = db.get(ResponsePlan, incident.current_plan_id)
-    if (
-        incident is not None
-        and target_status == ResourceStatus.OUT_OF_SERVICE
-        and active_plan is not None
-        and active_plan.status == ResponsePlanStatus.APPROVED
-        and resource.id in (active_plan.resource_ids_json or [])
-    ):
-        # Import locally to keep the resource/planning module dependency graph
-        # acyclic while recording the post-commit domain trigger.
-        from app.replanning import record_replan_trigger
-
-        record_replan_trigger(
-            db,
-            incident_id=incident.id,
-            expected_incident_version=incident.version,
-            trigger_reasons=["RESOURCE_UNAVAILABLE"],
-            input_references={
-                "resource_id": resource.id,
-                "resource_version": resource.version,
-                "resource_status": resource.status.value,
-            },
-            now=now_utc,
-        )
     result = serialize_resource(resource)
     publish_operations_event(
         event="resource.updated",

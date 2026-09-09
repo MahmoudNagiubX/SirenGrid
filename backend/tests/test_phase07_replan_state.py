@@ -6,6 +6,7 @@ import threading
 import uuid
 
 import networkx as nx
+import pytest
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 from fastapi.testclient import TestClient
@@ -694,6 +695,74 @@ def test_required_assigned_resource_outage_records_replan_trigger(
     assert saved_resource.status == ResourceStatus.OUT_OF_SERVICE
     assert pending is not None
     assert pending.trigger_reasons_json == ["RESOURCE_UNAVAILABLE"]
+
+
+def test_assigned_outage_rolls_back_when_replan_trigger_fails(
+    isolated_engine: Engine,
+    db_session: Session,
+    monkeypatch,
+) -> None:
+    init_db(isolated_engine)
+    incident = Incident(
+        id="outage-rollback-incident",
+        version=4,
+        incident_type="traffic_collision",
+        severity=Severity.LOW,
+        confidence_level=ConfidenceLevel.HIGH,
+        status=IncidentStatus.RESPONSE_ACTIVE,
+        latitude=30.05,
+        longitude=31.34,
+        current_plan_id="outage-rollback-plan",
+    )
+    plan = ResponsePlan(
+        id="outage-rollback-plan",
+        incident_id=incident.id,
+        incident_version=4,
+        plan_version=1,
+        status=ResponsePlanStatus.APPROVED,
+        resource_ids_json=["outage-rollback-resource"],
+        routes_json=[],
+        metrics_json={},
+        score_breakdown_json={},
+    )
+    resource = EmergencyResource(
+        id="outage-rollback-resource",
+        version=1,
+        name="Outage Rollback Resource",
+        resource_type=ResourceType.AMBULANCE,
+        capability_tags_json=[],
+        status=ResourceStatus.ASSIGNED,
+        latitude=30.05,
+        longitude=31.34,
+        assigned_incident_id=incident.id,
+    )
+    db_session.add_all([incident, plan, resource])
+    db_session.commit()
+
+    def fail_trigger(*args, **kwargs):
+        del args, kwargs
+        raise RuntimeError("controlled replan trigger failure")
+
+    monkeypatch.setattr("app.replanning.apply_replan_trigger", fail_trigger)
+    with pytest.raises(RuntimeError, match="controlled replan trigger failure"):
+        TestClient(app).patch(
+            f"/api/v1/resources/{resource.id}/state",
+            json={
+                "expected_resource_version": 1,
+                "incident_id": incident.id,
+                "status": ResourceStatus.OUT_OF_SERVICE.value,
+                "operator_reference": "operator-rollback",
+            },
+        )
+
+    db_session.expire_all()
+    saved = db_session.get(EmergencyResource, resource.id)
+    assert saved is not None
+    assert saved.status is ResourceStatus.ASSIGNED
+    assert saved.version == 1
+    assert db_session.scalar(
+        select(ReplanEvaluation).where(ReplanEvaluation.incident_id == incident.id)
+    ) is None
 
 
 def test_selected_hospital_not_accepting_records_replan_trigger(
