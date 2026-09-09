@@ -32,10 +32,13 @@ from app.incidents import (
 from app.media import MediaValidationError, resolve_media_path, store_media
 from app.models import Incident, Report, TimelineEvent, new_timeline_event_id
 from app.schemas import (
+    ConfidenceLevel,
     DataReality,
     FreshnessStatus,
     IncidentFactsPatchRequest,
+    IncidentRead,
     IncidentStatus,
+    ManualIncidentCreate,
     ReportRead,
 )
 from app.websocket import publish_operations_event
@@ -84,6 +87,14 @@ class ClaimsIngestRequest(BaseModel):
     model: str = Field(min_length=1, max_length=150)
     evidence_id: str | None = None
     claims: list[ProviderClaimDraft] = Field(default_factory=list, max_length=32)
+
+
+class ReportIncidentActivationRequest(ManualIncidentCreate):
+    """Explicit operator facts required to activate a standalone report."""
+
+    model_config = ConfigDict(extra="forbid")
+    confidence_level: ConfidenceLevel
+    operator_reference: str = Field(min_length=1)
 
 
 def _report_claims(report: Report) -> list[EvidenceClaim]:
@@ -600,6 +611,73 @@ def transcribe_report(
             payload=serialize_timeline_event(event),
         )
     return {"status": result.status.value, "result": result.model_dump(mode="json"), "report": serialize_report(report)}
+
+
+@router.post(
+    "/reports/{report_id}/create-incident",
+    status_code=status.HTTP_201_CREATED,
+    response_model=IncidentRead,
+)
+def create_incident_from_report(
+    report_id: str,
+    payload: ReportIncidentActivationRequest,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Create one incident from reviewed evidence using explicit operator facts."""
+    _acquire_write_lock(db)
+    report = db.get(Report, report_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail=f"Report '{report_id}' not found")
+    if report.incident_id is not None:
+        raise HTTPException(status_code=409, detail="report is already associated with an incident")
+    now_utc = datetime.now(timezone.utc)
+    resources = [
+        {
+            "resource_type": requirement.resource_type.value,
+            "count": requirement.count,
+            **({"required_capability_tags": list(requirement.required_capability_tags)} if requirement.required_capability_tags is not None else {}),
+        }
+        for requirement in payload.required_resources
+    ]
+    report_reality = report.data_reality.value if hasattr(report.data_reality, "value") else str(report.data_reality)
+    incident = Incident(
+        id=str(uuid.uuid4()), version=1, incident_type=payload.incident_type,
+        severity=payload.severity, confidence_level=payload.confidence_level,
+        status=IncidentStatus.ACTIVE_UNCONFIRMED,
+        latitude=payload.location.lat if payload.location else None,
+        longitude=payload.location.lon if payload.location else None,
+        location_text=payload.location_text, casualty_count=payload.casualty_count,
+        casualty_range=payload.casualty_range, trapped_person=payload.trapped_person,
+        road_blockage=payload.road_blockage, transport_required=payload.transport_required,
+        required_hospital_capabilities_json=payload.required_hospital_capabilities,
+        required_resources_json=resources, current_plan_id=None, pending_replan_plan_id=None,
+        created_at=now_utc, updated_at=now_utc,
+        provenance_json={
+            "source": "operator_report_activation", "data_reality": report_reality,
+            "freshness_status": (report.provenance_json or {}).get("freshness_status", FreshnessStatus.FRESH.value),
+            "last_updated": now_utc.isoformat(), "location_resolved": payload.location is not None,
+            "source_reference": payload.operator_reference, "source_report_id": report.id,
+            "report_source_reference": report.source_reference,
+        },
+    )
+    event = _timeline_event(
+        incident_id=incident.id, event_type="INCIDENT_CREATED_FROM_REPORT",
+        details={"report_id": report.id, "operator_reference": payload.operator_reference,
+                 "source": "operator_report_activation", "data_reality": report_reality,
+                 "status": IncidentStatus.ACTIVE_UNCONFIRMED.value, "incident_version": 1},
+        created_at=now_utc,
+    )
+    try:
+        report.incident_id = incident.id
+        db.add_all([incident, report, event])
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    db.refresh(incident)
+    result = serialize_incident(incident)
+    publish_operations_event(event="incident.created", incident_id=incident.id, payload=result)
+    return result
 
 
 @router.post("/incidents/{incident_id}/duplicate-merge")
