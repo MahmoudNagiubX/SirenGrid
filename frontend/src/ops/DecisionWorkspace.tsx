@@ -8,8 +8,27 @@ import {
   type OpsState,
   type ProvKind,
 } from '../data/mock';
-import { useOperations } from '../state/OperationsContext';
+import { useCommandRunner, useOperations } from '../state/OperationsContext';
+import {
+  approvePlan,
+  generateCandidates,
+  generateHospitalOptions,
+  selectAlternativePlan,
+  selectHospitalDestination,
+  sendHospitalPreAlert,
+} from '../commands/operationsCommands';
 import type { HospitalOptionRead, ResponsePlanRead, TimelineEventRead } from '../api/types';
+
+/** Prototype audit reference for versioned human-authority commands (SG-INT-06B §11). */
+const OPERATOR_REF = 'demo-operator';
+
+/** Incident statuses on which no further candidate generation / approval is meaningful. */
+const NON_ACTIONABLE_INCIDENT_STATUSES = new Set([
+  'CLOSED',
+  'CANCELLED_FALSE_REPORT',
+  'DUPLICATE_MERGED',
+  'REQUIRES_REVIEW',
+]);
 
 /** Ported from ui_kits/operations_center/decision.jsx — bound to canonical backend read state. */
 
@@ -211,15 +230,18 @@ function sortCandidatePlans(plans: ResponsePlanRead[]): ResponsePlanRead[] {
 }
 
 function PlanTab({ state }: { state: OpsState }) {
-  const { plans, replan, resources, selectedIncident } = useOperations();
+  const { plans, replan, resources, selectedIncident, refreshSelectedIncident } = useOperations();
+  const { busyAction, message, run } = useCommandRunner();
   const planList = plans.data ?? [];
   const rep = replan.data;
   const inc = selectedIncident.data;
 
   const [selId, setSelId] = useState<string | null>(null);
 
+  const rejectNote = 'Reject command unavailable in current backend contract.';
+
   if (state === 'replan') {
-    const pendingPlanId = inc?.pending_replan_plan_id ?? rep?.pending_plan_id;
+    const pendingPlanId = inc?.pending_replan_plan_id ?? rep?.pending_plan_id ?? null;
     const pendingPlan = pendingPlanId ? planList.find((p) => p.id === pendingPlanId) : undefined;
     const pendingSetId = pendingPlan ? getCandidateSetId(pendingPlan) : null;
     const replanCandidates = pendingSetId
@@ -230,6 +252,31 @@ function PlanTab({ state }: { state: OpsState }) {
     const replanPlans = sortCandidatePlans(replanCandidates);
     const activeReplanPlan = replanPlans.find((p) => p.id === selId) ?? replanPlans[0] ?? null;
     const selectedReplanPlanId = activeReplanPlan?.id ?? null;
+
+    // Only the EXACT backend-pending recommended replacement can be approved,
+    // and only while it is the visually selected card (§25). Replan alternatives
+    // stay view-only — no selectAlternativePlan wiring in replan (§26).
+    const pendingIsApproved = pendingPlan?.status === 'APPROVED';
+    const canApproveReplacement =
+      !!inc &&
+      !!pendingPlan &&
+      pendingPlan.status === 'RECOMMENDED' &&
+      selectedReplanPlanId === pendingPlan.id &&
+      busyAction === null;
+
+    const doApproveReplacement = () => {
+      if (!inc || !pendingPlan) return;
+      void run('approve-replacement', {
+        command: () =>
+          approvePlan(pendingPlan.id, {
+            expected_incident_version: inc.version,
+            expected_plan_version: pendingPlan.plan_version,
+            operator_reference: OPERATOR_REF,
+          }),
+        refetch: () => refreshSelectedIncident(inc.id),
+        successText: 'Replacement plan approved. Canonical state reloaded.',
+      });
+    };
 
     return (
       <Fragment>
@@ -243,6 +290,7 @@ function PlanTab({ state }: { state: OpsState }) {
               const etaSec = p.metrics?.max_arrival_eta_seconds;
               const routeRef = p.routes?.[0]?.routing_source || p.metrics?.routing_source || 'Standard route';
               const isSelected = p.id === selectedReplanPlanId;
+              const isPending = p.id === pendingPlan?.id;
               return (
                 <div key={p.id} style={{ flex: 1, cursor: 'pointer' }} onClick={() => setSelId(p.id)}>
                   <Card
@@ -251,7 +299,7 @@ function PlanTab({ state }: { state: OpsState }) {
                       borderColor: isSelected ? 'var(--color-accent)' : 'var(--color-border-hairline)',
                     }}
                   >
-                    <SubHead>{`Candidate ${idx + 1}`}</SubHead>
+                    <SubHead>{isPending ? 'Pending replacement' : `Candidate ${idx + 1}`}</SubHead>
                     <div style={{ fontSize: 24, fontWeight: 600, marginTop: 4, color: isSelected ? 'var(--color-accent)' : 'var(--color-text-muted)' }}>
                       {formatSeconds(etaSec)}
                     </div>
@@ -272,9 +320,21 @@ function PlanTab({ state }: { state: OpsState }) {
             : 'Replan evaluation is backend-authoritative. Materiality is determined by the server engine.'}
         </AiBlock>
         <ApprovalBar
-          approved={false}
-          disabled={true}
-          note="Human command wiring arrives in Phase 06"
+          approved={!!pendingIsApproved}
+          note={
+            pendingIsApproved
+              ? 'Replacement plan is recorded as approved in canonical backend state.'
+              : pendingPlan
+              ? 'Approve the exact backend-pending recommended replacement.'
+              : 'No pending recommended replacement plan to approve.'
+          }
+          approveLabel="Approve Replacement"
+          onApprove={canApproveReplacement ? doApproveReplacement : undefined}
+          disabled={!canApproveReplacement}
+          busy={busyAction === 'approve-replacement'}
+          rejectNote={rejectNote}
+          statusText={message?.text ?? null}
+          statusTone={message?.kind ?? 'neutral'}
         />
       </Fragment>
     );
@@ -311,17 +371,119 @@ function PlanTab({ state }: { state: OpsState }) {
 
   const resourceMap = new Map((resources.data ?? []).map((r) => [r.id, r.name || r.id]));
 
+  // --- Human-authority derivations (all from canonical reads) ---------------
+  const currentPlanId = inc?.current_plan_id ?? null;
+  const currentPlan = currentPlanId ? planList.find((p) => p.id === currentPlanId) : undefined;
+  const showApproved =
+    activePlan?.status === 'APPROVED' || currentPlan?.status === 'APPROVED';
+  const hasApprovedPlan = planList.some((p) => p.status === 'APPROVED');
+
+  // Approve is offered only for the incident's current RECOMMENDED plan (§21).
+  const canApprove =
+    !!inc &&
+    !!activePlan &&
+    activePlan.status === 'RECOMMENDED' &&
+    activePlan.id === currentPlanId &&
+    busyAction === null;
+
+  // An ALTERNATIVE card must be explicitly selected before it can be approved (§20).
+  const canSelectAlternative =
+    !!inc && !!activePlan && activePlan.status === 'ALTERNATIVE' && busyAction === null;
+
+  // Revise / recalculate only pre-approval on an actionable incident (§24).
+  const canRevise =
+    !!inc &&
+    !hasApprovedPlan &&
+    !NON_ACTIONABLE_INCIDENT_STATUSES.has(inc.status) &&
+    busyAction === null;
+
+  const doApprove = () => {
+    if (!inc || !activePlan) return;
+    void run('approve', {
+      command: () =>
+        approvePlan(activePlan.id, {
+          expected_incident_version: inc.version,
+          expected_plan_version: activePlan.plan_version,
+          operator_reference: OPERATOR_REF,
+        }),
+      refetch: () => refreshSelectedIncident(inc.id),
+      successText: 'Plan approved. Canonical state reloaded.',
+    });
+  };
+
+  const doSelectAlternative = () => {
+    if (!inc || !activePlan) return;
+    void run('select', {
+      command: () =>
+        selectAlternativePlan(activePlan.id, {
+          expected_incident_version: inc.version,
+          expected_plan_version: activePlan.plan_version,
+          operator_reference: OPERATOR_REF,
+        }),
+      refetch: () => refreshSelectedIncident(inc.id),
+      successText: 'Plan selected. Review the updated recommendation and approve explicitly.',
+    });
+  };
+
+  const doRevise = () => {
+    if (!inc) return;
+    void run('revise', {
+      command: () => generateCandidates(inc.id),
+      refetch: () => refreshSelectedIncident(inc.id),
+      successText: 'Candidate plans recalculated.',
+    });
+  };
+
+  const renderApprovalBar = () => {
+    if (showApproved) {
+      return (
+        <ApprovalBar approved={true} note="Approval is recorded in canonical backend state." />
+      );
+    }
+    if (canSelectAlternative) {
+      return (
+        <ApprovalBar
+          approved={false}
+          note="Selected candidate is an alternative. Select it, then approve explicitly."
+          approveLabel="Select Plan"
+          onApprove={doSelectAlternative}
+          disabled={busyAction !== null}
+          busy={busyAction === 'select'}
+          rejectNote={rejectNote}
+          onRevise={canRevise ? doRevise : undefined}
+          reviseDisabled={!canRevise}
+          statusText={message?.text ?? null}
+          statusTone={message?.kind ?? 'neutral'}
+        />
+      );
+    }
+    return (
+      <ApprovalBar
+        approved={false}
+        note={
+          canApprove
+            ? 'Approve the current recommended plan with its exact canonical versions.'
+            : 'Approve is available only for the incident’s current recommended plan.'
+        }
+        onApprove={canApprove ? doApprove : undefined}
+        disabled={!canApprove}
+        busy={busyAction === 'approve'}
+        rejectNote={rejectNote}
+        onRevise={canRevise ? doRevise : undefined}
+        reviseDisabled={!canRevise}
+        statusText={message?.text ?? null}
+        statusTone={message?.kind ?? 'neutral'}
+      />
+    );
+  };
+
   if (sortedPlans.length === 0) {
     return (
       <Fragment>
         <div style={{ padding: 24, textAlign: 'center', color: 'var(--color-text-muted)', fontSize: 13.5 }}>
           No candidate response plans generated yet.
         </div>
-        <ApprovalBar
-          approved={false}
-          disabled={true}
-          note="Human command wiring arrives in Phase 06"
-        />
+        {renderApprovalBar()}
       </Fragment>
     );
   }
@@ -425,19 +587,75 @@ function PlanTab({ state }: { state: OpsState }) {
           Backend candidate evaluation under policy {activePlan.score_breakdown?.policy_version || 'standard'}. Max ETA: {formatSeconds(activePlan.metrics?.max_arrival_eta_seconds)}. Post-dispatch joint coverage: {getCoverageStr(activePlan)}. Reserve exhausted: {activePlan.score_breakdown?.remaining_reserve_exhausted ? 'Yes' : 'No'}.
         </AiBlock>
       )}
-      <ApprovalBar
-        approved={false}
-        disabled={true}
-        note="Human command wiring arrives in Phase 06"
-      />
+      {renderApprovalBar()}
     </Fragment>
   );
 }
 
 function HospitalTab() {
-  const { operationalState } = useOperations();
-  const options = operationalState.data?.hospital_options?.options ?? [];
-  const [selName, setSelName] = useState<string | null>(null);
+  const { operationalState, selectedIncident, refreshSelectedIncident } = useOperations();
+  const { busyAction, message, run } = useCommandRunner();
+  const inc = selectedIncident.data;
+  const opState = operationalState.data;
+  const hospitalOptions = opState?.hospital_options ?? null;
+  const options = hospitalOptions?.options ?? [];
+  const destination = opState?.selected_destination ?? null;
+  const preAlert = opState?.hospital_pre_alert ?? null;
+
+  const [selectedOptionId, setSelectedOptionId] = useState<string | null>(null);
+
+  // Once a destination is committed, visual selection follows canonical state (§30).
+  const committedOptionId = destination
+    ? options.find((o) => o.hospital.id === destination.hospital_id)?.option_id ?? null
+    : null;
+  const effectiveOptionId = committedOptionId ?? selectedOptionId;
+  const selectedOption = options.find((o) => o.option_id === effectiveOptionId) ?? null;
+
+  const doGenerateOptions = () => {
+    if (!inc) return;
+    void run('gen-options', {
+      command: () => generateHospitalOptions(inc.id),
+      refetch: () => refreshSelectedIncident(inc.id),
+      successText: 'Hospital options generated. Canonical operational state reloaded.',
+    });
+  };
+
+  const doSelectDestination = () => {
+    if (!inc || !hospitalOptions || !selectedOption) return;
+    void run('select-dest', {
+      command: () =>
+        selectHospitalDestination(inc.id, {
+          expected_incident_version: hospitalOptions.incident_version,
+          expected_plan_version: hospitalOptions.plan_version,
+          expected_option_set_version: hospitalOptions.option_set_version,
+          hospital_id: selectedOption.hospital.id,
+          operator_reference: OPERATOR_REF,
+        }),
+      refetch: () => refreshSelectedIncident(inc.id),
+      successText: 'Destination committed. Showing canonical selected destination.',
+    });
+  };
+
+  const doPreAlert = () => {
+    if (!inc || !destination) return;
+    void run('prealert', {
+      command: () =>
+        sendHospitalPreAlert(inc.id, {
+          expected_incident_version: inc.version,
+          expected_plan_version: destination.plan_version,
+          operator_reference: OPERATOR_REF,
+          simulate_failure: false,
+        }),
+      refetch: () => refreshSelectedIncident(inc.id),
+      successText: 'Pre-alert sent. Showing canonical pre-alert status.',
+    });
+  };
+
+  const commandNotice = message ? (
+    <Alert tone={message.kind === 'success' ? 'info' : 'attention'} title={message.kind === 'conflict' ? 'State changed' : message.kind === 'error' ? 'Command failed' : 'Done'}>
+      {message.text}
+    </Alert>
+  ) : null;
 
   if (options.length === 0) {
     return (
@@ -449,6 +667,17 @@ function HospitalTab() {
         <div style={{ padding: 24, textAlign: 'center', color: 'var(--color-text-muted)', fontSize: 13.5 }}>
           No hospital options evaluated for this incident.
         </div>
+        {inc && (
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={busyAction !== null}
+            onClick={doGenerateOptions}
+          >
+            {busyAction === 'gen-options' ? 'Working…' : 'Generate options'}
+          </Button>
+        )}
+        {commandNotice}
       </Fragment>
     );
   }
@@ -462,7 +691,7 @@ function HospitalTab() {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
         {options.map((opt: HospitalOptionRead) => {
           const h = opt.hospital;
-          const isSelected = selName === (h.name || h.id);
+          const isSelected = opt.option_id === effectiveOptionId;
           const isRec = opt.rank === 1;
           const isStale = h.operational_freshness_status === 'STALE';
           const loadPct = h.simulated_load_ratio !== null ? Math.round(h.simulated_load_ratio * 100) : null;
@@ -471,10 +700,14 @@ function HospitalTab() {
           return (
             <button
               key={opt.option_id}
-              onClick={() => setSelName(h.name || h.id)}
+              onClick={() => {
+                // Local visual focus only — never commits. Once a destination is
+                // committed the selection follows canonical state.
+                if (!destination) setSelectedOptionId(opt.option_id);
+              }}
               style={{
                 textAlign: 'left',
-                cursor: 'pointer',
+                cursor: destination ? 'default' : 'pointer',
                 fontFamily: 'var(--font-en)',
                 display: 'flex',
                 gap: 12,
@@ -515,6 +748,38 @@ function HospitalTab() {
           );
         })}
       </div>
+
+      {destination ? (
+        <div style={{ borderRadius: 'var(--radius-md)', border: '1px solid var(--blue-300)', background: 'var(--color-confirmed-soft)', padding: 12 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 600 }}>
+            Committed destination · {selectedOption?.hospital.name || destination.hospital_id}
+          </div>
+          <div style={{ fontSize: 13, color: 'var(--color-text-muted)', marginTop: 2 }}>
+            Backend status: {humanize(destination.status)}
+            {preAlert ? ` · Pre-alert: ${humanize(preAlert.status)}` : ''}
+          </div>
+          <div style={{ marginTop: 10 }}>
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={busyAction !== null}
+              onClick={doPreAlert}
+            >
+              {busyAction === 'prealert' ? 'Working…' : preAlert ? 'Re-send pre-alert' : 'Send pre-alert'}
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <Button
+          variant="primary"
+          size="sm"
+          disabled={!selectedOption || busyAction !== null}
+          onClick={doSelectDestination}
+        >
+          {busyAction === 'select-dest' ? 'Working…' : 'Select destination'}
+        </Button>
+      )}
+      {commandNotice}
     </Fragment>
   );
 }

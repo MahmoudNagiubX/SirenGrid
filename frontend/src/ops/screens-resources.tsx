@@ -6,20 +6,28 @@ import {
   STATUS_TONE,
   type ProvKind,
 } from '../data/mock';
-import { useOperations } from '../state/OperationsContext';
-import type { ResourceRead, TimelineEventRead } from '../api/types';
+import { useCommandRunner, useOperations } from '../state/OperationsContext';
+import { patchResourceState } from '../commands/operationsCommands';
+import type { TimelineEventRead } from '../api/types';
 
 /** Ported from ui_kits/operations_center/screens-resources.jsx — bound to canonical backend read state. */
 
 type Filter = 'all' | 'avail' | 'committed';
 
+/** Prototype audit reference for versioned human-authority commands (SG-INT-06B §11). */
+const OPERATOR_REF = 'demo-operator';
+
 export function ResourceScreen() {
-  const { resources, hospitals } = useOperations();
-  const [sel, setSel] = useState<ResourceRead | null>(null);
+  const { resources, hospitals, refreshGlobal } = useOperations();
+  const { busyAction, message, run } = useCommandRunner();
+  // Selection is a stable ID; the live record is re-derived every render so a
+  // command always sends the latest canonical resource.version (§33).
+  const [selectedResourceId, setSelectedResourceId] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>('all');
   const [search, setSearch] = useState('');
 
   const resList = resources.data ?? [];
+  const sel = selectedResourceId ? resList.find((r) => r.id === selectedResourceId) ?? null : null;
   const rows = resList.filter((u) => {
     const matchesFilter =
       filter === 'all' ||
@@ -139,7 +147,7 @@ export function ResourceScreen() {
                 return (
                   <button
                     key={u.id}
-                    onClick={() => setSel(u)}
+                    onClick={() => setSelectedResourceId(u.id)}
                     style={{
                       width: '100%',
                       textAlign: 'left',
@@ -175,7 +183,7 @@ export function ResourceScreen() {
           </GlassPanel>
         </div>
         {sel ? (
-          <Drawer title={`${sel.id} · ${sel.name || sel.resource_type}`} onClose={() => setSel(null)}>
+          <Drawer title={`${sel.id} · ${sel.name || sel.resource_type}`} onClose={() => setSelectedResourceId(null)}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               <IconTile icon={<Ico n={sel.resource_type === 'AMBULANCE' || sel.type === 'AMBULANCE' ? 'ambulance' : 'truck'} />} tint="navy" size={42} />
               <div>
@@ -195,8 +203,37 @@ export function ResourceScreen() {
             </Alert>
             <div style={{ display: 'flex', gap: 8 }}>
               <Button variant="secondary" size="sm" disabled>Reposition</Button>
-              <Button variant="critical" size="sm" disabled>Mark unavailable</Button>
+              <Button
+                variant="critical"
+                size="sm"
+                disabled={sel.status === 'OUT_OF_SERVICE' || busyAction !== null}
+                onClick={() => {
+                  void run('mark-oos', {
+                    command: () =>
+                      patchResourceState(sel.id, {
+                        expected_resource_version: sel.version,
+                        status: 'OUT_OF_SERVICE',
+                        operator_reference: OPERATOR_REF,
+                        incident_id: sel.assigned_incident_id,
+                      }),
+                    refetch: () => refreshGlobal({ includeSelected: false }),
+                    successText: 'Resource marked out of service. Canonical fleet reloaded.',
+                  });
+                }}
+              >
+                {busyAction === 'mark-oos' ? 'Working…' : 'Mark unavailable'}
+              </Button>
             </div>
+            {message && (
+              <Alert
+                tone={message.kind === 'success' ? 'info' : 'attention'}
+                title={message.kind === 'conflict' ? 'Resource state changed' : message.kind === 'error' ? 'Command failed' : 'Done'}
+              >
+                {message.kind === 'conflict'
+                  ? 'Resource state changed. Review latest state and re-confirm.'
+                  : message.text}
+              </Alert>
+            )}
           </Drawer>
         ) : (
           <GlassPanel padding={14} style={{ width: 320, flexShrink: 0, alignSelf: 'flex-start' }}>

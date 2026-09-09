@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from 'react';
 import { ApiError } from '../api/client';
+import { classifyCommandError } from '../commands/operationsCommands';
 import {
   getHealth,
   getIncident,
@@ -330,8 +331,10 @@ export function OperationsProvider({ children }: { children: ReactNode }) {
   const runReconcileOnce = useCallback(async (need: ReconcileNeed) => {
     if (realtimeStoppedRef.current) return;
     if (need.recovery) {
-      // Full operational REST reconciliation (section 18): global + selected.
-      await refreshGlobalRef.current();
+      // Full operational REST reconciliation (section 18): global first (which
+      // can change the selected incident ID), then the selected detail domains
+      // exactly once — refreshGlobal skips its own selected refresh here.
+      await refreshGlobalRef.current({ includeSelected: false });
       if (realtimeStoppedRef.current) return;
       const current = selectedRef.current;
       if (current) await refreshSelectedRef.current(current);
@@ -513,4 +516,81 @@ export function useOperations(): OperationsContextValue {
     throw new Error('useOperations must be used within an OperationsProvider');
   }
   return context;
+}
+
+export type CommandMessageKind = 'success' | 'conflict' | 'error';
+
+export interface CommandMessage {
+  kind: CommandMessageKind;
+  text: string;
+}
+
+interface RunCommandOptions {
+  /** The versioned backend command. Must throw on non-2xx (ApiError). */
+  command: () => Promise<unknown>;
+  /** Canonical REST refetch, run after both success and conflict. */
+  refetch: () => Promise<unknown>;
+  /** Shown only after `refetch` completes — never from the command result alone. */
+  successText?: string;
+}
+
+const CONFLICT_MESSAGE =
+  'State changed. Latest data loaded. Review again and re-confirm.';
+
+/**
+ * Minimal per-surface human-authority command runner (Phase 06B).
+ *
+ * Enforces the authority rules: one in-flight action at a time, no optimistic
+ * success (UI reconciles from `refetch`, not the command response), and a 409
+ * is NEVER auto-retried — it reloads canonical state and the operator must
+ * review and click again.
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export function useCommandRunner() {
+  const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [message, setMessage] = useState<CommandMessage | null>(null);
+  const runningRef = useRef(false);
+
+  const run = useCallback(async (actionId: string, options: RunCommandOptions) => {
+    if (runningRef.current) return;
+    runningRef.current = true;
+    setBusyAction(actionId);
+    setMessage(null);
+    try {
+      await options.command();
+      await options.refetch();
+      if (options.successText) {
+        setMessage({ kind: 'success', text: options.successText });
+      }
+    } catch (error) {
+      const kind = classifyCommandError(error);
+      const detail = error instanceof ApiError ? error.detail : '';
+      if (kind === 'CONFLICT') {
+        try {
+          await options.refetch();
+        } catch {
+          // Canonical refetch is best-effort; existing AsyncState errors stand.
+        }
+        setMessage({
+          kind: 'conflict',
+          text:
+            detail && detail.length <= 140
+              ? `${CONFLICT_MESSAGE} (${detail})`
+              : CONFLICT_MESSAGE,
+        });
+      } else {
+        setMessage({
+          kind: 'error',
+          text: detail || 'Command failed. Canonical state is unchanged.',
+        });
+      }
+    } finally {
+      setBusyAction(null);
+      runningRef.current = false;
+    }
+  }, []);
+
+  const clearMessage = useCallback(() => setMessage(null), []);
+
+  return { busyAction, message, run, clearMessage };
 }

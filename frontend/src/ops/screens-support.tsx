@@ -7,7 +7,8 @@ import {
   DEMO_INJECTS,
   DEMO_SCENARIOS,
 } from '../data/mock';
-import { useOperations } from '../state/OperationsContext';
+import { useCommandRunner, useOperations } from '../state/OperationsContext';
+import { resetSimulation } from '../commands/operationsCommands';
 
 /** Ported from ui_kits/operations_center/screens-support.jsx — bound to canonical simulation read state. */
 
@@ -39,8 +40,11 @@ function ScenarioRow({
 }
 
 export function DemoScreen() {
-  const { simulation } = useOperations();
+  const { simulation, refreshGlobal } = useOperations();
+  const { busyAction, message, run } = useCommandRunner();
   const sim = simulation.data;
+  // Simulation mutations require the backend controller to be enabled (§37).
+  const simEnabled = sim?.enabled === true;
 
   const simStatusRows: [string, string][] = [
     ['Simulation enabled', sim ? (sim.enabled ? 'Yes' : 'No') : '—'],
@@ -117,7 +121,33 @@ export function DemoScreen() {
               </div>
             ))}
           </GlassPanel>
-          <Button variant="critical" size="md" disabled>Reset demo state</Button>
+          <Button
+            variant="critical"
+            size="md"
+            disabled={!simEnabled || busyAction !== null}
+            onClick={() => {
+              void run('sim-reset', {
+                command: () => resetSimulation(),
+                refetch: () => refreshGlobal(),
+                successText: 'Simulation reset. Canonical status reloaded.',
+              });
+            }}
+          >
+            {busyAction === 'sim-reset' ? 'Working…' : 'Reset demo state'}
+          </Button>
+          {!simEnabled && (
+            <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
+              Simulation controller is disabled in the backend. Mutation controls stay inactive.
+            </div>
+          )}
+          {message && (
+            <Alert
+              tone={message.kind === 'success' ? 'info' : 'attention'}
+              title={message.kind === 'conflict' ? 'State changed' : message.kind === 'error' ? 'Command failed' : 'Done'}
+            >
+              {message.text}
+            </Alert>
+          )}
         </div>
       </div>
     </Screen>

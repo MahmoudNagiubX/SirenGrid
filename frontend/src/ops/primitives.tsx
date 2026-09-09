@@ -106,17 +106,45 @@ export function AiBlock({ title, children, footer }: { title: string; children: 
   );
 }
 
+const APPROVAL_STATUS_COLOR: Record<string, string> = {
+  success: 'var(--color-confirmed)',
+  conflict: 'var(--color-attention)',
+  error: 'var(--color-critical)',
+  neutral: 'var(--color-text-muted)',
+};
+
 export function ApprovalBar({
   note,
   onApprove,
   approved,
   disabled,
+  busy,
+  approveLabel,
+  onReject,
+  rejectDisabled,
+  rejectNote,
+  onRevise,
+  reviseDisabled,
+  statusText,
+  statusTone = 'neutral',
 }: {
   note: string;
   onApprove?: () => void;
   approved?: boolean;
   disabled?: boolean;
+  busy?: boolean;
+  approveLabel?: string;
+  onReject?: () => void;
+  rejectDisabled?: boolean;
+  rejectNote?: string;
+  onRevise?: () => void;
+  reviseDisabled?: boolean;
+  statusText?: string | null;
+  statusTone?: 'success' | 'conflict' | 'error' | 'neutral';
 }) {
+  // Reject / Revise default to disabled so existing callers are unaffected.
+  const rejectOff = rejectDisabled !== false;
+  const reviseOff = reviseDisabled !== false;
   return (
     <div
       style={{
@@ -139,10 +167,20 @@ export function ApprovalBar({
       {!approved && (
         <div style={{ display: 'flex', gap: 8 }}>
           <div style={{ flex: 1 }}>
-            <Button variant="primary" size="md" onClick={onApprove} disabled={disabled} full>Approve</Button>
+            <Button variant="primary" size="md" onClick={onApprove} disabled={disabled || busy} full>
+              {busy ? 'Working…' : approveLabel ?? 'Approve'}
+            </Button>
           </div>
-          <Button variant="critical" size="md" disabled={disabled}>Reject</Button>
-          <Button variant="ghost" size="md" disabled={disabled}>Revise</Button>
+          <Button variant="critical" size="md" onClick={rejectOff ? undefined : onReject} disabled={rejectOff || busy}>Reject</Button>
+          <Button variant="ghost" size="md" onClick={reviseOff ? undefined : onRevise} disabled={reviseOff || busy}>Revise</Button>
+        </div>
+      )}
+      {!approved && rejectNote && (
+        <div style={{ fontSize: 12.5, color: 'var(--color-text-muted)' }}>{rejectNote}</div>
+      )}
+      {statusText && (
+        <div style={{ fontSize: 13, fontWeight: 500, color: APPROVAL_STATUS_COLOR[statusTone] ?? APPROVAL_STATUS_COLOR.neutral }}>
+          {statusText}
         </div>
       )}
     </div>
