@@ -67,6 +67,16 @@ __all__ = [
     "DriverAlertRefreshRequest",
     "DriverAlertRead",
     "IncidentOperationalStateRead",
+    "MobileService",
+    "MobileLoginRequest",
+    "MobileCitizenProfileRead",
+    "MobileLoginResponse",
+    "MobileLocation",
+    "MobileEmergencyRequestCreate",
+    "MobileEmergencyRequestCreated",
+    "CitizenRequestStatus",
+    "MobileResponderRead",
+    "MobileEmergencyTrackingRead",
 ]
 
 
@@ -1478,3 +1488,97 @@ class IncidentOperationalStateRead(BaseModel):
     corridors: list[CorridorRead] = Field(default_factory=list)
     driver_alert: DriverAlertRead | None = None
     driver_alerts: list[DriverAlertRead] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# SirenGrid Citizen (mobile) — frozen request/response contracts.
+# Write/input models forbid extra fields so a citizen cannot smuggle
+# identity/authority fields (e.g. citizen_reference, severity) into intake.
+# ---------------------------------------------------------------------------
+
+
+class MobileService(str, Enum):
+    AMBULANCE = "AMBULANCE"
+    FIRE = "FIRE"
+    POLICE = "POLICE"
+    GENERAL = "GENERAL"
+
+
+class CitizenRequestStatus(str, Enum):
+    RECEIVED = "RECEIVED"
+    UNDER_REVIEW = "UNDER_REVIEW"
+    RESPONSE_ASSIGNED = "RESPONSE_ASSIGNED"
+    EN_ROUTE = "EN_ROUTE"
+    ARRIVED = "ARRIVED"
+    COMPLETED = "COMPLETED"
+    CANCELLED = "CANCELLED"
+
+
+class MobileLoginRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    phone: str = Field(min_length=1, max_length=32)
+    pin: str = Field(min_length=1, max_length=32)
+
+
+class MobileCitizenProfileRead(BaseModel):
+    citizen_reference: str
+    display_name: str
+    phone: str
+    registered_address: str
+    national_id_masked: str
+    identity_status: str
+
+
+class MobileLoginResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    expires_at: datetime
+    profile: MobileCitizenProfileRead
+
+
+class MobileLocation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # Bounds reject out-of-range values and non-finite floats (nan/inf fail the
+    # ge/le comparison), matching the existing ``Coordinate`` model.
+    lat: float = Field(ge=-90.0, le=90.0)
+    lon: float = Field(ge=-180.0, le=180.0)
+
+
+class MobileEmergencyRequestCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    service: MobileService
+    location: MobileLocation | None = None
+    location_accuracy_m: float | None = Field(default=None, ge=0.0, le=10000.0)
+    client_timestamp: datetime | None = None
+    note: str | None = Field(default=None, max_length=500)
+
+
+class MobileEmergencyRequestCreated(BaseModel):
+    request_id: str
+    incident_id: str
+    status: CitizenRequestStatus = CitizenRequestStatus.RECEIVED
+    service: MobileService
+    received_at: str
+    tracking_available: bool = False
+
+
+class MobileResponderRead(BaseModel):
+    id: str
+    label: str
+    location: Coordinate | None = None
+    last_updated: str | None = None
+    freshness_status: FreshnessStatus = FreshnessStatus.UNKNOWN
+    data_reality: DataReality = DataReality.SIMULATED
+
+
+class MobileEmergencyTrackingRead(BaseModel):
+    request_id: str
+    incident_id: str
+    service: MobileService
+    status: CitizenRequestStatus
+    eta_seconds: float | None = None
+    responder: MobileResponderRead | None = None
+    last_updated: str | None = None

@@ -10,6 +10,7 @@ from app.driver_alert_api import router as driver_alert_router
 from app.incidents import router as incidents_router
 from app.hospital_api import router as hospital_router
 from app.map import router as map_router
+from app.mobile_api import router as mobile_router
 from app.operational_api import router as operational_router
 from app.phase06_api import router as phase06_router
 from app.planning import router as planning_router
@@ -59,6 +60,7 @@ api_router.include_router(map_router)
 api_router.include_router(traffic_router)
 api_router.include_router(phase06_router)
 api_router.include_router(social_router)
+api_router.include_router(mobile_router)
 api_router.include_router(websocket_router)
 
 app.include_router(api_router)

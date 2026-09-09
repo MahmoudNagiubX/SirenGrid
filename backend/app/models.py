@@ -45,6 +45,9 @@ __all__ = [
     "CorridorState",
     "DriverAlert",
     "ReplanEvaluation",
+    "CitizenProfile",
+    "CitizenSession",
+    "CitizenIdempotencyRecord",
     "new_timeline_event_id",
 ]
 
@@ -539,3 +542,107 @@ class DriverAlert(Base):
         default=DataReality.SIMULATED,
     )
     provenance_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+
+# ---------------------------------------------------------------------------
+# SirenGrid Citizen (mobile) — minimal pre-verified-identity auth boundary.
+# Synthetic demo identity only. Never store a real Egyptian National ID.
+# These tables are additive and never referenced by the operational core.
+# ---------------------------------------------------------------------------
+
+
+class CitizenProfile(Base):
+    __tablename__ = "citizen_profiles"
+
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+    )
+    citizen_reference: Mapped[str] = mapped_column(String(64), unique=True)
+    display_name: Mapped[str] = mapped_column(String)
+    phone: Mapped[str] = mapped_column(String(32), unique=True)
+    registered_address_text: Mapped[str] = mapped_column(String)
+    # Synthetic only. The API never returns more than these four digits.
+    national_id_last4: Mapped[str] = mapped_column(String(4))
+    identity_status: Mapped[str] = mapped_column(String, default="DEMO_VERIFIED")
+    identity_provider: Mapped[str] = mapped_column(
+        String,
+        default="SYNTHETIC_DEMO_IDENTITY",
+    )
+    identity_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        default=None,
+    )
+    pin_hash: Mapped[str] = mapped_column(String)
+    pin_salt: Mapped[str] = mapped_column(String)
+    pin_iterations: Mapped[int] = mapped_column(Integer, default=120_000)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    data_reality: Mapped[DataReality] = mapped_column(
+        SAEnum(
+            DataReality,
+            native_enum=False,
+            values_callable=lambda obj: [e.value for e in obj],
+        ),
+        default=DataReality.SYNTHETIC,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+
+class CitizenSession(Base):
+    __tablename__ = "citizen_sessions"
+
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+    )
+    citizen_id: Mapped[str] = mapped_column(String(36))
+    # SHA-256 hex digest of the opaque bearer token. The raw token is returned
+    # to the client exactly once at login and never persisted.
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        default=None,
+    )
+
+
+class CitizenIdempotencyRecord(Base):
+    __tablename__ = "citizen_idempotency_records"
+    __table_args__ = (
+        UniqueConstraint(
+            "citizen_reference",
+            "idempotency_key",
+            name="uq_citizen_idempotency_scope",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+    )
+    citizen_reference: Mapped[str] = mapped_column(String(64))
+    idempotency_key: Mapped[str] = mapped_column(String(200))
+    request_fingerprint: Mapped[str] = mapped_column(String(64))
+    report_id: Mapped[str] = mapped_column(String(36))
+    incident_id: Mapped[str] = mapped_column(String(36))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+    )
