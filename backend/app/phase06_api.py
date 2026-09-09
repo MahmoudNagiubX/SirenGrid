@@ -24,7 +24,7 @@ from app.fusion import FusionDecision, FusionReport, evaluate_report_association
 from app.incidents import (
     FACT_FIELD_NAMES,
     _acquire_write_lock,
-    patch_incident_facts,
+    _patch_incident_facts,
     serialize_incident,
     serialize_report,
     serialize_timeline_event,
@@ -779,6 +779,7 @@ def resolve_incident_claim(
     payload: ClaimResolutionRequest,
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
+    _acquire_write_lock(db)
     if payload.field_name not in FACT_FIELD_NAMES:
         raise HTTPException(status_code=422, detail="field is not an approved incident fact")
     claims = [
@@ -803,7 +804,9 @@ def resolve_incident_claim(
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail="resolved value is invalid for the selected fact") from exc
 
-    correction = patch_incident_facts(incident_id, patch_payload, db)
+    correction = _patch_incident_facts(
+        incident_id, patch_payload, db, acquire_lock=False, commit=False, publish=False
+    )
     incident = db.get(Incident, incident_id)
     if incident is None:  # pragma: no cover - correction already validates this
         raise HTTPException(status_code=404, detail=f"Incident '{incident_id}' not found")
@@ -830,7 +833,11 @@ def resolve_incident_claim(
     )
     db.add(incident)
     db.add(event)
-    db.commit()
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     db.refresh(incident)
     publish_operations_event(
         event="incident.updated",
