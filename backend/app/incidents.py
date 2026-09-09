@@ -877,8 +877,28 @@ def patch_incident_facts(
     payload: IncidentFactsPatchRequest,
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
+    return _patch_incident_facts(
+        incident_id,
+        payload,
+        db,
+        acquire_lock=True,
+        commit=True,
+        publish=True,
+    )
+
+
+def _patch_incident_facts(
+    incident_id: str,
+    payload: IncidentFactsPatchRequest,
+    db: Session,
+    *,
+    acquire_lock: bool,
+    commit: bool,
+    publish: bool,
+) -> dict[str, Any]:
     """Atomically patch typed incident facts with single version increment, audit event, and dirty flag."""
-    _acquire_write_lock(db)
+    if acquire_lock:
+        _acquire_write_lock(db)
 
     incident = db.get(Incident, incident_id)
     if incident is None:
@@ -1119,17 +1139,29 @@ def patch_incident_facts(
                 now=now_utc,
             )
 
+    if not commit:
+        return {
+            "incident": serialize_incident(incident),
+            "changed_fields": changed_fields,
+            "downstream_inputs_dirty": downstream_inputs_dirty,
+        }
+
     # Keep the authoritative correction and any resulting trigger in one
     # transaction. Notification is intentionally after this commit.
-    db.commit()
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     db.refresh(incident)
 
     serialized_incident = serialize_incident(incident)
-    publish_operations_event(
-        event="incident.updated",
-        incident_id=incident.id,
-        payload=serialized_incident,
-    )
+    if publish:
+        publish_operations_event(
+            event="incident.updated",
+            incident_id=incident.id,
+            payload=serialized_incident,
+        )
 
     return {
         "incident": serialized_incident,

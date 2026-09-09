@@ -492,39 +492,39 @@ def patch_resource_state(
         )
         db.add(timeline_event)
 
+    active_plan = None
+    if incident is not None and incident.current_plan_id:
+        active_plan = db.get(ResponsePlan, incident.current_plan_id)
     try:
+        if (
+            incident is not None
+            and target_status == ResourceStatus.OUT_OF_SERVICE
+            and active_plan is not None
+            and active_plan.status == ResponsePlanStatus.APPROVED
+            and resource.id in (active_plan.resource_ids_json or [])
+        ):
+            # Record the required trigger in this transaction so an outage
+            # cannot commit without its replan state.
+            from app.replanning import apply_replan_trigger
+
+            apply_replan_trigger(
+                db,
+                incident_id=incident.id,
+                expected_incident_version=incident.version,
+                trigger_reasons=["RESOURCE_UNAVAILABLE"],
+                input_references={
+                    "resource_id": resource.id,
+                    "resource_version": resource.version,
+                    "resource_status": resource.status.value,
+                },
+                now=now_utc,
+            )
         db.commit()
     except Exception:
         db.rollback()
         raise
 
     db.refresh(resource)
-    active_plan = None
-    if incident is not None and incident.current_plan_id:
-        active_plan = db.get(ResponsePlan, incident.current_plan_id)
-    if (
-        incident is not None
-        and target_status == ResourceStatus.OUT_OF_SERVICE
-        and active_plan is not None
-        and active_plan.status == ResponsePlanStatus.APPROVED
-        and resource.id in (active_plan.resource_ids_json or [])
-    ):
-        # Import locally to keep the resource/planning module dependency graph
-        # acyclic while recording the post-commit domain trigger.
-        from app.replanning import record_replan_trigger
-
-        record_replan_trigger(
-            db,
-            incident_id=incident.id,
-            expected_incident_version=incident.version,
-            trigger_reasons=["RESOURCE_UNAVAILABLE"],
-            input_references={
-                "resource_id": resource.id,
-                "resource_version": resource.version,
-                "resource_status": resource.status.value,
-            },
-            now=now_utc,
-        )
     result = serialize_resource(resource)
     publish_operations_event(
         event="resource.updated",

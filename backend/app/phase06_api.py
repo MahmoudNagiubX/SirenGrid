@@ -24,7 +24,7 @@ from app.fusion import FusionDecision, FusionReport, evaluate_report_association
 from app.incidents import (
     FACT_FIELD_NAMES,
     _acquire_write_lock,
-    patch_incident_facts,
+    _patch_incident_facts,
     serialize_incident,
     serialize_report,
     serialize_timeline_event,
@@ -810,35 +810,47 @@ def resolve_incident_claim(
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail="resolved value is invalid for the selected fact") from exc
 
-    correction = patch_incident_facts(incident_id, patch_payload, db)
-    incident = db.get(Incident, incident_id)
-    if incident is None:  # pragma: no cover - correction already validates this
-        raise HTTPException(status_code=404, detail=f"Incident '{incident_id}' not found")
-    now_utc = datetime.now(timezone.utc)
-    provenance = dict(incident.provenance_json or {})
-    states = dict(provenance.get("resolved_fact_states", {}))
-    states[payload.field_name] = "CONSISTENT"
-    provenance["resolved_fact_states"] = states
-    selected = dict(provenance.get("resolved_claim_evidence_ids", {}))
-    selected[payload.field_name] = payload.selected_evidence_id
-    provenance["resolved_claim_evidence_ids"] = selected
-    incident.provenance_json = provenance
-    event = _timeline_event(
-        incident_id=incident_id,
-        event_type="FACT_CLAIM_RESOLVED",
-        details={
-            "field_name": payload.field_name,
-            "selected_evidence_id": payload.selected_evidence_id,
-            "operator_reference": payload.operator_reference,
-            "incident_version": incident.version,
-            "timestamp": now_utc.isoformat(),
-        },
-        created_at=now_utc,
-    )
-    db.add(incident)
-    db.add(event)
-    db.commit()
-    db.refresh(incident)
+    try:
+        correction = _patch_incident_facts(
+            incident_id,
+            patch_payload,
+            db,
+            acquire_lock=True,
+            commit=False,
+            publish=False,
+        )
+        incident = db.get(Incident, incident_id)
+        if incident is None:  # pragma: no cover - correction already validates this
+            raise HTTPException(status_code=404, detail=f"Incident '{incident_id}' not found")
+        now_utc = datetime.now(timezone.utc)
+        provenance = dict(incident.provenance_json or {})
+        states = dict(provenance.get("resolved_fact_states", {}))
+        states[payload.field_name] = "CONSISTENT"
+        provenance["resolved_fact_states"] = states
+        selected = dict(provenance.get("resolved_claim_evidence_ids", {}))
+        selected[payload.field_name] = payload.selected_evidence_id
+        provenance["resolved_claim_evidence_ids"] = selected
+        incident.provenance_json = provenance
+        event = _timeline_event(
+            incident_id=incident_id,
+            event_type="FACT_CLAIM_RESOLVED",
+            details={
+                "field_name": payload.field_name,
+                "selected_evidence_id": payload.selected_evidence_id,
+                "operator_reference": payload.operator_reference,
+                "incident_version": incident.version,
+                "timestamp": now_utc.isoformat(),
+            },
+            created_at=now_utc,
+        )
+        db.add(incident)
+        db.add(event)
+        db.commit()
+        db.refresh(incident)
+    except Exception:
+        db.rollback()
+        raise
+
     publish_operations_event(
         event="incident.updated",
         incident_id=incident_id,

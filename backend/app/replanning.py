@@ -572,6 +572,93 @@ def create_replan_trigger(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="hospital_id is required when hospital_unreachable is confirmed",
         )
+    if payload.input_references.get("hospital_unreachable"):
+        from app.hospital_api import (
+            _generate_hospital_options,
+            _selected_hospital_destination,
+            invalidate_selected_hospital_for_replan,
+        )
+
+        # Hospital invalidation and its required replacement-option refresh
+        # are one command. Validate the selected destination before staging a
+        # trigger, then let all changes commit or roll back together.
+        try:
+            _acquire_write_lock(db)
+            incident = db.get(Incident, incident_id)
+            if incident is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Incident '{incident_id}' not found",
+                )
+            active_plan = _get_active_approved_plan(db, incident)
+            destination = _selected_hospital_destination(
+                db,
+                incident_id=incident.id,
+                plan_id=active_plan.id,
+            )
+            hospital_id = str(payload.input_references["hospital_id"])
+            if destination is not None and destination.hospital_id != hospital_id:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Hospital invalidation does not match the current destination",
+                )
+
+            evaluation, idempotent = apply_replan_trigger(
+                db,
+                incident_id=incident_id,
+                expected_incident_version=payload.expected_incident_version,
+                trigger_reasons=payload.trigger_reasons,
+                input_references=payload.input_references,
+            )
+            if destination is None:
+                if not idempotent:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="No selected hospital destination is available for invalidation",
+                    )
+            else:
+                invalidated = invalidate_selected_hospital_for_replan(
+                    db,
+                    incident_id=incident_id,
+                    hospital_id=hospital_id,
+                    reason="UNREACHABLE",
+                    operator_reference=payload.input_references.get(
+                        "operator_reference", "replan-trigger"
+                    ),
+                    acquire_lock=False,
+                    commit=False,
+                    generate_options=False,
+                )
+                if not invalidated:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="No selected hospital destination is available for invalidation",
+                    )
+                if active_plan.resource_ids_json:
+                    _generate_hospital_options(
+                        incident.id,
+                        db,
+                        acquire_lock=False,
+                        commit=False,
+                    )
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        db.refresh(evaluation)
+        db.refresh(incident)
+        result = serialize_replan_evaluation(
+            evaluation,
+            incident_version=incident.version,
+        )
+        result["idempotent"] = idempotent
+        publish_operations_event(
+            event="replan.required",
+            incident_id=incident.id,
+            payload={"replan": result, "incident": serialize_incident(incident)},
+        )
+        return result
+
     evaluation, idempotent = record_replan_trigger(
         db,
         incident_id=incident_id,
@@ -579,18 +666,6 @@ def create_replan_trigger(
         trigger_reasons=payload.trigger_reasons,
         input_references=payload.input_references,
     )
-    if payload.input_references.get("hospital_unreachable"):
-        from app.hospital_api import invalidate_selected_hospital_for_replan
-
-        invalidate_selected_hospital_for_replan(
-            db,
-            incident_id=incident_id,
-            hospital_id=str(payload.input_references["hospital_id"]),
-            reason="UNREACHABLE",
-            operator_reference=payload.input_references.get(
-                "operator_reference", "replan-trigger"
-            ),
-        )
     incident = db.get(Incident, incident_id)
     assert incident is not None
     result = serialize_replan_evaluation(
