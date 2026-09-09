@@ -34,7 +34,20 @@ import type {
 
 /* ------------------------------------------------------------------ config -- */
 
-/** Zero-key OpenStreetMap raster basemap. Attribution is intentionally kept. */
+/** Light Mist ground the desaturated raster sits on so the whole map reads cool. */
+const BASEMAP_GROUND = '#EDF2F4';
+
+/**
+ * Zero-key OpenStreetMap raster basemap. Attribution is intentionally kept.
+ *
+ * A raster tile is a pre-rendered image, so MapLibre cannot recolour individual
+ * roads/parks/labels into SirenGrid semantic colours. What it *can* do is tone
+ * the whole tile: here a Light Mist (`#EDF2F4`) `background` layer sits beneath
+ * a strongly desaturated, slightly cooled, partly transparent raster so the
+ * ground bleeds through. The result keeps OSM road/label detail but visibly
+ * belongs to SirenGrid — beige/yellow dominance is pulled out and Navy / Slate
+ * / Red overlays stand off the surface.
+ */
 const BASEMAP_STYLE: NonNullable<MapOptions['style']> = {
   version: 8,
   sources: {
@@ -47,18 +60,24 @@ const BASEMAP_STYLE: NonNullable<MapOptions['style']> = {
   },
   layers: [
     {
+      id: 'sg-basemap-ground',
+      type: 'background',
+      paint: { 'background-color': BASEMAP_GROUND },
+    },
+    {
       id: 'osm',
       type: 'raster',
       source: 'osm',
       paint: {
-        // Cool, calm operational basemap: pull warmth out of the OSM carto
-        // tiles and lift the whites so SirenGrid overlays read on top.
-        'raster-opacity': 0.9,
-        'raster-saturation': -0.62,
-        'raster-contrast': 0.06,
-        'raster-hue-rotate': 8,
-        'raster-brightness-min': 0.22,
-        'raster-brightness-max': 1,
+        // Let the Light Mist ground influence the tone; near-fully desaturate
+        // and lift the shadows so the map is light and cool while staying
+        // readable (Arabic labels included).
+        'raster-opacity': 0.82,
+        'raster-saturation': -0.9,
+        'raster-contrast': 0.04,
+        'raster-hue-rotate': 12,
+        'raster-brightness-min': 0.34,
+        'raster-brightness-max': 0.96,
       },
     },
   ],
@@ -79,8 +98,10 @@ const BOUNDARY_LINE = '#2C4468';
 const ZONES_FILL = '#628ECB';
 const ZONES_LINE = '#8AAEE0';
 const ROADS_LINE = '#4A76AE';
-const ROUTE_PRIMARY = '#2F7DE1';
-const ROUTE_ALTERNATIVE = '#93A4BE';
+// Operational route palette (mission section 25): primary route Deep Navy,
+// alternate Slate, superseded a muted slate tint.
+const ROUTE_PRIMARY = '#2B2D42';
+const ROUTE_ALTERNATIVE = '#8D99AE';
 const ROUTE_PREVIOUS = '#AEB9CC';
 
 const MARKER_TONE_COLORS: Record<MapMarkerTone, string> = {
@@ -210,6 +231,20 @@ function markerFill(marker: RealMapMarker): string {
   return MARKER_TONE_COLORS.neutral;
 }
 
+/**
+ * Build the DOM for one marker.
+ *
+ * The returned element is handed straight to `new Marker({ element })`, so it is
+ * the MapLibre marker *root*: MapLibre owns its `position`/`top`/`left` (from
+ * `.maplibregl-marker`) and rewrites its `transform` every frame to keep it on
+ * its geographic point. We must not set `position` (or any transform) on it — an
+ * inline `position: relative` overrides MapLibre's `position: absolute` and the
+ * per-frame `translate(x, y)` is then measured from the element's document-flow
+ * box instead of the map origin, which is what made markers drift on zoom/pan.
+ *
+ * All sizing, the `position: relative` context for the absolutely-positioned pin
+ * and pulse ring, and the only animation live on an inner wrapper.
+ */
 function createMarkerElement(marker: RealMapMarker): HTMLDivElement {
   const el = document.createElement('div');
   const description = marker.sublabel
@@ -218,10 +253,13 @@ function createMarkerElement(marker: RealMapMarker): HTMLDivElement {
   el.setAttribute('role', 'img');
   el.setAttribute('aria-label', description);
   el.title = description;
-  el.style.position = 'relative';
-  el.style.width = marker.selected ? '30px' : '26px';
-  el.style.height = marker.selected ? '30px' : '26px';
   el.style.pointerEvents = 'none';
+
+  const size = marker.selected ? '30px' : '26px';
+  const wrapper = document.createElement('div');
+  wrapper.style.cssText =
+    `position:relative;width:${size};height:${size};` +
+    'display:flex;align-items:center;justify-content:center;';
 
   const icon = marker.icon ?? KIND_DEFAULT_ICON[marker.kind];
   const fill = markerFill(marker);
@@ -232,14 +270,16 @@ function createMarkerElement(marker: RealMapMarker): HTMLDivElement {
     'border:2px solid #fff;box-shadow:0 2px 6px rgba(27,29,43,.32);';
   pin.innerHTML =
     `<svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true">${MARKER_ICON_PATHS[icon]}</svg>`;
-  el.appendChild(pin);
+  wrapper.appendChild(pin);
 
   if (marker.selected) {
     const ring = document.createElement('span');
     ring.className = 'sg-marker-ring';
     ring.style.borderColor = fill;
-    el.appendChild(ring);
+    wrapper.appendChild(ring);
   }
+
+  el.appendChild(wrapper);
   return el;
 }
 
@@ -434,7 +474,10 @@ export function RealMapCanvas({
     const map = mapRef.current;
     if (!ready || !map) return;
     const instances = markers.map((marker) =>
-      new Marker({ element: createMarkerElement(marker) })
+      // `anchor: 'center'` — these are circular pins, so their geographic point
+      // is their centre. MapLibre keeps the root transform under its control;
+      // only the inner wrapper's pulse ring animates.
+      new Marker({ element: createMarkerElement(marker), anchor: 'center' })
         .setLngLat(toTuple(marker.coordinate))
         .addTo(map),
     );
