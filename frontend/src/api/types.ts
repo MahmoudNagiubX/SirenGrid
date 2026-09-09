@@ -178,10 +178,49 @@ export interface SocialSignal extends Report {
   association_outcome?: string | null;
 }
 
+export interface BenchmarkMetricSummary {
+  availability_rate: number;
+  available_count: number;
+  max?: number;
+  mean?: number;
+  median?: number;
+  min?: number;
+  missing_count: number;
+  total_count: number;
+  p95?: number;
+}
+
+export interface BenchmarkEngineAggregate {
+  count: number;
+  outcome_counts: Record<string, number>;
+  hospital_status_counts: Record<string, number>;
+  incident_eta_seconds: BenchmarkMetricSummary;
+  baseline_population_weighted_coverage: BenchmarkMetricSummary;
+  post_dispatch_population_weighted_coverage: BenchmarkMetricSummary;
+  post_dispatch_undercovered_zone_count: BenchmarkMetricSummary;
+  post_dispatch_unreachable_zone_count: BenchmarkMetricSummary;
+  hospital_eta_seconds: BenchmarkMetricSummary;
+  replan_eta_delta_seconds: BenchmarkMetricSummary;
+  replan_status_counts: Record<string, number>;
+}
+
+export interface BenchmarkValidation {
+  actual: string;
+  case_id: string;
+  evidence: string;
+  expected: string;
+  passed: boolean;
+  result: string;
+  scenario_id: string;
+}
+
 export interface BenchmarkArtifact {
-  aggregate: JsonRecord;
+  aggregate: {
+    baseline: BenchmarkEngineAggregate;
+    sirengrid: BenchmarkEngineAggregate;
+  };
   performance: JsonRecord;
-  validation: JsonRecord[];
+  validation: BenchmarkValidation[];
   metadata: JsonRecord;
   provenance: JsonRecord;
 }

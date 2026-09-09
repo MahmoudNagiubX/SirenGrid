@@ -5,6 +5,18 @@ import { DenseMap, MapControls, MapLegend, MapMarker, MapScale, projectCoordinat
 import { DecisionWorkspace } from './DecisionWorkspace';
 import { IncidentRail, TimelineDock } from './workspace';
 import { LEGEND, STATE_META, type DecisionTab, type OpsState, type OverlayKey } from '../data/mock';
+import type { Incident } from '../api/types';
+
+function incidentLocation(incident: Incident): string {
+  const text = incident.location_text?.trim();
+  if (text) return text;
+  const latitude = incident.latitude;
+  const longitude = incident.longitude;
+  if (typeof latitude === 'number' && Number.isFinite(latitude) && typeof longitude === 'number' && Number.isFinite(longitude)) {
+    return `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
+  }
+  return 'Location unresolved';
+}
 
 function routeGeometry(plan: { routes: Record<string, unknown>[] } | null): Record<string, unknown> | null {
   const route = plan?.routes.find((item) => item.geometry || item.route_geometry);
@@ -36,7 +48,7 @@ export function Operations({ initialState = 'idle' }: { initialState?: OpsState 
         {data.actionError && <Alert tone="attention" title="Action not completed">{data.actionError}</Alert>}
         <div style={{ flex: 1, position: 'relative', borderRadius: 'var(--radius-lg)', overflow: 'hidden', border: '1px solid var(--color-border-hairline)', minHeight: 0 }}>
           <DenseMap view={STATE_META[state].map.view} overlays={overlays} route={STATE_META[state].map.route} backendMode routeGeometry={route}>
-            {markerIncident && <MapMarker icon="triangle-alert" label={incident?.id ?? 'Incident'} sub={incident?.location_text ?? 'Location unresolved'} tone="red" left={markerIncident.left} top={markerIncident.top} />}
+            {markerIncident && <MapMarker icon="triangle-alert" label={incident?.id ?? 'Incident'} sub={incident ? incidentLocation(incident) : 'Location unresolved'} tone="red" left={markerIncident.left} top={markerIncident.top} />}
             {markerResources.map((resource) => {
               const point = projectCoordinate({ lat: resource.latitude, lon: resource.longitude });
               return <MapMarker key={resource.id} icon={resource.resource_type === 'FIRE_RESCUE' ? 'truck' : 'ambulance'} label={resource.id} sub={resource.status.replaceAll('_', ' ')} tone="blue" left={point.left} top={point.top} />;

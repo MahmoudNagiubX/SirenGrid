@@ -17,6 +17,17 @@ function time(value: string | null): string {
   return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+function incidentLocation(incident: Incident): string {
+  const text = incident.location_text?.trim();
+  if (text) return text;
+  const latitude = incident.latitude;
+  const longitude = incident.longitude;
+  if (typeof latitude === 'number' && Number.isFinite(latitude) && typeof longitude === 'number' && Number.isFinite(longitude)) {
+    return `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
+  }
+  return 'Location unresolved';
+}
+
 export function StatusStrip({ nav, setNav }: { nav: TopNav; setNav: (n: TopNav) => void }) {
   const { incidents, resources, traffic } = useOperationsData();
   const openCount = incidents.data?.filter((incident) => !['CLOSED', 'CANCELLED_FALSE_REPORT', 'DUPLICATE_MERGED'].includes(incident.status)).length;
@@ -63,7 +74,7 @@ export function IncidentRail({ selected, setSelected, state, setState }: { selec
 }
 
 function IncidentCard({ incident, selected, onSelect }: { incident: Incident; selected: boolean; onSelect: () => void }) {
-  return <button onClick={onSelect} style={{ textAlign: 'left', cursor: 'pointer', fontFamily: 'var(--font-en)', borderRadius: 'var(--radius-md)', padding: 14, display: 'flex', gap: 12, alignItems: 'flex-start', border: selected ? '1.5px solid var(--color-accent)' : '1px solid var(--color-border-hairline)', background: selected ? 'var(--color-accent-soft)' : 'var(--color-bg-surface)', boxShadow: selected ? 'var(--shadow-sm)' : 'none' }}><IconTile icon={<Ico n="triangle-alert" />} tint={incident.severity === 'CRITICAL' || incident.severity === 'HIGH' ? 'red' : 'navy'} size={34} /><div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.25 }}>{incident.incident_type.replaceAll('_', ' ')}</div><div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}><Badge severity={severity(incident.severity)} /><span style={{ fontSize: 12.5, color: 'var(--color-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{incident.location_text ?? 'Location unresolved'}</span></div><div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginTop: 5 }}><span style={{ fontSize: 12.5, color: 'var(--color-text-secondary)' }}>{incident.status.replaceAll('_', ' ')} · v{incident.version}</span><span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>{time(incident.updated_at)}</span></div></div></button>;
+  return <button onClick={onSelect} style={{ textAlign: 'left', cursor: 'pointer', fontFamily: 'var(--font-en)', borderRadius: 'var(--radius-md)', padding: 14, display: 'flex', gap: 12, alignItems: 'flex-start', border: selected ? '1.5px solid var(--color-accent)' : '1px solid var(--color-border-hairline)', background: selected ? 'var(--color-accent-soft)' : 'var(--color-bg-surface)', boxShadow: selected ? 'var(--shadow-sm)' : 'none' }}><IconTile icon={<Ico n="triangle-alert" />} tint={incident.severity === 'CRITICAL' || incident.severity === 'HIGH' ? 'red' : 'navy'} size={34} /><div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.25 }}>{incident.incident_type.replaceAll('_', ' ')}</div><div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}><Badge severity={severity(incident.severity)} /><span style={{ fontSize: 12.5, color: 'var(--color-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{incidentLocation(incident)}</span></div><div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginTop: 5 }}><span style={{ fontSize: 12.5, color: 'var(--color-text-secondary)' }}>{incident.status.replaceAll('_', ' ')} · v{incident.version}</span><span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>{time(incident.updated_at)}</span></div></div></button>;
 }
 
 export function TimelineDock({ open, setOpen }: { open: boolean; setOpen: (o: boolean) => void }) {

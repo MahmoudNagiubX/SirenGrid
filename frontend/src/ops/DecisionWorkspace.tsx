@@ -2,7 +2,7 @@ import { Fragment, useState } from 'react';
 import { Alert, Badge, Button, Card, GlassPanel, IconTile } from '../components';
 import { Ico } from '../lib/icon';
 import { useOperationsData } from '../state/OperationsContext';
-import type { HospitalOption, JsonRecord, Report, ResponsePlan } from '../api/types';
+import type { HospitalOption, Incident, JsonRecord, Report, ResponsePlan } from '../api/types';
 import { DEC_TABS, type DecisionTab, type OpsState } from '../data/mock';
 import { AiBlock, ApprovalBar, Fact, Prov, SubHead } from './primitives';
 
@@ -12,6 +12,21 @@ function display(value: unknown, fallback = unknownText): string {
   if (value === null || value === undefined || value === '') return fallback;
   if (typeof value === 'boolean') return value ? 'Yes' : 'No';
   return String(value);
+}
+
+function coordinateText(latitude: number | null, longitude: number | null): string | null {
+  if (typeof latitude !== 'number' || !Number.isFinite(latitude) || typeof longitude !== 'number' || !Number.isFinite(longitude)) return null;
+  return `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
+}
+
+function incidentLocation(incident: Incident): string {
+  const text = incident.location_text?.trim();
+  return text || coordinateText(incident.latitude, incident.longitude) || 'Location unresolved';
+}
+
+function reportLocation(report: Report): string {
+  const text = report.location_text?.trim();
+  return text || (report.location ? coordinateText(report.location.lat, report.location.lon) : null) || 'Location unresolved';
 }
 
 function eta(route: JsonRecord | undefined): string {
@@ -55,7 +70,7 @@ function OverviewTab() {
     <div style={{ display: 'flex', gap: 14, padding: '2px 0 8px' }}><div style={{ flex: 1 }}><SubHead>Severity</SubHead><div style={{ fontSize: 18, fontWeight: 600, color: 'var(--color-critical)', marginTop: 5 }}>{display(incident.severity)}</div></div><span style={{ width: 1, background: 'var(--color-border-hairline)' }} /><div style={{ flex: 1.1 }}><SubHead>Evidence confidence</SubHead><div style={{ marginTop: 7 }}><Badge tone="info">{display(incident.confidence_level)}</Badge></div></div></div>
     <SubHead>Confirmed / known fields</SubHead>
     <Fact label="Incident type" value={incident.incident_type.replaceAll('_', ' ')} prov="source" />
-    <Fact label="Location" value={incident.location_text ?? 'Unresolved'} unknown={!incident.location_text} prov="source" />
+    <Fact label="Location" value={incidentLocation(incident)} unknown={incidentLocation(incident) === 'Location unresolved'} prov="source" />
     <Fact label="Casualties" value={incident.casualty_count ?? incident.casualty_range ?? unknownText} unknown={incident.casualty_count === null && !incident.casualty_range} prov="source" />
     <Fact label="Trapped person" value={display(incident.trapped_person)} unknown={incident.trapped_person === null} prov="source" />
     <Fact label="Road blockage" value={display(incident.road_blockage)} unknown={incident.road_blockage === null} prov="source" />
@@ -116,7 +131,7 @@ function HospitalOptionCard({ option, selected, onSelect, disabled }: { option: 
 function EvidenceTab() {
   const { reports } = useOperationsData();
   const list = reports.data ?? [];
-  return <Fragment><SubHead>Reports · {list.length}</SubHead>{!list.length && <Alert tone="info" title="No reports">The backend has no reports attached to this incident.</Alert>}{list.map((report: Report) => <Card key={report.id} padding={12}><div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}><span style={{ fontSize: 14, fontWeight: 600 }}>{report.source_type}</span><Reality value={report.data_reality} /></div><div style={{ fontSize: 13, color: 'var(--color-text-secondary)', marginTop: 4 }}>{report.raw_text}</div><div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 5 }}>{report.location_text ?? 'Location unknown'} · {report.processing_status}</div></Card>)}<Alert tone="attention" title="Evidence is not operational authority">AI or external evidence remains review-oriented until an operator confirms material facts.</Alert></Fragment>;
+  return <Fragment><SubHead>Reports · {list.length}</SubHead>{!list.length && <Alert tone="info" title="No reports">The backend has no reports attached to this incident.</Alert>}{list.map((report: Report) => <Card key={report.id} padding={12}><div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}><span style={{ fontSize: 14, fontWeight: 600 }}>{report.source_type}</span><Reality value={report.data_reality} /></div><div style={{ fontSize: 13, color: 'var(--color-text-secondary)', marginTop: 4 }}>{report.raw_text}</div><div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 5 }}>{reportLocation(report)} · {report.processing_status}</div></Card>)}<Alert tone="attention" title="Evidence is not operational authority">AI or external evidence remains review-oriented until an operator confirms material facts.</Alert></Fragment>;
 }
 
 function HistoryTab() {
