@@ -209,7 +209,7 @@ function OverviewTab({ state, onSelectTab }: { state: OpsState; onSelectTab: (t:
         <div style={{ flex: 1.1 }}>
           <SubHead>AI confidence</SubHead>
           <div style={{ marginTop: 7 }}>
-            <ConfidenceMeter level={confLevel ?? 'low'} label={confLevel ? humanize(confLevel) : 'Unknown'} />
+            <ConfidenceMeter level={confLevel ?? 'low'} label={confLevel ? humanize(confLevel) : 'Not scored'} />
           </div>
         </div>
       </div>
@@ -260,14 +260,23 @@ function OverviewTab({ state, onSelectTab }: { state: OpsState; onSelectTab: (t:
         </Fragment>
       )}
       <SubHead>Known</SubHead>
-      <Row a="Type" b={inc?.incident_type ? humanize(inc.incident_type) : 'Unknown'} />
-      <Row a="Trapped" b={inc?.trapped_person === true ? 'Yes' : inc?.trapped_person === false ? 'No' : 'Unknown'} tone={inc?.trapped_person === null ? 'var(--color-text-muted)' : undefined} />
-      <Row a="Road" b={inc?.road_blockage === true ? 'Blocked' : inc?.road_blockage === false ? 'Clear' : 'Unknown'} tone={inc?.road_blockage === null ? 'var(--color-text-muted)' : undefined} />
-      <Row a="Location" b={inc?.location_text || 'Location unresolved'} />
+      <Row a="Type" b={inc?.incident_type ? humanize(inc.incident_type) : 'Not reported'} />
+      <Row a="Trapped" b={inc?.trapped_person === true ? 'Yes' : inc?.trapped_person === false ? 'No' : 'Not reported'} tone={inc?.trapped_person == null ? 'var(--color-text-muted)' : undefined} />
+      <Row a="Road" b={inc?.road_blockage === true ? 'Blocked' : inc?.road_blockage === false ? 'Clear' : 'Not reported'} tone={inc?.road_blockage == null ? 'var(--color-text-muted)' : undefined} />
+      <Row
+        a="Location"
+        b={
+          inc?.location_text ||
+          (inc?.latitude != null && inc?.longitude != null
+            ? `${inc.latitude.toFixed(4)}, ${inc.longitude.toFixed(4)}`
+            : 'Location pending confirmation')
+        }
+        tone={!inc?.location_text ? 'var(--color-text-muted)' : undefined}
+      />
       <SubHead>Casualties</SubHead>
       <Row
         a="Casualty count"
-        b={inc?.casualty_count !== null && inc?.casualty_count !== undefined ? `${inc.casualty_count}` : inc?.casualty_range || 'Unknown'}
+        b={inc?.casualty_count !== null && inc?.casualty_count !== undefined ? `${inc.casualty_count}` : inc?.casualty_range || 'Not reported'}
         tone={inc?.casualty_count === null && !inc?.casualty_range ? 'var(--color-text-muted)' : undefined}
       />
       <AiBlock title="Incident interpretation">
@@ -1086,8 +1095,18 @@ export function DecisionWorkspace({
   tab: DecisionTab;
   setTab: (t: DecisionTab) => void;
 }) {
-  const { selectedIncident, selectedIncidentId, refreshSelectedIncident } = useOperations();
+  const { selectedIncident, selectedIncidentId, refreshSelectedIncident, incidents } =
+    useOperations();
   const inc = selectedIncident.data;
+
+  // A clean, intentional empty state — never the "wall of Unknown" data sheet —
+  // when no incident is selected and nothing is loading or errored.
+  const showEmptyState =
+    !selectedIncidentId &&
+    selectedIncident.data == null &&
+    !selectedIncident.loading &&
+    selectedIncident.error == null;
+  const incidentCount = incidents.data?.length ?? 0;
 
   // §23/§24: a failed selected-incident read is visible and retriable; a read
   // that is merely still loading shows "Loading incident", never "Unknown".
@@ -1114,6 +1133,63 @@ export function DecisionWorkspace({
     : '—';
   const headerSevTone = inc ? (inc.severity.toLowerCase() as 'low' | 'moderate' | 'high' | 'critical') : 'low';
   const headerSeverityPending = isUnconfirmedMobileSeverity(inc);
+
+  if (showEmptyState) {
+    return (
+      <GlassPanel
+        padding={0}
+        style={{ width: 400, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}
+      >
+        <div
+          className="sg-rise"
+          style={{
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            textAlign: 'center',
+            gap: 10,
+            padding: '32px 28px',
+          }}
+        >
+          <IconTile icon={<Ico n="siren" />} tint="navy" size={44} />
+          <div style={{ fontSize: 16, fontWeight: 600, letterSpacing: '-0.01em' }}>
+            {incidentCount > 0 ? 'Select an incident to inspect' : 'No active incidents yet'}
+          </div>
+          <div style={{ fontSize: 13, color: 'var(--color-text-muted)', lineHeight: 1.55, maxWidth: 280 }}>
+            {incidentCount > 0
+              ? `This workspace shows facts, plan comparison, hospital options and history for one incident. Pick one of the ${incidentCount} in the rail.`
+              : 'The Command Center is monitoring the feed. Citizen mobile requests and operator intake appear in the incident rail automatically.'}
+          </div>
+          <div
+            style={{
+              marginTop: 8,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 7,
+              fontSize: 12.5,
+              color: 'var(--color-text-secondary)',
+              textAlign: 'left',
+            }}
+          >
+            <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ width: 14, height: 14, display: 'flex', color: 'var(--color-accent)' }}>
+                <Ico n="clipboard-list" />
+              </span>
+              Choose an incident from the rail on the left
+            </span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ width: 14, height: 14, display: 'flex', color: 'var(--color-accent)' }}>
+                <Ico n="sliders-horizontal" />
+              </span>
+              Or open Demo controls to load a scenario
+            </span>
+          </div>
+        </div>
+      </GlassPanel>
+    );
+  }
 
   return (
     <GlassPanel padding={0} style={{ width: 400, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
@@ -1162,11 +1238,13 @@ export function DecisionWorkspace({
       <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12, overflowY: 'auto', minHeight: 0 }}>
         {selectedIncidentNotice}
         <StateBanner state={state} />
-        {tab === 'overview' && <OverviewTab state={state} onSelectTab={setTab} />}
-        {tab === 'plan' && <PlanTab state={state} />}
-        {tab === 'hospital' && <HospitalTab />}
-        {tab === 'evidence' && <EvidenceTab />}
-        {tab === 'history' && <HistoryTab />}
+        <div key={tab} className="sg-fade" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {tab === 'overview' && <OverviewTab state={state} onSelectTab={setTab} />}
+          {tab === 'plan' && <PlanTab state={state} />}
+          {tab === 'hospital' && <HospitalTab />}
+          {tab === 'evidence' && <EvidenceTab />}
+          {tab === 'history' && <HistoryTab />}
+        </div>
       </div>
     </GlassPanel>
   );

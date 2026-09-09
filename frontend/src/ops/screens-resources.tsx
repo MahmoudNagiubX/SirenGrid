@@ -18,6 +18,20 @@ type Filter = 'all' | 'avail' | 'committed';
 /** Prototype audit reference for versioned human-authority commands (SG-INT-06B §11). */
 const OPERATOR_REF = 'demo-operator';
 
+/** OSM-derived hospital records sometimes carry a raw `osm:(...)` id or no name. */
+function hospitalName(raw: string | null | undefined): string {
+  const name = (raw ?? '').trim();
+  if (!name || /^osm[:(]/i.test(name) || /^\('?(node|way|relation)'?,/i.test(name)) {
+    return 'Unnamed facility';
+  }
+  return name;
+}
+
+/** Compact unit id — full UUIDs are noise in a list. */
+function shortUnitId(id: string): string {
+  return /^[0-9a-f-]{20,}$/i.test(id) ? `#${id.slice(-4)}` : id;
+}
+
 export function ResourceScreen() {
   const { resources, hospitals, refreshGlobal } = useOperations();
   const { busyAction, message, run } = useCommandRunner();
@@ -55,6 +69,19 @@ export function ResourceScreen() {
   const hospList = hospitals.data ?? [];
   const hospTotal = hospList.length;
   const hospAccepting = hospList.filter((h) => h.accepting_state === 'ACCEPTING').length;
+  const hospKnown = hospList.filter((h) => h.accepting_state !== 'UNKNOWN').length;
+  // Live acceptance state is only meaningful once a hospital has reported it.
+  const hospReadinessValue = !hospitals.data
+    ? '—'
+    : hospKnown > 0
+    ? `${hospAccepting} / ${hospKnown} open`
+    : `${hospTotal} facilities`;
+  const hospReadinessSub =
+    !hospitals.data
+      ? 'Awaiting hospital data'
+      : hospKnown > 0
+      ? `${hospKnown} reporting live status`
+      : 'Live readiness pending — static registry loaded';
 
   const kpis = [
     {
@@ -81,8 +108,8 @@ export function ResourceScreen() {
     {
       icon: 'hospital',
       label: 'Hospital readiness',
-      value: hospitals.data ? `${hospAccepting} / ${hospTotal} open` : '—',
-      sub: 'Operational status',
+      value: hospReadinessValue,
+      sub: hospReadinessSub,
       tint: 'blue' as const,
     },
   ];
@@ -147,17 +174,30 @@ export function ResourceScreen() {
           </div>
           <GlassPanel padding={0} style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
             <div style={{ display: 'flex', padding: '11px 16px', borderBottom: '1px solid var(--color-border-hairline)', fontSize: 12, fontWeight: 600, letterSpacing: '.05em', color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>
-              <span style={{ width: 150 }}>Unit</span>
-              <span style={{ width: 150 }}>Status</span>
+              <span style={{ width: 176 }}>Unit</span>
+              <span style={{ width: 124 }}>Status</span>
               <span style={{ width: 110 }}>Zone</span>
               <span style={{ flex: 1 }}>Base</span>
               <span style={{ width: 150 }}>Capability</span>
               <span style={{ width: 60, textAlign: 'right' }}>ETA</span>
             </div>
             <div style={{ overflowY: 'auto' }}>
-              {rows.length === 0 && (
+              {rows.length === 0 && resources.loading && resources.data == null && (
+                <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {[0, 1, 2, 3].map((i) => (
+                    <div key={i} className="sg-skeleton" style={{ height: 40 }} />
+                  ))}
+                </div>
+              )}
+              {rows.length === 0 && !(resources.loading && resources.data == null) && (
                 <div style={{ padding: 24, textAlign: 'center', color: 'var(--color-text-muted)', fontSize: 13 }}>
-                  {resources.loading ? 'Loading resource fleet…' : 'No matching resources found'}
+                  {resources.error != null
+                    ? 'Fleet data unavailable — use Refresh data above.'
+                    : total === 0
+                    ? 'No units in the fleet registry yet.'
+                    : search.trim() || filter !== 'all'
+                    ? 'No matching units — clear the search or filter.'
+                    : 'No units to show.'}
                 </div>
               )}
               {rows.map((u) => {
@@ -180,14 +220,18 @@ export function ResourceScreen() {
                       fontSize: 12.5,
                     }}
                   >
-                    <span style={{ width: 150, display: 'flex', alignItems: 'center', gap: 9 }}>
+                    <span style={{ width: 176, display: 'flex', alignItems: 'center', gap: 9, minWidth: 0 }}>
                       <IconTile icon={<Ico n={isAmb ? 'ambulance' : 'truck'} />} tint={u.status === 'OUT_OF_SERVICE' ? 'slate' : 'navy'} size={26} />
-                      <span>
-                        <b>{u.id}</b>
-                        <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>{u.name || u.resource_type}</div>
+                      <span style={{ minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {u.name || u.resource_type}
+                        </div>
+                        <div style={{ fontSize: 11.5, color: 'var(--color-text-muted)' }}>
+                          {u.resource_type.replace(/_/g, ' ')} · {shortUnitId(u.id)}
+                        </div>
                       </span>
                     </span>
-                    <span style={{ width: 150 }}>
+                    <span style={{ width: 124 }}>
                       <Badge tone={STATUS_TONE[u.status] ?? 'neutral'}>{u.status.replace(/_/g, ' ')}</Badge>
                     </span>
                     <span style={{ width: 110, color: 'var(--color-text-secondary)' }}>{u.home_zone || '—'}</span>
@@ -201,7 +245,7 @@ export function ResourceScreen() {
           </GlassPanel>
         </div>
         {sel ? (
-          <Drawer title={`${sel.id} · ${sel.name || sel.resource_type}`} onClose={() => setSelectedResourceId(null)}>
+          <Drawer title={sel.name || sel.resource_type.replace(/_/g, ' ')} onClose={() => setSelectedResourceId(null)}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               <IconTile icon={<Ico n={sel.resource_type === 'AMBULANCE' || sel.type === 'AMBULANCE' ? 'ambulance' : 'truck'} />} tint="navy" size={42} />
               <div>
@@ -265,20 +309,25 @@ export function ResourceScreen() {
                   : 'No hospital records available.'}
               </div>
             ) : (
-              hospList.map((h) => (
-                <div key={h.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '7px 0', borderBottom: '1px solid var(--color-border-hairline)', fontSize: 12.5 }}>
-                  <span>{h.name || h.id}</span>
-                  <span style={{ color: 'var(--color-text-secondary)' }}>
-                    {h.accepting_state === 'ACCEPTING'
-                      ? h.simulated_load_ratio !== null
-                        ? `${Math.round(h.simulated_load_ratio * 100)}% load`
-                        : 'Accepting'
-                      : h.accepting_state === 'NOT_ACCEPTING'
-                      ? 'Not accepting'
-                      : 'Unknown'}
-                  </span>
-                </div>
-              ))
+              hospList.slice(0, 40).map((h) => {
+                const known = h.accepting_state !== 'UNKNOWN';
+                return (
+                  <div key={h.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, padding: '7px 0', borderBottom: '1px solid var(--color-border-hairline)', fontSize: 12.5 }}>
+                    <span style={{ minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {hospitalName(h.name)}
+                    </span>
+                    <span style={{ color: known ? 'var(--color-text-secondary)' : 'var(--color-text-muted)', flexShrink: 0 }}>
+                      {h.accepting_state === 'ACCEPTING'
+                        ? h.simulated_load_ratio !== null
+                          ? `${Math.round(h.simulated_load_ratio * 100)}% load`
+                          : 'Accepting'
+                        : h.accepting_state === 'NOT_ACCEPTING'
+                        ? 'Not accepting'
+                        : 'Readiness pending'}
+                    </span>
+                  </div>
+                );
+              })
             )}
             <div style={{ fontSize: 12.5, color: 'var(--color-text-muted)', marginTop: 10 }}>Select a unit to open its detail drawer.</div>
           </GlassPanel>

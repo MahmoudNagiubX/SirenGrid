@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
+from app.db import init_db
 from app.corridor_api import router as corridor_router
 from app.driver_alert_api import router as driver_alert_router
 from app.incidents import router as incidents_router
@@ -19,10 +24,30 @@ from app.simulation_api import router as simulation_router
 from app.traffic.api import router as traffic_router
 from app.websocket import router as websocket_router
 
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    """Ensure the operational schema exists before serving.
+
+    ``init_db()`` is an idempotent ``CREATE TABLE IF NOT EXISTS`` pass. Running
+    it on startup means ``uvicorn app.main:app`` against a fresh database no
+    longer 500s every read endpoint (which previously left the dashboard
+    showing "refresh failed" everywhere). Demo data is still seeded separately
+    via ``python -m app.seed``.
+    """
+    try:
+        init_db()
+    except Exception:  # pragma: no cover - startup must not crash the server
+        logger.exception("init_db() failed during startup")
+    yield
+
 
 app = FastAPI(
     title=settings.app_name,
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -57,7 +82,6 @@ api_router.include_router(map_router)
 api_router.include_router(traffic_router)
 api_router.include_router(phase06_router)
 api_router.include_router(simulation_router)
-api_router.include_router(websocket_router)
 api_router.include_router(mobile_router)
 api_router.include_router(websocket_router)
 

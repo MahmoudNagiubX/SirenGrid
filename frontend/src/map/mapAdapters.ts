@@ -109,9 +109,11 @@ export function toIncidentMarker(
     id: incident.id,
     coordinate,
     kind: 'incident',
-    label: `${incident.id} · ${humanizeType(incident.incident_type)}`,
+    label: `${humanizeType(incident.incident_type)} · ${incident.id}`,
     sublabel: incident.location_text ?? undefined,
     tone: severe ? 'critical' : 'primary',
+    icon: 'incident',
+    selected: true,
   };
 }
 
@@ -134,6 +136,16 @@ export function toResourceMarkers(
     if (assignedToSelected) tone = 'primary';
     else if (isSimulatedProvenance(resource.provenance)) tone = 'simulated';
 
+    const rtype = (resource.resource_type ?? resource.type ?? '').toUpperCase();
+    const icon: RealMapMarker['icon'] =
+      rtype === 'AMBULANCE'
+        ? 'ambulance'
+        : rtype.includes('FIRE')
+        ? 'fire'
+        : rtype.includes('POLICE')
+        ? 'police'
+        : 'unit';
+
     markers.push({
       id: resource.id,
       coordinate: [lon, lat],
@@ -141,6 +153,7 @@ export function toResourceMarkers(
       label: resource.name || resource.id,
       sublabel: resource.status,
       tone,
+      icon,
     });
   }
   return markers;
@@ -160,6 +173,7 @@ export function toHospitalMarkers(hospitals: readonly HospitalRead[]): RealMapMa
       label: hospital.name || hospital.id,
       sublabel: hospital.accepting_state,
       tone: 'neutral',
+      icon: 'hospital',
     });
   }
   return markers;

@@ -33,9 +33,21 @@ function ScenarioRow({
         <div style={{ fontSize: 13, fontWeight: 600 }}>{title}</div>
         <div style={{ fontSize: 12.5, color: 'var(--color-text-secondary)' }}>{sub}</div>
       </div>
-      <Button variant="secondary" size="sm" disabled>
-        {action}
-      </Button>
+      <span
+        title="Live triggering arrives with the simulation controller"
+        style={{
+          fontSize: 11.5,
+          fontWeight: 600,
+          letterSpacing: '0.02em',
+          color: 'var(--color-text-muted)',
+          border: '1px solid var(--color-border-hairline)',
+          borderRadius: 'var(--radius-pill)',
+          padding: '4px 10px',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {action} · preview
+      </span>
     </div>
   );
 }
@@ -59,8 +71,10 @@ export function DemoScreen() {
 
   return (
     <Screen>
-      <Alert tone="simulated" title="Demo & simulation controls">
-        These controls drive prototype demonstration scenarios. Simulation status is read from the canonical backend. Mutation controls are wired in Phase 06.
+      <Alert tone="simulated" title="Demo &amp; simulation controls">
+        Simulation status below is read live from the backend. The scenario and inject
+        presets are shown for the demo narrative; live triggering is enabled through the
+        simulation controller and is not active in this build.
       </Alert>
       {/* §37: canonical `enabled` truth is unavailable — do not imply a known state. */}
       {simulation.error != null ? (

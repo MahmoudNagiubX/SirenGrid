@@ -1,13 +1,15 @@
-/* SirenGrid design tokens — ported verbatim from the Claude Design project
-   (tokens/colors.css, tokens/typography.css, tokens/spacing.css, tokens/effects.css).
-   Do not retune these values; they are the canonical design system. */
+/* SirenGrid design tokens.
+   Base system ported from the Claude Design project; the neutral ramp, page
+   surface and map palette are tuned here to the approved SirenGrid direction
+   (Deep Navy #2B2D42 / Slate Blue-Gray #8D99AE / Light Mist #EDF2F4 /
+   Alert Red #EF233C / Critical Red #D90429 — SirenGrid_FRONTEND_..._MISSION §6). */
 
 @import url('https://fonts.googleapis.com/css2?family=Lexend:wght@300;400;500;600;700;800&family=Rubik:wght@300;400;500;600;700&display=swap');
 
 :root {
-  --gray-0: #F7F8FA; --gray-50: #F1F3F6; --gray-100: #E7EAF0; --gray-200: #DDE1E9;
-  --gray-300: #C7CCD8; --gray-400: #A7AEBD; --gray-500: #8992A6; --gray-600: #6B7386;
-  --gray-700: #4F5568; --gray-800: #383D4E; --navy-900: #1B1D2B;
+  --gray-0: #F5F7F9; --gray-50: #EDF2F4; --gray-100: #E4E9EE; --gray-200: #D8DEE6;
+  --gray-300: #C4CCD8; --gray-400: #A6AFBF; --gray-500: #8D99AE; --gray-600: #6B7688;
+  --gray-700: #4E5766; --gray-800: #363C4C; --navy-900: #2B2D42;
   --blue-50: #F0F3FA; --blue-100: #D5DEEF; --blue-200: #B1C9EF; --blue-300: #8AAEE0;
   --blue-400: #628ECB; --blue-500: #4A76AE; --blue-600: #395886; --blue-700: #2C4468; --blue-800: #21324D;
   --slate-300: #AEB9CC; --slate-400: #7A8CA3; --slate-500: #5D7089; --slate-600: #46586F;
@@ -56,12 +58,12 @@
   --conf-medium: var(--blue-300);
   --conf-high: var(--blue-600);
 
-  --map-bg: #E7EBF1; --map-water: #CBDBEA; --map-land: #EDEFF4; --map-block: #DBE1EC;
-  --map-road-minor: #FBFCFE; --map-road-major: #C3CCDD; --map-road-highway: #A8B4C9;
-  --map-label: #3A4557; --map-label-halo: #FFFFFF;
-  --map-route-primary: #2F7DE1; --map-route-alt: #93A4BE;
-  --map-congestion-med: var(--red-300); --map-congestion-high: var(--red-600);
-  --map-incident: var(--red-600); --map-hospital: var(--blue-600); --map-responder: var(--blue-500);
+  --map-bg: #E4E9EF; --map-water: #C6D6E6; --map-land: #EDF2F4; --map-block: #DBE2EC;
+  --map-road-minor: #FBFCFE; --map-road-major: #BFC9D8; --map-road-highway: #A4B0C4;
+  --map-label: #2B2D42; --map-label-halo: #FFFFFF;
+  --map-route-primary: #2B2D42; --map-route-alt: #8D99AE;
+  --map-congestion-med: var(--red-400); --map-congestion-high: var(--red-600);
+  --map-incident: var(--red-500); --map-hospital: var(--blue-600); --map-responder: var(--blue-500);
   --map-coverage-fill: rgba(57, 88, 134, .13); --map-coverage-line: rgba(57, 88, 134, .42);
   --map-gap-fill: rgba(165, 8, 31, .14); --map-gap-line: rgba(165, 8, 31, .5);
   --map-corridor: var(--blue-400);

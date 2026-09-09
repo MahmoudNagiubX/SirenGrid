@@ -203,7 +203,10 @@ export function Drawer({ title, children, onClose }: { title: string; children: 
 
 export function Screen({ children, style = {} }: { children: ReactNode; style?: CSSProperties }) {
   return (
-    <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 14, padding: 18, overflow: 'hidden', ...style }}>
+    <div
+      className="sg-fade"
+      style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 14, padding: 18, overflow: 'hidden', ...style }}
+    >
       {children}
     </div>
   );

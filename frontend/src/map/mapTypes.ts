@@ -51,6 +51,15 @@ export interface MapGeoJsonFeatureCollection {
 /** Renderer marker categories. The caller decides which one a datum earns. */
 export type MapMarkerKind = 'incident' | 'resource' | 'hospital' | 'facility';
 
+/** Pictogram drawn inside the marker. The caller picks it from backend truth. */
+export type MapMarkerIcon =
+  | 'incident'
+  | 'ambulance'
+  | 'fire'
+  | 'police'
+  | 'hospital'
+  | 'unit';
+
 /** Renderer colour intent. The caller supplies tone; the renderer never infers it. */
 export type MapMarkerTone = 'critical' | 'primary' | 'neutral' | 'simulated';
 
@@ -61,6 +70,10 @@ export interface RealMapMarker {
   label: string;
   sublabel?: string;
   tone?: MapMarkerTone;
+  /** Optional pictogram; defaults are derived from `kind` when absent. */
+  icon?: MapMarkerIcon;
+  /** Selected markers get a highlight ring / pulse. */
+  selected?: boolean;
 }
 
 /** Role of a supplied route line. Geometry is never computed by the renderer. */

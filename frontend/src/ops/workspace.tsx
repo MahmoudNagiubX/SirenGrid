@@ -20,16 +20,26 @@ import type { TimelineEventRead } from '../api/types';
 /** Ported from ui_kits/operations_center/workspace.jsx (StatusStrip, StateSwitch, IncidentRail, TimelineDock). */
 
 export function StatusStrip({ nav, setNav }: { nav: TopNav; setNav: (n: TopNav) => void }) {
-  const { incidents } = useOperations();
+  const { incidents, resources } = useOperations();
   const terminalStatuses = new Set(['CLOSED', 'CANCELLED_FALSE_REPORT', 'DUPLICATE_MERGED']);
   const openCount = incidents.data
     ? incidents.data.filter((i) => !terminalStatuses.has(i.status)).length
     : null;
+  const resList = resources.data ?? [];
+  const availUnits = resList.filter((r) => r.status === 'AVAILABLE').length;
+  const fleetLabel = resources.data
+    ? `${availUnits} / ${resList.length}`
+    : resources.loading
+    ? '···'
+    : '—';
+  const incidentsLoading = incidents.loading && incidents.data == null;
 
   const kpis: [string, string][] = [
-    ['—', 'city coverage'],
-    ['—', 'avg response ETA'],
-    [openCount !== null ? `${openCount} active` : '— active', 'open incidents'],
+    [fleetLabel, 'units available'],
+    [
+      openCount !== null ? `${openCount}` : incidentsLoading ? '···' : '—',
+      openCount === 1 ? 'active incident' : 'active incidents',
+    ],
   ];
 
   return (
@@ -75,26 +85,57 @@ export function StatusStrip({ nav, setNav }: { nav: TopNav; setNav: (n: TopNav) 
         </div>
       </div>
       <div style={{ display: 'flex', gap: 22, alignItems: 'center', whiteSpace: 'nowrap' }}>
-        {kpis.map(([v, l], i) => (
-          <Fragment key={l}>
-            {i > 0 && <span style={{ width: 1, height: 22, background: 'var(--color-border-hairline)' }} />}
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 7 }}>
-              <span style={{ fontSize: 21, fontWeight: 600, letterSpacing: '-0.015em' }}>{v}</span>
-              <span style={{ fontSize: 13, color: 'var(--color-text-muted)' }}>{l}</span>
-            </div>
-          </Fragment>
-        ))}
+        {kpis.map(([v, l], i) => {
+          const active = l.includes('incident') && openCount !== null && openCount > 0;
+          return (
+            <Fragment key={l}>
+              {i > 0 && <span style={{ width: 1, height: 22, background: 'var(--color-border-hairline)' }} />}
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 7 }}>
+                {active && (
+                  <span
+                    style={{
+                      width: 7,
+                      height: 7,
+                      borderRadius: '50%',
+                      background: 'var(--color-siren)',
+                      alignSelf: 'center',
+                      boxShadow: '0 0 0 4px rgba(239,35,60,.16)',
+                    }}
+                  />
+                )}
+                <span style={{ fontSize: 21, fontWeight: 600, letterSpacing: '-0.015em', color: active ? 'var(--color-critical)' : undefined }}>{v}</span>
+                <span style={{ fontSize: 13, color: 'var(--color-text-muted)' }}>{l}</span>
+              </div>
+            </Fragment>
+          );
+        })}
       </div>
       <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-        {/* §40: mixed truth — OSM-derived map data is real, operational fields are simulated. */}
-        <Badge tone="simulated">Real + simulated</Badge>
+        {/* Data-reality context lives in Demo controls, not a loud header pill. */}
         <button
           onClick={() => setNav('demo')}
-          title="Scenario controls"
-          aria-label="Scenario controls"
-          style={{ border: 'none', background: 'transparent', padding: 0, cursor: 'pointer' }}
+          title="Demo data — open scenario &amp; simulation controls"
+          aria-label="Demo data — open scenario and simulation controls"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 7,
+            padding: '5px 11px',
+            border: '1px solid var(--color-border-hairline)',
+            borderRadius: 'var(--radius-pill)',
+            background: nav === 'demo' ? 'var(--color-accent-soft)' : 'transparent',
+            color: nav === 'demo' ? 'var(--color-accent)' : 'var(--color-text-secondary)',
+            cursor: 'pointer',
+            fontFamily: 'var(--font-en)',
+            fontSize: 12,
+            fontWeight: 600,
+            letterSpacing: '0.01em',
+          }}
         >
-          <IconTile icon={<Ico n="sliders-horizontal" />} tint={nav === 'demo' ? 'navy' : 'slate'} size={32} />
+          <span style={{ width: 13, height: 13, display: 'flex' }}>
+            <Ico n="sliders-horizontal" />
+          </span>
+          Demo data
         </button>
         <IconTile icon={<Ico n="user-round" />} tint="navy" size={32} />
       </div>
@@ -239,13 +280,42 @@ export function IncidentRail({
             onRetry={() => void refreshGlobal({ includeSelected: false })}
           />
         )}
-        {/* §21: a still-loading first fetch is LOADING, never an empty list. */}
+        {/* §21: a still-loading first fetch shows calm skeletons, never an empty list. */}
         {incidents.error == null && incidents.loading && incidents.data == null && (
-          <RecoveryNotice kind="LOADING" title="Loading incidents" compact />
+          <Fragment>
+            {[0, 1, 2].map((i) => (
+              <div
+                key={i}
+                className="sg-skeleton"
+                style={{ height: 78, borderRadius: 'var(--radius-md)', opacity: 1 - i * 0.22 }}
+              />
+            ))}
+          </Fragment>
         )}
         {filtered.length === 0 && incidents.error == null && !(incidents.loading && incidents.data == null) && (
-          <div style={{ padding: 16, textAlign: 'center', color: 'var(--color-text-muted)', fontSize: 13 }}>
-            No active incidents
+          <div
+            className="sg-rise"
+            style={{
+              padding: '28px 18px',
+              textAlign: 'center',
+              color: 'var(--color-text-muted)',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: 8,
+            }}
+          >
+            <span style={{ width: 26, height: 26, display: 'flex', color: 'var(--gray-400)' }}>
+              <Ico n={incidentList.length === 0 ? 'siren' : 'search'} />
+            </span>
+            <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--color-text-secondary)' }}>
+              {incidentList.length === 0 ? 'No active incidents yet' : 'No incidents match your search'}
+            </div>
+            <div style={{ fontSize: 12.5, lineHeight: 1.5, maxWidth: 220 }}>
+              {incidentList.length === 0
+                ? 'Citizen mobile requests and operator intake appear here automatically.'
+                : 'Clear the search to see the full incident feed.'}
+            </div>
           </div>
         )}
         {filtered.map((inc) => {
@@ -283,7 +353,10 @@ export function IncidentRail({
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
                   {severityPending ? <Badge tone="neutral">Pending</Badge> : <Badge severity={sevTone} />}
                   <span style={{ fontSize: 13, color: 'var(--color-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {inc.location_text || 'Location unresolved'}
+                    {inc.location_text ||
+                      (inc.latitude != null && inc.longitude != null
+                        ? `${inc.latitude.toFixed(4)}, ${inc.longitude.toFixed(4)}`
+                        : 'Location pending')}
                   </span>
                 </div>
                 {mobileSummary && (

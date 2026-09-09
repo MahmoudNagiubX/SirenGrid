@@ -24,6 +24,8 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import type {
   LngLatTuple,
   MapGeoJsonFeatureCollection,
+  MapMarkerIcon,
+  MapMarkerKind,
   MapMarkerTone,
   RealMapMarker,
   RealMapOverlayState,
@@ -49,10 +51,14 @@ const BASEMAP_STYLE: NonNullable<MapOptions['style']> = {
       type: 'raster',
       source: 'osm',
       paint: {
-        'raster-opacity': 0.92,
-        'raster-saturation': -0.35,
-        'raster-brightness-min': 0.18,
-        'raster-brightness-max': 0.98,
+        // Cool, calm operational basemap: pull warmth out of the OSM carto
+        // tiles and lift the whites so SirenGrid overlays read on top.
+        'raster-opacity': 0.9,
+        'raster-saturation': -0.62,
+        'raster-contrast': 0.06,
+        'raster-hue-rotate': 8,
+        'raster-brightness-min': 0.22,
+        'raster-brightness-max': 1,
       },
     },
   ],
@@ -79,9 +85,33 @@ const ROUTE_PREVIOUS = '#AEB9CC';
 
 const MARKER_TONE_COLORS: Record<MapMarkerTone, string> = {
   critical: '#D90429',
-  primary: '#395886',
+  primary: '#2B2D42',
   neutral: '#5D7089',
-  simulated: '#A7AEBD',
+  simulated: '#8D99AE',
+};
+
+/** Per-category fill so a marker reads by type even before its label. */
+const MARKER_KIND_COLORS: Record<MapMarkerKind, string> = {
+  incident: '#EF233C',
+  hospital: '#395886',
+  resource: '#2B2D42',
+  facility: '#5D7089',
+};
+
+/** 16px-viewBox pictograms, white stroke, drawn inside the pin. */
+const MARKER_ICON_PATHS: Record<MapMarkerIcon, string> = {
+  incident:
+    '<path d="M8 3.2 14 13H2z" fill="none" stroke="#fff" stroke-width="1.7" stroke-linejoin="round"/><path d="M8 6.6v3.1M8 11.3v.05" stroke="#fff" stroke-width="1.7" stroke-linecap="round"/>',
+  ambulance:
+    '<rect x="2.4" y="5" width="11.2" height="6.4" rx="1.2" fill="none" stroke="#fff" stroke-width="1.6"/><path d="M8 6.7v3M6.5 8.2h3" stroke="#fff" stroke-width="1.6" stroke-linecap="round"/><circle cx="5" cy="12" r="1.15" fill="#fff"/><circle cx="11" cy="12" r="1.15" fill="#fff"/>',
+  fire:
+    '<path d="M8 2.6c1.7 2.2 3.2 3.6 3.2 6.1A3.2 3.2 0 0 1 8 12a3.2 3.2 0 0 1-3.2-3.3c0-1.3.5-2.2 1.3-3 .1 1 .7 1.6 1.3 1.9-.2-1.9.3-3.6.6-4z" fill="none" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/>',
+  police:
+    '<path d="M8 2.6 13 4.4v3.4c0 3-2 4.8-5 5.9-3-1.1-5-2.9-5-5.9V4.4z" fill="none" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/><path d="M6 7.7 7.4 9 10 6" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>',
+  hospital:
+    '<rect x="3" y="3.4" width="10" height="9.4" rx="1.1" fill="none" stroke="#fff" stroke-width="1.5"/><path d="M8 5.7v4.4M5.8 7.9h4.4" stroke="#fff" stroke-width="1.6" stroke-linecap="round"/>',
+  unit:
+    '<circle cx="8" cy="8" r="3" fill="none" stroke="#fff" stroke-width="1.7"/>',
 };
 
 const EMPTY_FEATURE_COLLECTION: GeoJSON.FeatureCollection = {
@@ -161,6 +191,25 @@ function setLayerVisible(map: MapLibreMap, layerId: string, visible: boolean): v
   }
 }
 
+const KIND_DEFAULT_ICON: Record<MapMarkerKind, MapMarkerIcon> = {
+  incident: 'incident',
+  hospital: 'hospital',
+  resource: 'unit',
+  facility: 'unit',
+};
+
+function markerFill(marker: RealMapMarker): string {
+  // Incidents and hospitals carry their category colour so they read at a
+  // glance. Responders stay calm/neutral unless committed to the selected
+  // incident — a parked fire engine must not look like an alarm.
+  if (marker.kind === 'incident') return MARKER_KIND_COLORS.incident;
+  if (marker.kind === 'hospital') return MARKER_KIND_COLORS.hospital;
+  if (marker.tone === 'critical') return MARKER_TONE_COLORS.critical;
+  if (marker.tone === 'primary') return MARKER_TONE_COLORS.primary;
+  if (marker.tone === 'simulated') return MARKER_TONE_COLORS.simulated;
+  return MARKER_TONE_COLORS.neutral;
+}
+
 function createMarkerElement(marker: RealMapMarker): HTMLDivElement {
   const el = document.createElement('div');
   const description = marker.sublabel
@@ -169,13 +218,28 @@ function createMarkerElement(marker: RealMapMarker): HTMLDivElement {
   el.setAttribute('role', 'img');
   el.setAttribute('aria-label', description);
   el.title = description;
-  el.style.width = '16px';
-  el.style.height = '16px';
-  el.style.boxSizing = 'border-box';
-  el.style.borderRadius = '50%';
-  el.style.border = '2px solid #FFFFFF';
-  el.style.boxShadow = '0 1px 4px rgba(27, 29, 43, 0.35)';
-  el.style.background = MARKER_TONE_COLORS[marker.tone ?? 'neutral'];
+  el.style.position = 'relative';
+  el.style.width = marker.selected ? '30px' : '26px';
+  el.style.height = marker.selected ? '30px' : '26px';
+  el.style.pointerEvents = 'none';
+
+  const icon = marker.icon ?? KIND_DEFAULT_ICON[marker.kind];
+  const fill = markerFill(marker);
+  const pin = document.createElement('div');
+  pin.style.cssText =
+    'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;' +
+    `border-radius:50%;background:${fill};` +
+    'border:2px solid #fff;box-shadow:0 2px 6px rgba(27,29,43,.32);';
+  pin.innerHTML =
+    `<svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true">${MARKER_ICON_PATHS[icon]}</svg>`;
+  el.appendChild(pin);
+
+  if (marker.selected) {
+    const ring = document.createElement('span');
+    ring.className = 'sg-marker-ring';
+    ring.style.borderColor = fill;
+    el.appendChild(ring);
+  }
   return el;
 }
 
