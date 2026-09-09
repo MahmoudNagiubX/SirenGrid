@@ -17,6 +17,7 @@ import {
   selectHospitalDestination,
   sendHospitalPreAlert,
 } from '../commands/operationsCommands';
+import { RecoveryNotice } from '../recovery/RecoveryNotice';
 import type { HospitalOptionRead, ResponsePlanRead, TimelineEventRead } from '../api/types';
 
 /** Prototype audit reference for versioned human-authority commands (SG-INT-06B §11). */
@@ -230,7 +231,8 @@ function sortCandidatePlans(plans: ResponsePlanRead[]): ResponsePlanRead[] {
 }
 
 function PlanTab({ state }: { state: OpsState }) {
-  const { plans, replan, resources, selectedIncident, refreshSelectedIncident } = useOperations();
+  const { plans, replan, resources, selectedIncident, refreshSelectedIncident, refreshGlobal } =
+    useOperations();
   const { busyAction, message, run } = useCommandRunner();
   const planList = plans.data ?? [];
   const rep = replan.data;
@@ -239,6 +241,36 @@ function PlanTab({ state }: { state: OpsState }) {
   const [selId, setSelId] = useState<string | null>(null);
 
   const rejectNote = 'Reject command unavailable in current backend contract.';
+
+  // §25 safety: while the canonical plan read is errored, current versions cannot
+  // be trusted — every plan mutation control is disabled until a good refresh.
+  const plansErrored = plans.error != null;
+
+  const plansNotice =
+    plans.error != null ? (
+      <RecoveryNotice
+        kind="UNAVAILABLE"
+        title="Response plans unavailable"
+        detail={
+          planList.length > 0
+            ? 'Showing last-known plans. Authority actions are paused until refresh succeeds.'
+            : undefined
+        }
+        compact
+        onRetry={inc ? () => void refreshSelectedIncident(inc.id) : undefined}
+        retryLabel="Retry"
+      />
+    ) : plans.loading && plans.data == null ? (
+      <RecoveryNotice kind="LOADING" title="Loading response plans" compact />
+    ) : null;
+
+  // §13 hardening: committed global resource truth must not depend on the
+  // best-effort WebSocket. Each plan authority action explicitly reconciles
+  // global reads then the selected incident, once each.
+  const reconcileAfterPlanCommand = (incidentId: string) => async () => {
+    await refreshGlobal({ includeSelected: false });
+    await refreshSelectedIncident(incidentId);
+  };
 
   if (state === 'replan') {
     const pendingPlanId = inc?.pending_replan_plan_id ?? rep?.pending_plan_id ?? null;
@@ -260,6 +292,7 @@ function PlanTab({ state }: { state: OpsState }) {
     const canApproveReplacement =
       !!inc &&
       !!pendingPlan &&
+      !plansErrored &&
       pendingPlan.status === 'RECOMMENDED' &&
       selectedReplanPlanId === pendingPlan.id &&
       busyAction === null;
@@ -273,18 +306,19 @@ function PlanTab({ state }: { state: OpsState }) {
             expected_plan_version: pendingPlan.plan_version,
             operator_reference: OPERATOR_REF,
           }),
-        refetch: () => refreshSelectedIncident(inc.id),
+        refetch: reconcileAfterPlanCommand(inc.id),
         successText: 'Replacement plan approved. Canonical state reloaded.',
       });
     };
 
     return (
       <Fragment>
-        {replanPlans.length === 0 ? (
+        {plansNotice}
+        {plansNotice == null && replanPlans.length === 0 ? (
           <div style={{ padding: 16, textAlign: 'center', color: 'var(--color-text-muted)', fontSize: 13 }}>
             No pending replan evaluation for this incident.
           </div>
-        ) : (
+        ) : replanPlans.length === 0 ? null : (
           <div style={{ display: 'flex', gap: 10 }}>
             {replanPlans.map((p, idx) => {
               const etaSec = p.metrics?.max_arrival_eta_seconds;
@@ -378,21 +412,24 @@ function PlanTab({ state }: { state: OpsState }) {
     activePlan?.status === 'APPROVED' || currentPlan?.status === 'APPROVED';
   const hasApprovedPlan = planList.some((p) => p.status === 'APPROVED');
 
-  // Approve is offered only for the incident's current RECOMMENDED plan (§21).
+  // Approve is offered only for the incident's current RECOMMENDED plan (§21),
+  // and never while the canonical plan read is errored (§25).
   const canApprove =
     !!inc &&
     !!activePlan &&
+    !plansErrored &&
     activePlan.status === 'RECOMMENDED' &&
     activePlan.id === currentPlanId &&
     busyAction === null;
 
   // An ALTERNATIVE card must be explicitly selected before it can be approved (§20).
   const canSelectAlternative =
-    !!inc && !!activePlan && activePlan.status === 'ALTERNATIVE' && busyAction === null;
+    !!inc && !!activePlan && !plansErrored && activePlan.status === 'ALTERNATIVE' && busyAction === null;
 
   // Revise / recalculate only pre-approval on an actionable incident (§24).
   const canRevise =
     !!inc &&
+    !plansErrored &&
     !hasApprovedPlan &&
     !NON_ACTIONABLE_INCIDENT_STATUSES.has(inc.status) &&
     busyAction === null;
@@ -406,7 +443,7 @@ function PlanTab({ state }: { state: OpsState }) {
           expected_plan_version: activePlan.plan_version,
           operator_reference: OPERATOR_REF,
         }),
-      refetch: () => refreshSelectedIncident(inc.id),
+      refetch: reconcileAfterPlanCommand(inc.id),
       successText: 'Plan approved. Canonical state reloaded.',
     });
   };
@@ -420,7 +457,7 @@ function PlanTab({ state }: { state: OpsState }) {
           expected_plan_version: activePlan.plan_version,
           operator_reference: OPERATOR_REF,
         }),
-      refetch: () => refreshSelectedIncident(inc.id),
+      refetch: reconcileAfterPlanCommand(inc.id),
       successText: 'Plan selected. Review the updated recommendation and approve explicitly.',
     });
   };
@@ -429,7 +466,7 @@ function PlanTab({ state }: { state: OpsState }) {
     if (!inc) return;
     void run('revise', {
       command: () => generateCandidates(inc.id),
-      refetch: () => refreshSelectedIncident(inc.id),
+      refetch: reconcileAfterPlanCommand(inc.id),
       successText: 'Candidate plans recalculated.',
     });
   };
@@ -480,9 +517,13 @@ function PlanTab({ state }: { state: OpsState }) {
   if (sortedPlans.length === 0) {
     return (
       <Fragment>
-        <div style={{ padding: 24, textAlign: 'center', color: 'var(--color-text-muted)', fontSize: 13.5 }}>
-          No candidate response plans generated yet.
-        </div>
+        {plansNotice}
+        {/* §26: "No candidate plans" only once loading is done and there is no error. */}
+        {plansNotice == null && (
+          <div style={{ padding: 24, textAlign: 'center', color: 'var(--color-text-muted)', fontSize: 13.5 }}>
+            No candidate response plans generated yet.
+          </div>
+        )}
         {renderApprovalBar()}
       </Fragment>
     );
@@ -518,6 +559,7 @@ function PlanTab({ state }: { state: OpsState }) {
 
   return (
     <Fragment>
+      {plansNotice}
       <div style={{ borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border-hairline)', overflow: 'hidden' }}>
         <div style={{ display: 'grid', gridTemplateColumns: `78px repeat(${displayCandidates.length}, 1fr)`, background: 'var(--gray-100)', fontSize: 12, fontWeight: 700, letterSpacing: '0.06em', color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>
           <div style={{ padding: '9px 10px', textAlign: 'left' }}></div>
@@ -604,6 +646,36 @@ function HospitalTab() {
 
   const [selectedOptionId, setSelectedOptionId] = useState<string | null>(null);
 
+  // §27/§28: an errored operational-state read is NOT "no hospital options".
+  // A 409 here specifically means this incident has no approved operational
+  // state yet — a local neutral notice, never a global outage. Any error
+  // disables hospital commands that need versions from that missing state.
+  const opStateError = operationalState.error;
+  const opStateNoApprovedPlan = opStateError?.status === 409;
+  const opStateUnavailable = opStateError != null && !opStateNoApprovedPlan;
+  const opStateBlocksCommands = opStateError != null;
+
+  const opStateNotice = opStateNoApprovedPlan ? (
+    <RecoveryNotice
+      kind="UNAVAILABLE"
+      title="Operational state not available for this incident yet"
+      detail="Hospital and corridor state appear once a response plan is approved."
+      compact
+    />
+  ) : opStateUnavailable ? (
+    <RecoveryNotice
+      kind="UNAVAILABLE"
+      title="Operational state unavailable"
+      detail={
+        opState
+          ? 'Showing last-known operational state. Hospital actions are paused until refresh succeeds.'
+          : undefined
+      }
+      compact
+      onRetry={inc ? () => void refreshSelectedIncident(inc.id) : undefined}
+    />
+  ) : null;
+
   // Once a destination is committed, visual selection follows canonical state (§30).
   const committedOptionId = destination
     ? options.find((o) => o.hospital.id === destination.hospital_id)?.option_id ?? null
@@ -663,11 +735,14 @@ function HospitalTab() {
         <AiBlock title="Destination rationale">
           Hospital options are ranked by the backend operational model.
         </AiBlock>
+        {opStateNotice}
         <SubHead>Candidates</SubHead>
-        <div style={{ padding: 24, textAlign: 'center', color: 'var(--color-text-muted)', fontSize: 13.5 }}>
-          No hospital options evaluated for this incident.
-        </div>
-        {inc && (
+        {opStateBlocksCommands ? null : (
+          <div style={{ padding: 24, textAlign: 'center', color: 'var(--color-text-muted)', fontSize: 13.5 }}>
+            No hospital options evaluated for this incident.
+          </div>
+        )}
+        {inc && !opStateBlocksCommands && (
           <Button
             variant="secondary"
             size="sm"
@@ -687,6 +762,7 @@ function HospitalTab() {
       <AiBlock title="Destination rationale">
         Hospital options are ranked by the backend operational model.
       </AiBlock>
+      {opStateNotice}
       <SubHead>{`Candidates · ${options.length} evaluated`}</SubHead>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
         {options.map((opt: HospitalOptionRead) => {
@@ -762,7 +838,7 @@ function HospitalTab() {
             <Button
               variant="secondary"
               size="sm"
-              disabled={busyAction !== null}
+              disabled={busyAction !== null || opStateBlocksCommands}
               onClick={doPreAlert}
             >
               {busyAction === 'prealert' ? 'Working…' : preAlert ? 'Re-send pre-alert' : 'Send pre-alert'}
@@ -773,7 +849,7 @@ function HospitalTab() {
         <Button
           variant="primary"
           size="sm"
-          disabled={!selectedOption || busyAction !== null}
+          disabled={!selectedOption || busyAction !== null || opStateBlocksCommands}
           onClick={doSelectDestination}
         >
           {busyAction === 'select-dest' ? 'Working…' : 'Select destination'}
@@ -880,8 +956,27 @@ export function DecisionWorkspace({
   tab: DecisionTab;
   setTab: (t: DecisionTab) => void;
 }) {
-  const { selectedIncident } = useOperations();
+  const { selectedIncident, selectedIncidentId, refreshSelectedIncident } = useOperations();
   const inc = selectedIncident.data;
+
+  // §23/§24: a failed selected-incident read is visible and retriable; a read
+  // that is merely still loading shows "Loading incident", never "Unknown".
+  const selectedIncidentNotice =
+    selectedIncident.error != null ? (
+      <RecoveryNotice
+        kind="UNAVAILABLE"
+        title="Selected incident unavailable"
+        detail={inc ? 'Showing last-known incident facts.' : undefined}
+        compact
+        onRetry={
+          selectedIncidentId
+            ? () => void refreshSelectedIncident(selectedIncidentId)
+            : undefined
+        }
+      />
+    ) : selectedIncident.loading && selectedIncident.data == null && selectedIncidentId ? (
+      <RecoveryNotice kind="LOADING" title="Loading incident" compact />
+    ) : null;
 
   const headerTitle = inc ? humanize(inc.incident_type) : 'No incident selected';
   const headerSub = inc
@@ -929,6 +1024,7 @@ export function DecisionWorkspace({
         </div>
       </div>
       <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12, overflowY: 'auto', minHeight: 0 }}>
+        {selectedIncidentNotice}
         <StateBanner state={state} />
         {tab === 'overview' && <OverviewTab state={state} onSelectTab={setTab} />}
         {tab === 'plan' && <PlanTab state={state} />}

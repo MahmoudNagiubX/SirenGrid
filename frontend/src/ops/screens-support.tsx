@@ -9,6 +9,7 @@ import {
 } from '../data/mock';
 import { useCommandRunner, useOperations } from '../state/OperationsContext';
 import { resetSimulation } from '../commands/operationsCommands';
+import { RecoveryNotice } from '../recovery/RecoveryNotice';
 
 /** Ported from ui_kits/operations_center/screens-support.jsx — bound to canonical simulation read state. */
 
@@ -61,6 +62,19 @@ export function DemoScreen() {
       <Alert tone="simulated" title="Demo & simulation controls">
         These controls drive prototype demonstration scenarios. Simulation status is read from the canonical backend. Mutation controls are wired in Phase 06.
       </Alert>
+      {/* §37: canonical `enabled` truth is unavailable — do not imply a known state. */}
+      {simulation.error != null ? (
+        <RecoveryNotice
+          kind="UNAVAILABLE"
+          title="Simulation status unavailable"
+          detail="Mutation controls stay disabled until canonical status is read."
+          compact
+          onRetry={() => void refreshGlobal({ includeSelected: false })}
+          retryLabel="Refresh data"
+        />
+      ) : simulation.loading && sim == null ? (
+        <RecoveryNotice kind="LOADING" title="Loading simulation status" compact />
+      ) : null}
       <div style={{ flex: 1, display: 'flex', gap: 14, minHeight: 0 }}>
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 12, overflowY: 'auto', minWidth: 0 }}>
           <SubHead>Scenarios</SubHead>

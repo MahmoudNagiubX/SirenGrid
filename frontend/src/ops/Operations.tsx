@@ -21,6 +21,8 @@ import {
   toMapFeatureCollection,
   toResourceMarkers,
 } from '../map/mapAdapters';
+import { RecoveryNotice } from '../recovery/RecoveryNotice';
+import { deriveRealtimeNotice } from '../recovery/recoveryTypes';
 
 /**
  * Ported from the `Operations` component in ui_kits/operations_center/index.html.
@@ -40,9 +42,15 @@ export function Operations({ initialState = 'idle' }: { initialState?: OpsState 
     hospitals,
     plans,
     replan,
+    traffic,
     mapBoundary,
     mapRoads,
     mapZones,
+    realtimeState,
+    realtimeRecoveryReason,
+    refreshGlobal,
+    refreshSelectedIncident,
+    refreshMapLayers,
   } = useOperations();
 
   const [state, setStateRaw] = useState<OpsState>(STATE_META[initialState] ? initialState : 'idle');
@@ -119,10 +127,67 @@ export function Operations({ initialState = 'idle' }: { initialState?: OpsState 
     setMapReady(true);
   }, []);
 
+  // §15–19: one truthful realtime/connectivity notice derived from transport state.
+  const realtimeNotice = useMemo(
+    () => deriveRealtimeNotice({ state: realtimeState, recoveryReason: realtimeRecoveryReason }),
+    [realtimeState, realtimeRecoveryReason],
+  );
+  // §16: explicit REST reconciliation only — never touches the socket, never writes.
+  const handleRefreshData = useCallback(() => {
+    void refreshGlobal({ includeSelected: false });
+    if (selectedIncidentId) void refreshSelectedIncident(selectedIncidentId);
+  }, [refreshGlobal, refreshSelectedIncident, selectedIncidentId]);
+  const realtimeRetry =
+    realtimeNotice && (realtimeNotice.kind === 'DISCONNECTED' || realtimeNotice.kind === 'RECONNECTING')
+      ? handleRefreshData
+      : undefined;
+
+  // §33/§34: domain-specific traffic freshness truth — no local age calculation.
+  const trafficFreshness = traffic.data?.freshness_status;
+  const trafficNotice = traffic.error != null ? (
+    <RecoveryNotice
+      kind="UNAVAILABLE"
+      title="Traffic snapshot unavailable"
+      detail="Current routing is not labelled live. Backend routing policy still applies."
+      compact
+      onRetry={() => void refreshGlobal({ includeSelected: false })}
+      retryLabel="Refresh data"
+    />
+  ) : trafficFreshness === 'STALE' ? (
+    <RecoveryNotice
+      kind="STALE"
+      title="Traffic data stale"
+      detail="Routing continues to use backend-authoritative fallback/freshness policy."
+      compact
+    />
+  ) : trafficFreshness === 'UNKNOWN' ? (
+    <RecoveryNotice kind="UNKNOWN" title="Traffic freshness unknown" compact />
+  ) : null;
+
+  // §35: a failed SirenGrid map layer does not fall back to DenseMap — the OSM
+  // basemap and any layers that did load stay; one compact notice covers it.
+  const mapLayerError =
+    mapBoundary.error != null || mapRoads.error != null || mapZones.error != null;
+
   return (
     <div style={{ flex: 1, display: 'flex', gap: 14, padding: 16, minHeight: 0 }}>
       <IncidentRail selected={selectedIncidentId ?? ''} setSelected={(id) => setSelectedIncidentId(id)} state={state} setState={setState} />
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
+        {(realtimeNotice || trafficNotice) && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {realtimeNotice && (
+              <RecoveryNotice
+                kind={realtimeNotice.kind}
+                title={realtimeNotice.title}
+                detail={realtimeNotice.detail}
+                compact={realtimeNotice.compact}
+                onRetry={realtimeRetry}
+                retryLabel="Refresh data"
+              />
+            )}
+            {trafficNotice}
+          </div>
+        )}
         <div style={{ flex: 1, position: 'relative', borderRadius: 'var(--radius-lg)', overflow: 'hidden', border: '1px solid var(--color-border-hairline)', minHeight: 0, background: 'var(--map-land)' }}>
           <RealMapCanvas
             boundary={boundaryFc}
@@ -135,12 +200,31 @@ export function Operations({ initialState = 'idle' }: { initialState?: OpsState 
             onReady={handleMapReady}
             onError={handleMapError}
           />
-          {!mapReady && !mapError && (
-            <div style={mapNoticeStyle} role="status">Loading map…</div>
-          )}
-          {mapError && (
-            <div style={mapNoticeStyle} role="status">Map unavailable</div>
-          )}
+          {(!mapReady && !mapError) || mapError || mapLayerError ? (
+            <div style={mapOverlayStackStyle}>
+              {!mapReady && !mapError && (
+                <RecoveryNotice kind="LOADING" title="Loading map…" compact />
+              )}
+              {mapError && (
+                <RecoveryNotice
+                  kind="UNAVAILABLE"
+                  title="Map unavailable"
+                  detail={mapError && mapError.length <= 120 ? mapError : undefined}
+                  compact
+                />
+              )}
+              {mapLayerError && (
+                <RecoveryNotice
+                  kind="UNAVAILABLE"
+                  title="One or more SirenGrid map layers are unavailable"
+                  detail="The base map and available layers still render."
+                  compact
+                  onRetry={() => void refreshMapLayers()}
+                  retryLabel="Refresh data"
+                />
+              )}
+            </div>
+          ) : null}
           <MapControls overlays={overlays} setOverlay={setOverlay} />
           <MapLegend items={LEGEND[state] ?? LEGEND.default} />
           <MapScale />
@@ -152,18 +236,13 @@ export function Operations({ initialState = 'idle' }: { initialState?: OpsState 
   );
 }
 
-const mapNoticeStyle: CSSProperties = {
+const mapOverlayStackStyle: CSSProperties = {
   position: 'absolute',
-  top: 16,
-  left: 16,
-  padding: '5px 11px',
-  borderRadius: 'var(--radius-pill)',
-  fontFamily: 'var(--font-en)',
-  fontSize: 12.5,
-  fontWeight: 600,
-  color: 'var(--color-text-secondary)',
-  background: 'var(--color-bg-glass-strong)',
-  border: '0.5px solid var(--color-border-hairline)',
-  backdropFilter: 'blur(var(--blur-glass-light))',
-  zIndex: 2,
+  top: 12,
+  left: 12,
+  right: 12,
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 8,
+  zIndex: 3,
 };

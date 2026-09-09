@@ -8,6 +8,7 @@ import {
 } from '../data/mock';
 import { useCommandRunner, useOperations } from '../state/OperationsContext';
 import { patchResourceState } from '../commands/operationsCommands';
+import { RecoveryNotice } from '../recovery/RecoveryNotice';
 import type { TimelineEventRead } from '../api/types';
 
 /** Ported from ui_kits/operations_center/screens-resources.jsx — bound to canonical backend read state. */
@@ -88,6 +89,23 @@ export function ResourceScreen() {
 
   return (
     <Screen>
+      {/* §29/§30: read failure is visible and retriable; last-known rows stay. */}
+      {(resources.error != null || hospitals.error != null) && (
+        <RecoveryNotice
+          kind="UNAVAILABLE"
+          title={
+            resources.error != null && hospitals.error != null
+              ? 'Resource and hospital data unavailable'
+              : resources.error != null
+              ? 'Resource data unavailable'
+              : 'Hospital readiness unavailable'
+          }
+          detail="Showing the last successful read. Values are not being refreshed."
+          compact
+          onRetry={() => void refreshGlobal({ includeSelected: false })}
+          retryLabel="Refresh data"
+        />
+      )}
       <div style={{ display: 'flex', gap: 12 }}>
         {kpis.map((kpi) => (
           <Kpi
@@ -240,7 +258,11 @@ export function ResourceScreen() {
             <PanelHeader icon="hospital" title="Hospital readiness" right={<Badge tone="simulated">Simulated</Badge>} />
             {hospList.length === 0 ? (
               <div style={{ padding: '8px 0', fontSize: 12.5, color: 'var(--color-text-muted)' }}>
-                {hospitals.loading ? 'Loading hospitals…' : 'No hospital records available.'}
+                {hospitals.error != null
+                  ? 'Hospital readiness unavailable.'
+                  : hospitals.loading
+                  ? 'Loading hospitals…'
+                  : 'No hospital records available.'}
               </div>
             ) : (
               hospList.map((h) => (

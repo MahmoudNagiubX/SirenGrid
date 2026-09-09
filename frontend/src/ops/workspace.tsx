@@ -10,6 +10,7 @@ import {
   type TopNav,
 } from '../data/mock';
 import { useOperations } from '../state/OperationsContext';
+import { RecoveryNotice } from '../recovery/RecoveryNotice';
 import type { TimelineEventRead } from '../api/types';
 
 /** Ported from ui_kits/operations_center/workspace.jsx (StatusStrip, StateSwitch, IncidentRail, TimelineDock). */
@@ -81,7 +82,8 @@ export function StatusStrip({ nav, setNav }: { nav: TopNav; setNav: (n: TopNav) 
         ))}
       </div>
       <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-        <Badge tone="simulated">Simulated data</Badge>
+        {/* §40: mixed truth — OSM-derived map data is real, operational fields are simulated. */}
+        <Badge tone="simulated">Real + simulated</Badge>
         <button
           onClick={() => setNav('demo')}
           title="Scenario controls"
@@ -179,7 +181,7 @@ export function IncidentRail({
   setState: (s: OpsState) => void;
 }) {
   const [search, setSearch] = useState('');
-  const { incidents, resources } = useOperations();
+  const { incidents, resources, refreshGlobal } = useOperations();
 
   const incidentList = incidents.data ?? [];
   const filtered = incidentList.filter((inc) => {
@@ -222,9 +224,24 @@ export function IncidentRail({
       />
       <StateSwitch state={state} setState={setState} />
       <div style={{ display: 'flex', flexDirection: 'column', gap: 9, overflowY: 'auto', paddingRight: 2, flex: 1, minHeight: 0 }}>
-        {filtered.length === 0 && (
+        {/* §20: incident-list refresh failure is distinct from "no incidents";
+            the last-known list stays visible if it exists. */}
+        {incidents.error != null && (
+          <RecoveryNotice
+            kind="UNAVAILABLE"
+            title="Incident list refresh failed"
+            detail={incidentList.length > 0 ? 'Showing last-known incidents.' : undefined}
+            compact
+            onRetry={() => void refreshGlobal({ includeSelected: false })}
+          />
+        )}
+        {/* §21: a still-loading first fetch is LOADING, never an empty list. */}
+        {incidents.error == null && incidents.loading && incidents.data == null && (
+          <RecoveryNotice kind="LOADING" title="Loading incidents" compact />
+        )}
+        {filtered.length === 0 && incidents.error == null && !(incidents.loading && incidents.data == null) && (
           <div style={{ padding: 16, textAlign: 'center', color: 'var(--color-text-muted)', fontSize: 13 }}>
-            {incidents.loading ? 'Loading incidents…' : 'No active incidents'}
+            No active incidents
           </div>
         )}
         {filtered.map((inc) => {
@@ -289,6 +306,18 @@ export function IncidentRail({
             <span style={{ fontWeight: 600 }}>{b}</span>
           </div>
         ))}
+        {/* §22: keep last-known counts, flag that the refresh failed. */}
+        {resources.error != null && (
+          <div style={{ marginTop: 8 }}>
+            <RecoveryNotice
+              kind="UNAVAILABLE"
+              title="Resource counts may be out of date"
+              detail={resources.data != null ? 'Last successful fleet read shown.' : undefined}
+              compact
+              onRetry={() => void refreshGlobal({ includeSelected: false })}
+            />
+          </div>
+        )}
       </GlassPanel>
     </div>
   );
