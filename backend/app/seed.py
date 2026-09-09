@@ -11,16 +11,35 @@ from sqlalchemy.orm import Session
 
 from app.config import REPO_ROOT
 import app.db as db_module
-from app.models import EmergencyResource
+from app.mobile_auth import generate_pin_salt, hash_pin
+from app.models import CitizenProfile, EmergencyResource
 from app.schemas import DataReality, FreshnessStatus, ResourceStatus, ResourceType
 
-__all__ = ["DEFAULT_SCENARIO_PATH", "seed_resources", "main"]
+__all__ = [
+    "DEFAULT_SCENARIO_PATH",
+    "seed_resources",
+    "seed_demo_citizen",
+    "main",
+]
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_SCENARIO_PATH = (
     REPO_ROOT / "data" / "scenarios" / "phase01_resources.json"
 )
+
+# Synthetic hackathon citizen. Not a real identity. The PIN is a demo secret
+# that only ever appears here and in test setup, never in logs or API output.
+DEMO_CITIZEN = {
+    "citizen_reference": "demo-citizen-001",
+    "display_name": "Demo Citizen",
+    "phone": "01000000000",
+    "registered_address_text": "12 Demo Street, Nasr City, Cairo",
+    "national_id_last4": "1234",
+    "identity_status": "DEMO_VERIFIED",
+    "identity_provider": "SYNTHETIC_DEMO_IDENTITY",
+}
+DEMO_CITIZEN_PIN = "1234"
 
 
 def _parse_datetime(val: Any) -> datetime:
@@ -132,15 +151,59 @@ def seed_resources(
     return new_resources
 
 
+def seed_demo_citizen(db: Session) -> CitizenProfile:
+    """Idempotently ensure the synthetic demo citizen exists.
+
+    Rerunning never duplicates the account and never overwrites an existing
+    row (its active state, PIN hash, and identity fields are left intact).
+    """
+    existing = db.scalars(
+        select(CitizenProfile).where(
+            CitizenProfile.citizen_reference == DEMO_CITIZEN["citizen_reference"]
+        )
+    ).first()
+    if existing is not None:
+        logger.debug(
+            "Demo citizen %s already exists; leaving it untouched.",
+            DEMO_CITIZEN["citizen_reference"],
+        )
+        return existing
+
+    salt = generate_pin_salt()
+    now_utc = datetime.now(timezone.utc)
+    citizen = CitizenProfile(
+        citizen_reference=DEMO_CITIZEN["citizen_reference"],
+        display_name=DEMO_CITIZEN["display_name"],
+        phone=DEMO_CITIZEN["phone"],
+        registered_address_text=DEMO_CITIZEN["registered_address_text"],
+        national_id_last4=DEMO_CITIZEN["national_id_last4"],
+        identity_status=DEMO_CITIZEN["identity_status"],
+        identity_provider=DEMO_CITIZEN["identity_provider"],
+        identity_verified_at=now_utc,
+        pin_hash=hash_pin(DEMO_CITIZEN_PIN, salt),
+        pin_salt=salt,
+        is_active=True,
+        data_reality=DataReality.SYNTHETIC,
+        created_at=now_utc,
+        updated_at=now_utc,
+    )
+    db.add(citizen)
+    db.commit()
+    db.refresh(citizen)
+    return citizen
+
+
 def main() -> None:
     """Entry point when executed as `python -m app.seed`."""
     db_module.init_db()
     with db_module.SessionLocal() as db:
         newly_seeded = seed_resources(db=db)
+        citizen = seed_demo_citizen(db=db)
         total_count = len(db.scalars(select(EmergencyResource.id)).all())
         print(
             f"SirenGrid seed completed: {len(newly_seeded)} new resource(s) inserted. "
-            f"Total resources in operational DB: {total_count}."
+            f"Total resources in operational DB: {total_count}. "
+            f"Demo citizen: {citizen.citizen_reference}."
         )
 
 
