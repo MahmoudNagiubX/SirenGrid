@@ -8,6 +8,8 @@
 > **Primary user:** Emergency Control Room Operator / Dispatcher  
 > **Repository:** `MahmoudNagiubX/SirenGrid`  
 > **Revision v1.1:** Applies the owner-approved architecture review: Golden-Flow-first delivery, single-worker MVP runtime, corrected routing/turn-restriction claims, progressive TomTom mapping, benchmark-gated AI providers, explicit prototype response rules, safer activation/hospital semantics, non-linear operational substates, corrected coding-agent workflow, early AI feasibility gates, frontend-owner deferral, and additional concurrency/reliability safeguards.
+>
+> **Product-scope update (PD-081 / PD-082 / PD-083, Master Plan v1.3):** SirenGrid is a **two-sided platform** — a **Citizen Mobile App** (Flutter) plus the existing **Institutional Command Center**. The "no citizen app" wording in this plan (§17.1) is superseded; see §17.1 and §50. The FastAPI backend remains the operational source of truth; Firebase/FCM is citizen notification transport only; human approval for critical response changes is unchanged.
 
 ---
 
@@ -1036,16 +1038,19 @@ No patient or private incident details are included.
 
 # 17. Multimodal Intake — F01/F02/F04
 
-## 17.1 Control-Room Boundary
+## 17.1 Intake Boundary
 
-There is no citizen SirenGrid reporting app.
+> **UPDATED by PD-081 (2026-09-09).** The earlier line "There is no citizen SirenGrid reporting app" is superseded: SirenGrid is a two-sided platform with a **Citizen Mobile App** (Flutter) alongside the Institutional Command Center. The FastAPI backend remains the operational source of truth for all intake paths, and human approval for critical response changes is unchanged.
 
 Inputs arrive via:
+- **Citizen Mobile App** requests (`source_type = MOBILE_APP`): authenticated pre-registered citizen, requested service, and **fresh Device GPS** as the emergency operational location; registered address is account context only. Handled by `backend/app/mobile_api.py` / `mobile_auth.py`, which reuse the existing `Incident` / `Report` / `TimelineEvent` / operations-event pipeline (no parallel dispatch state machine). Police / General are operator handoff / review only.
 - operator-entered text,
 - emergency-call audio/transcript available to the control room,
 - caller location metadata,
 - image/video evidence forwarded through an authorized channel,
 - responder/hospital updates.
+
+Citizen notification back to the Mobile App uses **FCM** (notification transport only; see PD-083). Institutional real-time coordination continues to use the operations WebSocket + REST reconciliation.
 
 ## 17.2 Processing Pipeline
 
@@ -2413,8 +2418,10 @@ Phase 1 must not implement every feature at once; it establishes contracts and a
 
 A developer joining SirenGrid should understand the following without further product invention:
 
-- SirenGrid is a control-room emergency coordination system.
-- The backend is the source of operational truth.
+- SirenGrid is a **two-sided** emergency coordination platform (PD-081): a **Citizen Mobile App** (Flutter) for one-tap Ambulance / Fire / Police / General requests with fresh Device GPS, and the **Institutional Command Center** for monitoring, planning, approval, routing, hospital coordination, and replanning. The institutional dashboard is preserved and upgraded, not rewritten.
+- The FastAPI backend is the source of operational truth for **both** surfaces; Firebase/FCM is citizen notification transport only (PD-083), not operational truth and not an auth replacement.
+- Positioning is **B2G with a citizen-facing access layer** (PD-082); no official Egyptian government partnership is claimed.
+- Citizen identity is synthetic/demo; there is no real National-ID/KYC or emergency-service integration; GPS and registered address remain separate; Police/General are operator handoff/review only.
 - The MVP backend runs as one instance/one worker.
 - AI understands evidence and explains deterministic results; it does not invent operational facts or act as the sole incident-activation authority.
 - the initial AI providers are configuration/benchmark choices, not product dependencies; provider failure has explicit fallbacks.

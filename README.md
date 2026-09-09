@@ -2,7 +2,16 @@
 
 **AI-powered emergency response coordination for Cairo — built for IMPACT ECU 2026.**
 
-SirenGrid helps an emergency control-room dispatcher turn a real-world incident report into a coordinated response across responders, roads, emergency coverage, and receiving hospitals.
+SirenGrid is a **two-sided digital emergency-response platform** for Egypt:
+
+1. **Citizen Mobile App** — a citizen-facing **Flutter** app for one-tap **Ambulance / Fire / Police / General Emergency** requests. A pre-registered citizen confirms once; the app sends the requested service plus **fresh Device GPS**, which is the emergency operational location. The registered address is **account context only**, never a dispatch location. The app shows tracking / status / ETA when the backend has valid data and receives **FCM** notifications (including citizen-facing Clear-the-Way where applicable).
+2. **Institutional Command Center** — the government / authorized-facility web application (this repo's `frontend/`), **preserved and upgraded**. It turns an incident report — from the Citizen App, an operator, or an emergency-call channel — into a coordinated response across responders, roads, emergency coverage, and receiving hospitals.
+
+The **FastAPI backend is the single operational source of truth** for both surfaces; critical response changes remain **human-approved**. Citizen identity is synthetic/demo for the hackathon (no real National-ID/KYC and no real emergency-service integration). See `docs/MASTER_PLAN.md` §4.7 and PD-081 / PD-082 / PD-083 in `docs/DECISIONS.md`.
+
+## Business Positioning
+
+SirenGrid is a **B2G platform with a citizen-facing access layer**: citizens are free end users / beneficiaries; government, city authorities, and authorized emergency institutions are the payer / customer. Value model: deployment / integration + annual platform licensing / support + optional modules / integrations. No official Egyptian government partnership is claimed.
 
 ## Core Flow
 
@@ -36,7 +45,7 @@ A single credible urgent report can activate the response workflow immediately. 
 - **MVP:** Nasr City, Cairo
 - **Initial working/demo zone:** Rabaa → Tayaran → Abbas El Akkad → Makram Ebeid → El Nasr Road
 - **Long-term vision:** Greater Cairo
-- **Primary user:** Emergency Control Room Operator / Dispatcher
+- **Users:** citizens (Mobile App — end users / beneficiaries) and the Emergency Control Room Operator / Dispatcher + authorized institutional staff (Command Center — customer/payer side)
 - **Final demo scenario:** not locked yet
 
 ## Product Boundary
@@ -46,6 +55,8 @@ SirenGrid is a **decision-support and coordination system**, not an autonomous e
 The AI can understand, correlate, simulate, compare, recommend, and explain. Critical operational actions remain under **human approval**.
 
 Government dispatch systems, physical traffic-light control, live hospital-capacity systems, and citywide public alerts are treated as **simulated integrations** unless a real authorized connection is available.
+
+The Citizen Mobile App request flow is a **real prototype flow** against this backend, but citizen identity is **synthetic/demo** (no real National-ID/KYC), Police/General requests are **operator handoff/review** (no invented police optimizer), and Device GPS and registered address remain **separate** concepts. **Firebase/FCM is citizen notification transport only** — not operational truth and not an authentication replacement.
 
 ## Architecture & Operational Hardening
 
@@ -72,12 +83,12 @@ For demonstration and testing, minimal gated controls exist under `/api/v1/simul
 
 ```text
 SirenGrid/
-├── frontend/               # Operator-facing application
-├── backend/                # APIs, AI/decision logic, routing and optimization
+├── frontend/               # Institutional Command Center (web); the Citizen Mobile App is a separate Flutter surface
+├── backend/                # APIs (institutional + mobile), AI/decision logic, routing and optimization
 ├── data/                   # Public, simulated and synthetic project data
 ├── docs/
-│   ├── MASTER_PLAN.md      # Product source of truth
-│   └── DECISIONS.md        # Approved project/architecture decisions
+│   ├── MASTER_PLAN.md      # Product source of truth (v1.3 — two-sided platform)
+│   └── DECISIONS.md        # Approved project/architecture decisions (through PD-083)
 ├── .github/
 │   └── PULL_REQUEST_TEMPLATE.md
 ├── CONTRIBUTING.md

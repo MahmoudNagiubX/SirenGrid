@@ -92,7 +92,9 @@ It should begin only after the core end-to-end workflow is stable and demo-ready
 ## PD-005 — Control-Room-Side Emergency Intake
 
 **Date:** 2026-09-06  
-**Status:** Approved
+**Status:** Superseded by PD-081 (2026-09-09)
+
+> **Superseded:** The "operator/control-room system, not a citizen-facing application" scope below is no longer the approved product scope. SirenGrid is now a two-sided platform (Citizen Mobile App + Institutional Command Center) — see **PD-081**. The immediate-response rule and the control-room intake channels listed here remain valid; the "no citizen-facing app" constraint does not. The historical text is kept for context.
 
 ### Decision
 SirenGrid is an **operator/control-room system**, not a citizen-facing emergency-reporting application.
@@ -1552,3 +1554,77 @@ The feature branch diverged significantly from the hardened baseline. A standard
 - `backend/app/routing.py`, `backend/app/candidate_generation.py`, and `backend/app/repositioning.py` incorporate verified performance improvements.
 - All core hardening contracts, safety fences, and test suites remain 100% green.
 - Next gate: Phase 09B revalidation of SG-GAP-001..015 against the canonical integrated backend.
+
+## PD-081 — Two-Sided SirenGrid Product: Citizen Mobile App + Institutional Command Center
+
+**Date:** 2026-09-09
+**Status:** Approved
+**Owner:** Project owner (main consolidation + canonical docs alignment)
+
+### Decision
+SirenGrid is a **two-sided digital emergency-response platform** for Egypt:
+
+1. **Citizen Mobile App** — a citizen-facing Flutter application for one-tap Ambulance / Fire / Police / General Emergency requests. Fresh **Device GPS is the emergency operational location**; the citizen's registered address is **account context only** and is never used as a dispatch location. The app shows citizen tracking / status / ETA when the backend has valid data.
+2. **Institutional Command Center** — the existing government / authorized-facility web application for incident monitoring, responder and resource monitoring, traffic-aware routing, coverage-aware planning, hospital recommendation and pre-alert, human approval, corridor / driver-alert support, and replanning. This is the **existing dashboard, preserved and upgraded** — not a new dashboard rewrite.
+
+This decision **supersedes** the earlier "control-room-side intake / no citizen-facing reporting app" product statement (`docs/MASTER_PLAN.md` §4.7 and its v1.2 revision note; `docs/TECHNICAL_ARCHITECTURE_PLAN.md` "There is no citizen SirenGrid reporting app"). The immediate-response rule is unchanged: a single credible urgent request is sufficient to create an incident and begin response planning.
+
+### Reason
+The approved product direction is now a two-sided platform. Citizens who are pre-registered should not have to repeat identity information during an emergency; they open the app, choose a service, confirm once, and the backend attaches verified citizen context and current device location to the existing operational pipeline. The control-room / institutional side keeps its full operational role and adds the ability to receive `MOBILE_APP`-origin incidents.
+
+### Impact
+- Backend: `backend/app/mobile_api.py` + `backend/app/mobile_auth.py` (citizen auth, pre-registered synthetic profile, mobile emergency intake, idempotency, ownership checks, citizen-safe tracking) reuse the existing `Incident` / `Report` / `TimelineEvent` / operations-event infrastructure. No parallel emergency/dispatch state machine.
+- Command Center: mobile-origin incidents are surfaced with a "Mobile Request" marker, a Request Source section (citizen reference, identity status, phone, registered address, emergency Device-GPS location, location source/accuracy, request time), and a "Pending confirmation" severity for the mobile placeholder.
+- Docs: `docs/MASTER_PLAN.md` §4.7, its v1.2 note, and the `docs/TECHNICAL_ARCHITECTURE_PLAN.md` "no citizen app" line are marked superseded by this PD.
+
+### Notes
+- Citizen identity is **synthetic / demo** for the hackathon. There is **no real National-ID / KYC integration** and **no real Egyptian emergency-service integration**.
+- GPS and registered address remain strictly separate concepts in data and UI.
+- Police / General requests are **operator handoff / review** only; no invented police optimizer and no police resource type.
+- Hospital recommendation / preparation remains part of the core institutional value and is unchanged.
+- Human approval remains required for critical response / dispatch changes.
+
+## PD-082 — Business Positioning: B2G Platform with a Citizen-Facing Access Layer
+
+**Date:** 2026-09-09
+**Status:** Approved
+**Owner:** Project owner (main consolidation + canonical docs alignment)
+
+### Decision
+SirenGrid is positioned as a **B2G (business-to-government) platform with a citizen-facing access layer**:
+
+- **Citizens** are end users / beneficiaries; citizen access is **free** in the product concept.
+- **Government, city authorities, and authorized emergency institutions** are the payer / customer.
+- Value model: deployment / integration work, plus annual platform licensing / support, plus optional modules / integrations.
+
+### Reason
+The institutional Command Center is where the coordination value and the paying relationship sit; the citizen app is the access channel that feeds verified requests into that platform. This framing keeps the citizen experience free while making the government / institutional side the commercial customer.
+
+### Impact
+- Product-facing text (`README.md`, `docs/MASTER_PLAN.md`) describes the two-sided platform and the B2G + citizen-access positioning.
+- No change to operational behavior, APIs, or algorithms.
+
+### Notes
+- **Do not claim an official Egyptian government partnership.** No deployment commitments, pricing numbers, contract terms, or named customers are asserted.
+
+## PD-083 — FCM Is the Required Citizen Notification Transport; FastAPI Remains Canonical Truth
+
+**Date:** 2026-09-09
+**Status:** Approved
+**Owner:** Project owner (main consolidation + canonical docs alignment)
+
+### Decision
+Firebase Cloud Messaging (FCM) is the **required transport for the final citizen notification path**, including citizen-facing "Clear-the-Way" alerts where applicable. Firebase is **notification transport only**.
+
+### Reason
+The citizen Flutter app needs a reliable push channel for status / ETA / responder updates and clear-the-way notifications. FCM is the standard mechanism for that on mobile and is sufficient to describe meaningful Google technology use for the citizen notification flow.
+
+### Impact
+- The citizen notification path (citizen app + FCM) replaces any notion of telecom-SMS clear-the-way for the citizen side.
+- Institutional real-time coordination continues to use the existing operations WebSocket + REST reconciliation; it is not moved onto Firebase.
+
+### Notes
+- **No Firebase Auth** as a replacement for the existing citizen auth boundary.
+- **No Firestore / Realtime Database** as operational truth — the **FastAPI backend remains the single operational source of truth**, and critical response changes remain human-approved.
+- Do not claim additional Google Cloud architecture beyond FCM unless it is actually implemented.
+- The FCM/Team-04 notification backend is **not implemented by this consolidation** and is scheduled as a later dedicated task.

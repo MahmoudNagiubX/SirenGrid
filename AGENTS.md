@@ -14,7 +14,9 @@ Before implementing product behavior, read:
 
 `docs/MASTER_PLAN.md`
 
-The Master Plan is the product source of truth.
+The Master Plan is the product source of truth. A later explicitly approved Product Decision (`docs/DECISIONS.md`) or Master Plan revision supersedes an earlier statement.
+
+**Current product (Master Plan v1.3 / PD-081, PD-082, PD-083):** SirenGrid is a **two-sided platform** — a **Citizen Mobile App** (Flutter) plus the existing **Institutional Command Center**. The older "control-room-only / no citizen-facing app" wording in `docs/MASTER_PLAN.md` §4.7 and `docs/TECHNICAL_ARCHITECTURE_PLAN.md` §17.1 is **superseded** and kept only as historical context. The FastAPI backend remains the single operational source of truth; Firebase/FCM is citizen notification transport only; human approval for critical actions is unchanged.
 
 You must not silently reinterpret, weaken, remove, or expand approved behavior.
 

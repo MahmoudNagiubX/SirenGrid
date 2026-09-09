@@ -1,5 +1,5 @@
 # SirenGrid / City Emergency AI
-## Master Product & System Behavior Plan — v1.2
+## Master Product & System Behavior Plan — v1.3
 
 > **Status:** Product concept locked for implementation planning  
 > **Primary purpose of this file:** Single source of truth for humans and AI coding agents  
@@ -13,6 +13,7 @@
 > **Reference demo candidate:** Multi-casualty urban road incident (NOT locked; final demo scenario remains open)  
 > **Bonus feature after core completion:** Social Media Intelligence
 > **Revision v1.2:** Clarifies that SirenGrid intake begins on the control-room side through existing emergency communication channels; the MVP has no citizen-facing SirenGrid reporting app.
+> **Revision v1.3:** **Supersedes the v1.2 "no citizen-facing app" scope.** SirenGrid is now a **two-sided platform**: a **Citizen Mobile App** (Flutter — Ambulance / Fire / Police / General requests, fresh Device GPS as the emergency location, registered address as account context only, citizen tracking, FCM notifications) **plus** the existing **Institutional Command Center** (preserved and upgraded). See PD-081 / PD-082 / PD-083 in `docs/DECISIONS.md` and §4.7 below. Backend operational truth, human approval, real-vs-simulated boundaries, and the immediate-response rule are unchanged.
 
 ---
 
@@ -296,7 +297,22 @@ Naming rule:
 
 ---
 
-## 4.7 Control-room-side intake / no citizen-facing reporting app
+## 4.7 Product surfaces — Citizen Mobile App + Institutional Command Center
+
+> **SUPERSEDED-IN-PART by PD-081 (2026-09-09).** The v1.2 statement below that "SirenGrid is an operator/control-room system, not a citizen reporting application" and that "the MVP must not require citizens to … submit reports through a SirenGrid application" is **no longer the approved product scope**. It is kept here as historical context. The immediate-response rule, control-room intake channels, and Social Media Intelligence boundary in this section remain valid.
+
+### 4.7.0 Current approved product (PD-081 / PD-082 / PD-083)
+
+SirenGrid is a **two-sided digital emergency-response platform**:
+
+1. **Citizen Mobile App** — a citizen-facing **Flutter** application. A pre-registered, identity-verified citizen opens the app, chooses **Ambulance / Fire / Police / General Emergency**, and confirms once. The app submits the requested service plus **fresh Device GPS**, which is the **emergency operational location**. The citizen's **registered address is account context only** and must never be used as a dispatch location. The app shows tracking / status / ETA / responder location when the backend has valid data, and receives **FCM** notifications (including citizen-facing Clear-the-Way where applicable). Citizen identity is **synthetic / demo** for the hackathon — no real National-ID/KYC integration and no real emergency-service integration. Police / General are **operator handoff / review** only.
+2. **Institutional Command Center** — the existing government / authorized-facility web application, **preserved and upgraded** (not a rewrite): incident monitoring, responder / resource monitoring, traffic-aware routing, coverage-aware planning, hospital recommendation and pre-alert, **human approval**, corridor / driver-alert support, and replanning. It now also receives and presents `MOBILE_APP`-origin incidents.
+
+**Product truth (unchanged):** the FastAPI backend is the operational source of truth; critical response changes are human-approved; GPS and registered address stay separate; simulated integrations stay labeled simulated; Firebase/FCM is notification transport only and is not operational truth or an auth replacement.
+
+**Business positioning (PD-082):** B2G platform with a citizen-facing access layer — citizens are free end users / beneficiaries; government / city / authorized emergency institutions are the payer / customer. No official Egyptian government partnership is claimed.
+
+### 4.7.1 Historical v1.2 statement (superseded by PD-081)
 
 **SirenGrid is an operator/control-room system, not a citizen reporting application.**
 
@@ -3066,6 +3082,21 @@ Changes from v1.1:
 
 No tech stack or implementation architecture was selected by this revision.
 
+---
+
+# 56.3 v1.3 CHANGE SUMMARY
+
+Changes from v1.2 (see PD-081 / PD-082 / PD-083 in `docs/DECISIONS.md`):
+
+1. **Superseded** the v1.2 "control-room-only / no citizen-facing app" product scope. SirenGrid is now a **two-sided platform**: a **Citizen Mobile App** (Flutter) plus the existing **Institutional Command Center** (preserved and upgraded).
+2. Citizen app: pre-registered synthetic identity; one-tap Ambulance / Fire / Police / General; **fresh Device GPS is the emergency operational location**; **registered address is account context only**; citizen tracking / status / ETA when the backend has valid data.
+3. Recorded the **B2G platform with a citizen-facing access layer** positioning: citizens are free end users / beneficiaries; government / city / authorized institutions are the payer / customer. No official Egyptian government partnership is claimed.
+4. Recorded **FCM as the required citizen notification transport** (notification transport only; no Firebase Auth replacement; no Firestore/RTDB as operational truth). The **FastAPI backend remains the single operational source of truth**.
+5. Preserved unchanged: backend operational authority, human approval for critical actions, GPS-vs-registered-address separation, real-vs-simulated labeling, hospital recommendation / pre-alert as core value, Police/General as operator handoff/review with no invented optimizer, and the immediate-response rule.
+6. §4.7 keeps the historical v1.2 statement for context under a superseded banner; no historical decision text was deleted.
+
+No tech stack change beyond recording FCM as the citizen notification transport. No operational algorithm, API contract, or acceptance criterion changed.
+
 # 56. END STATE
 
 When the core system is complete, a judge should be able to watch one emergency move through this story:
@@ -3079,7 +3110,7 @@ Everything else is secondary.
 ---
 
 ## Document Version
-**v1.2 — Locked Product Master Plan**
+**v1.3 — Locked Product Master Plan** (two-sided: Citizen Mobile App + Institutional Command Center; see §4.7.0 and PD-081 / PD-082 / PD-083). v1.2 remains the base; v1.3 supersedes only the control-room-only product scope.
 
 ## Next document
 A separate architecture/technical plan should later translate this behavior into software architecture and a tech stack without changing the product contract defined here.
