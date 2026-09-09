@@ -13,6 +13,7 @@ from app.driver_alert import refresh_driver_alert
 from app.models import (
     EmergencyResource,
     Incident,
+    ReplanEvaluation,
     ResponsePlan,
     TimelineEvent,
     new_timeline_event_id,
@@ -75,6 +76,85 @@ def is_planner_eligible(resource: EmergencyResource | dict[str, Any]) -> bool:
     is_unassigned = not assigned_id
 
     return bool(is_available and is_unassigned)
+
+
+def _apply_resource_state_side_effects(
+    db: Session,
+    resource: EmergencyResource,
+    *,
+    incident: Incident | None,
+    previous_status: str,
+    operator_reference: str,
+    now_utc: datetime,
+    record_status_timeline: bool = True,
+    record_replan: bool = True,
+) -> ReplanEvaluation | None:
+    """Apply shared resource-state provenance, timeline, and replan effects.
+
+    This helper deliberately does not acquire a lock, commit, or publish. The
+    caller owns the transaction so simulated and operator resource changes can
+    preserve the same outage atomicity.
+    """
+    current_provenance = dict(resource.provenance_json or {})
+    resource.provenance_json = {
+        **current_provenance,
+        "source": current_provenance.get("source") or "operator_action",
+        "data_reality": DataReality.SIMULATED.value,
+        "freshness_status": FreshnessStatus.FRESH.value,
+        "last_updated": now_utc.isoformat(),
+        "source_reference": operator_reference,
+    }
+
+    if incident is not None and record_status_timeline:
+        db.add(
+            TimelineEvent(
+                id=new_timeline_event_id(),
+                incident_id=incident.id,
+                event_type="RESOURCE_STATUS_CHANGED",
+                details_json={
+                    "resource_id": resource.id,
+                    "resource_version": resource.version,
+                    "incident_id": incident.id,
+                    "operator_reference": operator_reference,
+                    "previous_status": previous_status,
+                    "status": resource.status.value,
+                },
+                created_at=now_utc,
+            )
+        )
+
+    if not (
+        record_replan
+        and incident is not None
+        and resource.status == ResourceStatus.OUT_OF_SERVICE
+    ):
+        return None
+
+    active_plan = None
+    if incident.current_plan_id:
+        active_plan = db.get(ResponsePlan, incident.current_plan_id)
+    if (
+        active_plan is None
+        or active_plan.status != ResponsePlanStatus.APPROVED
+        or resource.id not in (active_plan.resource_ids_json or [])
+    ):
+        return None
+
+    from app.replanning import apply_replan_trigger
+
+    evaluation, _ = apply_replan_trigger(
+        db,
+        incident_id=incident.id,
+        expected_incident_version=incident.version,
+        trigger_reasons=["RESOURCE_UNAVAILABLE"],
+        input_references={
+            "resource_id": resource.id,
+            "resource_version": resource.version,
+            "resource_status": resource.status.value,
+        },
+        now=now_utc,
+    )
+    return evaluation
 
 
 def interpolate_route_progress(
@@ -465,60 +545,15 @@ def patch_resource_state(
     resource.version = resource.version + 1
     resource.last_updated = now_utc
 
-    current_provenance = dict(resource.provenance_json or {})
-    resource.provenance_json = {
-        **current_provenance,
-        "source": current_provenance.get("source") or "operator_action",
-        "data_reality": DataReality.SIMULATED.value,
-        "freshness_status": FreshnessStatus.FRESH.value,
-        "last_updated": now_utc.isoformat(),
-        "source_reference": payload.operator_reference,
-    }
-
-    if incident is not None:
-        timeline_event = TimelineEvent(
-            id=new_timeline_event_id(),
-            incident_id=incident.id,
-            event_type="RESOURCE_STATUS_CHANGED",
-            details_json={
-                "resource_id": resource.id,
-                "resource_version": resource.version,
-                "incident_id": incident.id,
-                "operator_reference": payload.operator_reference,
-                "previous_status": prev_status,
-                "status": target_status.value,
-            },
-            created_at=now_utc,
-        )
-        db.add(timeline_event)
-
-    active_plan = None
-    if incident is not None and incident.current_plan_id:
-        active_plan = db.get(ResponsePlan, incident.current_plan_id)
     try:
-        if (
-            incident is not None
-            and target_status == ResourceStatus.OUT_OF_SERVICE
-            and active_plan is not None
-            and active_plan.status == ResponsePlanStatus.APPROVED
-            and resource.id in (active_plan.resource_ids_json or [])
-        ):
-            # Record the required trigger in this transaction so an outage
-            # cannot commit without its replan state.
-            from app.replanning import apply_replan_trigger
-
-            apply_replan_trigger(
-                db,
-                incident_id=incident.id,
-                expected_incident_version=incident.version,
-                trigger_reasons=["RESOURCE_UNAVAILABLE"],
-                input_references={
-                    "resource_id": resource.id,
-                    "resource_version": resource.version,
-                    "resource_status": resource.status.value,
-                },
-                now=now_utc,
-            )
+        _apply_resource_state_side_effects(
+            db,
+            resource,
+            incident=incident,
+            previous_status=prev_status,
+            operator_reference=payload.operator_reference,
+            now_utc=now_utc,
+        )
         db.commit()
     except Exception:
         db.rollback()

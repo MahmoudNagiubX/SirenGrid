@@ -19,7 +19,7 @@ from app.benchmark_scenarios import (
 )
 from app.config import REPO_ROOT, settings
 from app.db import get_db
-from app.incidents import serialize_incident, serialize_timeline_event
+from app.incidents import _acquire_write_lock, serialize_incident, serialize_timeline_event
 from app.models import (
     Approval,
     CorridorState,
@@ -29,17 +29,21 @@ from app.models import (
     HospitalOptionSet,
     HospitalPreAlert,
     Incident,
-    ReplanEvaluation,
     Report,
+    ReplanEvaluation,
     ResponsePlan,
     TimelineEvent,
     new_timeline_event_id,
 )
+from app.replanning import serialize_replan_evaluation
+from app.resources import _apply_resource_state_side_effects, serialize_resource
 from app.schemas import (
     ConfidenceLevel,
     DataReality,
     IncidentStatus,
+    ResourceStatus,
 )
+from app.websocket import publish_operations_event
 
 
 router = APIRouter(prefix="/simulation", tags=["simulation"])
@@ -260,45 +264,103 @@ def trigger_simulation_event(
         if incident is None:
             raise HTTPException(status_code=409, detail="Loaded simulation incident is missing")
         changed_resources: list[str] = []
-        for override in event.resource_overrides:
-            resource = db.get(EmergencyResource, override.resource_id)
-            if resource is None:
-                raise HTTPException(status_code=409, detail="Simulation resource is missing")
-            if override.status is not None:
-                resource.status = override.status
-            if "assigned_incident_id" in override.model_fields_set:
-                resource.assigned_incident_id = override.assigned_incident_id
-            if override.latitude is not None:
-                resource.latitude = override.latitude
-            if override.longitude is not None:
-                resource.longitude = override.longitude
-            resource.version += 1
-            resource.last_updated = datetime.now(timezone.utc)
-            changed_resources.append(resource.id)
+        changed_resource_rows: list[EmergencyResource] = []
+        replan_evaluations: list[ReplanEvaluation] = []
         created_incident_id = None
-        if event.event_type == "SECOND_INCIDENT" and event.incident is not None:
-            created = _scenario_incident(scenario.model_copy(update={"incident": event.incident}))
-            created.id = f"simulation-{scenario.id}-event-{event.event_index}"
-            db.add(created)
-            created_incident_id = created.id
-        timeline = TimelineEvent(
-            id=new_timeline_event_id(),
-            incident_id=incident.id,
-            event_type="SIMULATION_EVENT_TRIGGERED",
-            details_json={
-                "scenario_id": scenario.id,
-                "event_index": event.event_index,
-                "event_type": event.event_type,
-                "changed_resource_ids": sorted(changed_resources),
-                "created_incident_id": created_incident_id,
-                "data_reality": DataReality.SIMULATED.value,
-            },
-            created_at=datetime.now(timezone.utc),
-        )
-        db.add(timeline)
-        db.commit()
-        _next_event_index += 1
-    return {
+        event_time = datetime.now(timezone.utc)
+        try:
+            _acquire_write_lock(db)
+            for override in event.resource_overrides:
+                resource = db.get(EmergencyResource, override.resource_id)
+                if resource is None:
+                    raise HTTPException(status_code=409, detail="Simulation resource is missing")
+                previous_status = (
+                    resource.status.value
+                    if hasattr(resource.status, "value")
+                    else str(resource.status)
+                )
+                if override.status is not None:
+                    resource.status = override.status
+                if "assigned_incident_id" in override.model_fields_set:
+                    resource.assigned_incident_id = override.assigned_incident_id
+                if override.latitude is not None:
+                    resource.latitude = override.latitude
+                if override.longitude is not None:
+                    resource.longitude = override.longitude
+                resource.version += 1
+                resource.last_updated = event_time
+                resource_incident = (
+                    db.get(Incident, resource.assigned_incident_id)
+                    if resource.assigned_incident_id
+                    else None
+                )
+                evaluation = _apply_resource_state_side_effects(
+                    db,
+                    resource,
+                    incident=resource_incident,
+                    previous_status=previous_status,
+                    operator_reference=(
+                        f"simulation:{scenario.id}:event:{event.event_index}"
+                    ),
+                    now_utc=event_time,
+                    record_status_timeline=override.status is not None,
+                    record_replan=override.status == ResourceStatus.OUT_OF_SERVICE,
+                )
+                if evaluation is not None:
+                    replan_evaluations.append(evaluation)
+                changed_resources.append(resource.id)
+                changed_resource_rows.append(resource)
+
+            if event.event_type == "SECOND_INCIDENT" and event.incident is not None:
+                created = _scenario_incident(
+                    scenario.model_copy(update={"incident": event.incident})
+                )
+                created.id = f"simulation-{scenario.id}-event-{event.event_index}"
+                db.add(created)
+                db.add(
+                    TimelineEvent(
+                        id=new_timeline_event_id(),
+                        incident_id=created.id,
+                        event_type="SIMULATION_EVENT_TRIGGERED",
+                        details_json={
+                            "scenario_id": scenario.id,
+                            "event_index": event.event_index,
+                            "event_type": event.event_type,
+                            "data_reality": DataReality.SIMULATED.value,
+                        },
+                        created_at=event_time,
+                    )
+                )
+                created_incident_id = created.id
+
+            timeline = TimelineEvent(
+                id=new_timeline_event_id(),
+                incident_id=incident.id,
+                event_type="SIMULATION_EVENT_TRIGGERED",
+                details_json={
+                    "scenario_id": scenario.id,
+                    "event_index": event.event_index,
+                    "event_type": event.event_type,
+                    "changed_resource_ids": sorted(changed_resources),
+                    "created_incident_id": created_incident_id,
+                    "data_reality": DataReality.SIMULATED.value,
+                },
+                created_at=event_time,
+            )
+            db.add(timeline)
+            db.commit()
+            db.refresh(timeline)
+            for resource in changed_resource_rows:
+                db.refresh(resource)
+            for evaluation in replan_evaluations:
+                db.refresh(evaluation)
+            db.refresh(incident)
+            _next_event_index += 1
+        except Exception:
+            db.rollback()
+            raise
+
+    result = {
         "mode": "SIMULATED",
         "scope": "DEMO_ONLY",
         "status": "EVENT_APPLIED",
@@ -309,6 +371,34 @@ def trigger_simulation_event(
         "created_incident_id": created_incident_id,
         "timeline_event": serialize_timeline_event(timeline),
     }
+    for resource in changed_resource_rows:
+        publish_operations_event(
+            event="resource.updated",
+            incident_id=resource.assigned_incident_id,
+            payload=serialize_resource(resource),
+        )
+    for evaluation in replan_evaluations:
+        replan_incident = db.get(Incident, evaluation.incident_id)
+        if replan_incident is None:
+            continue
+        replan_payload = serialize_replan_evaluation(
+            evaluation,
+            incident_version=replan_incident.version,
+        )
+        publish_operations_event(
+            event="replan.required",
+            incident_id=replan_incident.id,
+            payload={
+                "replan": replan_payload,
+                "incident": serialize_incident(replan_incident),
+            },
+        )
+    publish_operations_event(
+        event="simulation.event",
+        incident_id=incident.id,
+        payload=result,
+    )
+    return result
 
 
 @router.get("/status")
