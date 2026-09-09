@@ -119,8 +119,10 @@ class _LoginScreenState extends State<LoginScreen> {
                                 ? context.tr('login.err_pin')
                                 : null,
                           ),
-                          const Spacer(),
-                          const SizedBox(height: 24),
+                          // Fixed, calm gap before the CTA. The bare Spacer()
+                          // here previously ate every pixel of slack on tall
+                          // devices and left an awkward void under the PIN field.
+                          const SizedBox(height: 40),
                           SgPrimaryButton(
                             label: context.tr('login.submit'),
                             full: true,

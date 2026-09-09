@@ -96,7 +96,7 @@ class _ConfirmationBody extends StatelessWidget {
                         ),
                       ),
                     ],
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 22),
                     Row(
                       children: [
                         Expanded(
@@ -108,6 +108,7 @@ class _ConfirmationBody extends StatelessWidget {
                         ),
                         const SizedBox(width: 10),
                         Expanded(
+                          flex: 2,
                           child: SgEmergencyButton(
                             label: failure != null && failure.canRetry
                                 ? context.tr('common.retry')

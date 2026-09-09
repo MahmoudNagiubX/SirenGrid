@@ -114,15 +114,21 @@ class _SgTextFieldState extends State<SgTextField> {
                 ),
               ),
               if (widget.obscure)
-                GestureDetector(
-                  onTap: () => setState(() => _reveal = !_reveal),
-                  behavior: HitTestBehavior.opaque,
-                  child: Padding(
-                    padding: const EdgeInsets.only(left: 6),
-                    child: SgIcon(
-                      _reveal ? 'shield-check' : 'shield',
-                      size: 18,
-                      color: SgColors.textMuted,
+                Semantics(
+                  button: true,
+                  label: _reveal ? 'Hide PIN' : 'Show PIN',
+                  child: GestureDetector(
+                    onTap: () => setState(() => _reveal = !_reveal),
+                    behavior: HitTestBehavior.opaque,
+                    child: Padding(
+                      padding: const EdgeInsets.only(left: 8),
+                      child: SgIcon(
+                        _reveal ? 'eye-off' : 'eye',
+                        size: 19,
+                        color: _reveal
+                            ? SgColors.infoStrong
+                            : SgColors.textMuted,
+                      ),
                     ),
                   ),
                 ),

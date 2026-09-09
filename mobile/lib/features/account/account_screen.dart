@@ -60,7 +60,7 @@ class AccountScreen extends StatelessWidget {
                       ),
                       (
                         label: context.tr('account.identity_status'),
-                        value: profile.identityStatus,
+                        value: profile.identityStatusLabel,
                       ),
                     ],
                   ),

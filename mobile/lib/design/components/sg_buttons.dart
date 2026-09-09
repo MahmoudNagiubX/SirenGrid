@@ -284,7 +284,7 @@ class _SgEmergencyButtonState extends State<SgEmergencyButton>
       width: isCircle ? 96 : (widget.full ? double.infinity : null),
       padding: isCircle
           ? EdgeInsets.zero
-          : const EdgeInsets.symmetric(horizontal: 28),
+          : EdgeInsets.symmetric(horizontal: widget.full ? 18 : 28),
       decoration: BoxDecoration(
         gradient: SgColors.gradientEmergency,
         borderRadius: radius,
@@ -311,13 +311,16 @@ class _SgEmergencyButtonState extends State<SgEmergencyButton>
                 const SizedBox(width: 10),
               ],
               Flexible(
-                child: Text(
-                  widget.label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: SgType.cardHeading.copyWith(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w700,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    widget.label,
+                    maxLines: 1,
+                    softWrap: false,
+                    style: SgType.cardHeading.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
               ),

@@ -124,7 +124,9 @@ class _TrackingBody extends StatelessWidget {
                   snapshot: s,
                   serviceIcon: _service.icon,
                 )
-              : Container(color: SgColors.mapBg),
+              : TrackingMapPlaceholder(
+                  caption: context.tr('track.map_preparing'),
+                ),
         ),
         // legibility gradient under the header
         Positioned(

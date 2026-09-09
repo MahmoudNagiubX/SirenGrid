@@ -74,9 +74,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 SingleChildScrollView(
                   padding: const EdgeInsets.fromLTRB(
                     SgSpace.page,
-                    20,
+                    14,
                     SgSpace.page,
-                    190,
+                    196,
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -109,14 +109,17 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                         ],
                       ),
-                      const SizedBox(height: 14),
-                      GridView.count(
-                        crossAxisCount: 2,
+                      const SizedBox(height: 12),
+                      GridView(
                         shrinkWrap: true,
                         physics: const NeverScrollableScrollPhysics(),
-                        mainAxisSpacing: 12,
-                        crossAxisSpacing: 12,
-                        childAspectRatio: 1.35,
+                        gridDelegate:
+                            const SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: 2,
+                              mainAxisSpacing: 12,
+                              crossAxisSpacing: 12,
+                              mainAxisExtent: 126,
+                            ),
                         children: [
                           for (final s in EmergencyService.values)
                             SgServiceCard(
@@ -128,7 +131,6 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                         ],
                       ),
-                      const SizedBox(height: 18),
                       _LocationStrip(
                         onRequestPermission: () {
                           context.read<LocationCubit>().requestPermission();
@@ -147,13 +149,13 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: IgnorePointer(
                     ignoring: true,
                     child: Container(
-                      height: 120,
+                      height: 150,
                       decoration: const BoxDecoration(
                         gradient: LinearGradient(
                           begin: Alignment.topCenter,
                           end: Alignment.bottomCenter,
                           colors: [Color(0x00EDF2F4), SgColors.bgApp],
-                          stops: [0, 0.46],
+                          stops: [0, 0.42],
                         ),
                       ),
                     ),
@@ -227,9 +229,9 @@ class _Hero extends StatelessWidget {
           Padding(
             padding: EdgeInsets.fromLTRB(
               SgSpace.page,
-              topPad + 14,
+              topPad + 12,
               SgSpace.page,
-              22,
+              18,
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -291,7 +293,7 @@ class _Hero extends StatelessWidget {
                     ),
                   ],
                 ),
-                const SizedBox(height: 24),
+                const SizedBox(height: 18),
                 Text(
                   greeting,
                   style: SgType.caption.copyWith(
@@ -301,19 +303,19 @@ class _Hero extends StatelessWidget {
                 ),
                 const SizedBox(height: 6),
                 ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 260),
+                  constraints: const BoxConstraints(maxWidth: 250),
                   child: Text(
                     headline,
                     style: const TextStyle(
-                      fontSize: 30,
-                      height: 36 / 30,
+                      fontSize: 28,
+                      height: 34 / 28,
                       fontWeight: FontWeight.w700,
                       color: Colors.white,
                       letterSpacing: -0.6,
                     ),
                   ),
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 16),
                 _HeroLocation(),
               ],
             ),
@@ -330,16 +332,27 @@ class _HeroLocation extends StatelessWidget {
     return BlocBuilder<LocationCubit, LocationReadiness>(
       builder: (context, r) {
         final ready = r == LocationReadiness.ready;
-        final title = switch (r) {
-          LocationReadiness.ready => context.tr('home.location_ready'),
-          LocationReadiness.servicesOff => context.tr('home.location_off'),
-          LocationReadiness.permissionBlocked => context.tr(
-            'home.location_blocked',
+        final (title, sub) = switch (r) {
+          LocationReadiness.ready => (
+            context.tr('home.location_ready'),
+            context.tr('home.location_ready_hint'),
           ),
-          LocationReadiness.permissionRequired => context.tr(
-            'home.location_permission',
+          LocationReadiness.servicesOff => (
+            context.tr('home.location_off'),
+            context.tr('home.location_off_hint'),
           ),
-          LocationReadiness.unknown => context.tr('home.location_finding'),
+          LocationReadiness.permissionBlocked => (
+            context.tr('home.location_blocked'),
+            context.tr('home.location_off_hint'),
+          ),
+          LocationReadiness.permissionRequired => (
+            context.tr('home.location_permission'),
+            context.tr('home.location_off_hint'),
+          ),
+          LocationReadiness.unknown => (
+            context.tr('home.location_finding'),
+            context.tr('home.location_finding_hint'),
+          ),
         };
         return Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -370,15 +383,13 @@ class _HeroLocation extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      ready
-                          ? context.tr('home.location_ready')
-                          : context.tr('home.location_finding'),
+                      sub,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12,
-                        fontWeight: FontWeight.w500,
-                        color: Colors.white,
+                        fontWeight: FontWeight.w400,
+                        color: Colors.white.withValues(alpha: 0.82),
                       ),
                     ),
                   ],
@@ -421,11 +432,10 @@ class _LocationStrip extends StatelessWidget {
   Widget build(BuildContext context) {
     return BlocBuilder<LocationCubit, LocationReadiness>(
       builder: (context, r) {
-        if (r == LocationReadiness.ready) {
-          return SgLocationCard(
-            title: context.tr('home.location_ready'),
-            state: SgLocationCardState.ready,
-          );
+        // The hero pill already reports a healthy location state; only surface a
+        // second card down here when the citizen must act (permission / GPS off).
+        if (r == LocationReadiness.ready || r == LocationReadiness.unknown) {
+          return const SizedBox.shrink();
         }
         final (state, action, cb) = switch (r) {
           LocationReadiness.servicesOff => (
@@ -459,11 +469,14 @@ class _LocationStrip extends StatelessWidget {
           ),
           _ => context.tr('home.location_finding'),
         };
-        return SgLocationCard(
-          title: title,
-          state: state,
-          actionLabel: action,
-          onAction: cb,
+        return Padding(
+          padding: const EdgeInsets.only(top: 18),
+          child: SgLocationCard(
+            title: title,
+            state: state,
+            actionLabel: action,
+            onAction: cb,
+          ),
         );
       },
     );

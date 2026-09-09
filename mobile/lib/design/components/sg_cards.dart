@@ -42,7 +42,7 @@ class _SgServiceCardState extends State<SgServiceCard> {
         child: AnimatedContainer(
           duration: SgDur.base,
           curve: SgDur.easeStandard,
-          padding: const EdgeInsets.fromLTRB(16, 18, 16, 16),
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
           decoration: BoxDecoration(
             color: sel ? SgColors.emergencySoft : SgColors.bgSurface,
             borderRadius: BorderRadius.circular(SgRadius.card),
@@ -66,8 +66,8 @@ class _SgServiceCardState extends State<SgServiceCard> {
             children: [
               AnimatedContainer(
                 duration: SgDur.base,
-                width: 48,
-                height: 48,
+                width: 46,
+                height: 46,
                 decoration: BoxDecoration(
                   color: sel ? null : SgColors.navy900,
                   gradient: sel ? SgColors.gradientEmergency : null,
@@ -91,31 +91,33 @@ class _SgServiceCardState extends State<SgServiceCard> {
                   ),
                 ),
               ),
-              const SizedBox(height: 14),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Flexible(
-                    child: Text(
-                      widget.label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: SgType.cardHeading.copyWith(
-                        color: SgColors.heading,
-                        fontWeight: FontWeight.w700,
+              const SizedBox(height: 12),
+              Flexible(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Flexible(
+                      child: Text(
+                        widget.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: SgType.cardHeading.copyWith(
+                          color: SgColors.heading,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ),
-                  ),
-                  if (sel)
-                    Container(
-                      width: 9,
-                      height: 9,
-                      decoration: const BoxDecoration(
-                        color: SgColors.emergency,
-                        shape: BoxShape.circle,
+                    if (sel)
+                      Container(
+                        width: 9,
+                        height: 9,
+                        decoration: const BoxDecoration(
+                          color: SgColors.emergency,
+                          shape: BoxShape.circle,
+                        ),
                       ),
-                    ),
-                ],
+                  ],
+                ),
               ),
             ],
           ),

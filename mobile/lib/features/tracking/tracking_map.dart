@@ -5,8 +5,149 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../design/components/sg_markers.dart';
+import '../../design/sg_icon.dart';
 import '../../design/tokens.dart';
 import 'tracking_models.dart';
+
+/// A designed stand-in for the live basemap: a cool graticule grid with a soft
+/// sonar sweep and an optional caption. Rendered when there is nothing to map
+/// yet, and kept *behind* [TrackingMap] so a slow or failed tile fetch reveals a
+/// deliberate surface instead of a flat void (brief §13).
+class TrackingMapPlaceholder extends StatefulWidget {
+  const TrackingMapPlaceholder({super.key, this.caption, this.showPin = true});
+
+  final String? caption;
+  final bool showPin;
+
+  @override
+  State<TrackingMapPlaceholder> createState() => _TrackingMapPlaceholderState();
+}
+
+class _TrackingMapPlaceholderState extends State<TrackingMapPlaceholder>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _sweep = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 2600),
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    _sweep.repeat();
+  }
+
+  @override
+  void dispose() {
+    _sweep.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final reduceMotion = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+    return DecoratedBox(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Color(0xFFEDF2FA), Color(0xFFDCE5F3)],
+        ),
+      ),
+      child: AnimatedBuilder(
+        animation: _sweep,
+        builder: (context, child) => CustomPaint(
+          painter: _GraticulePainter(
+            phase: reduceMotion ? 0 : _sweep.value,
+            animate: !reduceMotion,
+          ),
+          child: child,
+        ),
+        child: widget.caption == null && !widget.showPin
+            ? null
+            : Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (widget.showPin)
+                      Container(
+                        width: 46,
+                        height: 46,
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          shape: BoxShape.circle,
+                          boxShadow: SgShadows.card,
+                        ),
+                        child: const Center(
+                          child: SgIcon(
+                            'map-pin',
+                            size: 22,
+                            color: SgColors.mapRoute,
+                            strokeWidth: 2.2,
+                          ),
+                        ),
+                      ),
+                    if (widget.caption != null) ...[
+                      const SizedBox(height: 12),
+                      Text(
+                        widget.caption!,
+                        textAlign: TextAlign.center,
+                        style: SgType.captionMedium.copyWith(
+                          color: SgColors.infoStrong,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+      ),
+    );
+  }
+}
+
+class _GraticulePainter extends CustomPainter {
+  _GraticulePainter({required this.phase, required this.animate});
+
+  final double phase;
+  final bool animate;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const step = 44.0;
+    final grid = Paint()
+      ..color = SgColors.mapRoute.withValues(alpha: 0.07)
+      ..strokeWidth = 1;
+    for (double x = 0; x <= size.width; x += step) {
+      canvas.drawLine(Offset(x, 0), Offset(x, size.height), grid);
+    }
+    for (double y = 0; y <= size.height; y += step) {
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), grid);
+    }
+
+    final center = Offset(size.width / 2, size.height / 2);
+    final maxR = size.shortestSide * 0.42;
+    final ring = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.4
+      ..color = SgColors.mapRoute.withValues(alpha: 0.14);
+    for (final f in const [0.4, 0.7, 1.0]) {
+      canvas.drawCircle(center, maxR * f, ring);
+    }
+
+    if (animate) {
+      final r = maxR * (0.15 + 0.85 * phase);
+      final sweep = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2
+        ..color = SgColors.mapRoute.withValues(alpha: (1 - phase) * 0.35);
+      canvas.drawCircle(center, r, sweep);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _GraticulePainter old) =>
+      old.phase != phase || old.animate != animate;
+}
 
 /// Real interactive basemap for Live Response Tracking (brief §13/§14).
 ///
@@ -128,6 +269,17 @@ class TrackingMapState extends State<TrackingMap>
         _displayedResponder ??
         (route.isNotEmpty ? route.first : const LatLng(30.0561, 31.3452));
 
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        const TrackingMapPlaceholder(showPin: false),
+        _buildMap(center, route),
+      ],
+    );
+  }
+
+  Widget _buildMap(LatLng center, List<LatLng> route) {
+    final s = widget.snapshot;
     return FlutterMap(
       mapController: _map,
       options: MapOptions(
@@ -135,7 +287,7 @@ class TrackingMapState extends State<TrackingMap>
         initialZoom: 14,
         minZoom: 3,
         maxZoom: 18,
-        backgroundColor: SgColors.mapBg,
+        backgroundColor: Colors.transparent,
         interactionOptions: const InteractionOptions(
           flags:
               InteractiveFlag.pinchZoom |

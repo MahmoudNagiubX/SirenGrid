@@ -24,6 +24,22 @@ class CitizenProfile {
   final String nationalIdMasked;
   final String identityStatus;
 
+  /// Human-readable form of the raw backend token (e.g. `DEMO_VERIFIED` →
+  /// "Demo verified", `PENDING_REVIEW` → "Pending review"). Falls back to the
+  /// raw value if it does not look like an enum token.
+  String get identityStatusLabel {
+    final raw = identityStatus.trim();
+    if (raw.isEmpty) return raw;
+    final words = raw
+        .split(RegExp(r'[_\-\s]+'))
+        .where((w) => w.isNotEmpty)
+        .map((w) => w.toLowerCase())
+        .toList();
+    if (words.isEmpty) return raw;
+    words[0] = words[0][0].toUpperCase() + words[0].substring(1);
+    return words.join(' ');
+  }
+
   String get initials {
     final parts = displayName
         .trim()
