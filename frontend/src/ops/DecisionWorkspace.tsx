@@ -11,6 +11,7 @@ import {
 import { useCommandRunner, useOperations } from '../state/OperationsContext';
 import {
   approvePlan,
+  evaluateReplan,
   generateCandidates,
   generateHospitalOptions,
   selectAlternativePlan,
@@ -285,6 +286,31 @@ function PlanTab({ state }: { state: OpsState }) {
     const activeReplanPlan = replanPlans.find((p) => p.id === selId) ?? replanPlans[0] ?? null;
     const selectedReplanPlanId = activeReplanPlan?.id ?? null;
 
+    // P0 replan bridge: when the backend has recorded a pending trigger but no
+    // replacement has been produced yet, the operator must be able to run the
+    // existing evaluateReplan() command. Materiality stays backend-authoritative;
+    // this UI only forwards the request and reconciles canonical state.
+    const replanErrored = replan.error != null;
+    const triggerReasons = rep?.trigger_reasons ?? [];
+    const replanTriggerPending =
+      !!rep && rep.status === 'PENDING' && triggerReasons.length > 0;
+    const canEvaluateReplan =
+      !!inc &&
+      replanTriggerPending &&
+      !pendingPlanId &&
+      !plansErrored &&
+      !replanErrored &&
+      busyAction === null;
+
+    const doEvaluateReplan = () => {
+      if (!inc) return;
+      void run('evaluate-replan', {
+        command: () => evaluateReplan(inc.id, { expected_incident_version: inc.version }),
+        refetch: reconcileAfterPlanCommand(inc.id),
+        successText: 'Replan evaluation complete. Canonical replan state reloaded.',
+      });
+    };
+
     // Only the EXACT backend-pending recommended replacement can be approved,
     // and only while it is the visually selected card (§25). Replan alternatives
     // stay view-only — no selectAlternativePlan wiring in replan (§26).
@@ -315,9 +341,44 @@ function PlanTab({ state }: { state: OpsState }) {
       <Fragment>
         {plansNotice}
         {plansNotice == null && replanPlans.length === 0 ? (
-          <div style={{ padding: 16, textAlign: 'center', color: 'var(--color-text-muted)', fontSize: 13 }}>
-            No pending replan evaluation for this incident.
-          </div>
+          replanTriggerPending ? (
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 8,
+                padding: 12,
+                borderRadius: 'var(--radius-md)',
+                border: '1px solid var(--red-200)',
+                background: 'var(--color-critical-soft)',
+              }}
+            >
+              <div style={{ fontSize: 14, fontWeight: 600 }}>Replan required</div>
+              <div style={{ fontSize: 13, color: 'var(--color-text-muted)' }}>
+                {triggerReasons.map(humanize).join(', ')}
+              </div>
+              <div>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  disabled={!canEvaluateReplan}
+                  onClick={canEvaluateReplan ? doEvaluateReplan : undefined}
+                >
+                  {busyAction === 'evaluate-replan'
+                    ? 'Evaluating replacement…'
+                    : 'Evaluate replacement'}
+                </Button>
+              </div>
+            </div>
+          ) : rep && triggerReasons.length > 0 ? (
+            <div style={{ padding: 16, textAlign: 'center', color: 'var(--color-text-muted)', fontSize: 13 }}>
+              Replan evaluated — no material replacement required.
+            </div>
+          ) : (
+            <div style={{ padding: 16, textAlign: 'center', color: 'var(--color-text-muted)', fontSize: 13 }}>
+              No pending replan evaluation for this incident.
+            </div>
+          )
         ) : replanPlans.length === 0 ? null : (
           <div style={{ display: 'flex', gap: 10 }}>
             {replanPlans.map((p, idx) => {
