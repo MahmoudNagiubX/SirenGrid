@@ -90,7 +90,7 @@ function Row({ a, b, tone }: { a: string; b: string; tone?: string }) {
 }
 
 function OverviewTab({ state, onSelectTab }: { state: OpsState; onSelectTab: (t: DecisionTab) => void }) {
-  const { selectedIncident, timeline, resources } = useOperations();
+  const { selectedIncident, timeline, resources, plans } = useOperations();
   const inc = selectedIncident.data;
 
   if (state === 'coverage') {
@@ -109,8 +109,15 @@ function OverviewTab({ state, onSelectTab }: { state: OpsState; onSelectTab: (t:
 
   if (state === 'active') {
     const executedEvents = (timeline.data ?? []).slice(-3);
+    const incidentId = inc?.id;
+    const currentPlan = inc?.current_plan_id
+      ? (plans.data ?? []).find((p) => p.id === inc.current_plan_id)
+      : undefined;
+    const currentPlanResourceIds = new Set(currentPlan?.resource_ids ?? []);
     const assignedResources = (resources.data ?? []).filter(
-      (r) => r.assigned_incident_id === inc?.id || (inc?.current_plan_id && r.status !== 'AVAILABLE'),
+      (r) =>
+        (incidentId && r.assigned_incident_id === incidentId) ||
+        (currentPlanResourceIds.size > 0 && currentPlanResourceIds.has(r.id)),
     );
 
     return (
@@ -181,25 +188,49 @@ function OverviewTab({ state, onSelectTab }: { state: OpsState; onSelectTab: (t:
   );
 }
 
-function PlanTab({ state }: { state: OpsState }) {
-  const { plans, replan, resources } = useOperations();
-  const planList = plans.data ?? [];
-  const rep = replan.data;
+function getCandidateSetId(p: ResponsePlanRead): string | null {
+  return (
+    p.candidate_set_id ??
+    p.metrics?.candidate_set_id ??
+    (p.metrics?.phase04 as Record<string, unknown> | undefined)?.candidate_set_id as string | undefined ??
+    null
+  );
+}
 
-  const sortedPlans = [...planList].sort((a, b) => {
+function sortCandidatePlans(plans: ResponsePlanRead[]): ResponsePlanRead[] {
+  return [...plans].sort((a, b) => {
     const rankA = a.candidate_rank ?? a.metrics?.candidate_rank ?? 999;
     const rankB = b.candidate_rank ?? b.metrics?.candidate_rank ?? 999;
-    return rankA - rankB;
+    if (rankA !== rankB) {
+      return rankA - rankB;
+    }
+    const verA = a.plan_version ?? a.version ?? 0;
+    const verB = b.plan_version ?? b.version ?? 0;
+    return verA - verB;
   });
+}
+
+function PlanTab({ state }: { state: OpsState }) {
+  const { plans, replan, resources, selectedIncident } = useOperations();
+  const planList = plans.data ?? [];
+  const rep = replan.data;
+  const inc = selectedIncident.data;
 
   const [selId, setSelId] = useState<string | null>(null);
-  const selectedPlanId = selId ?? sortedPlans[0]?.id ?? null;
-  const activePlan = sortedPlans.find((p) => p.id === selectedPlanId) ?? sortedPlans[0] ?? null;
-
-  const resourceMap = new Map((resources.data ?? []).map((r) => [r.id, r.name || r.id]));
 
   if (state === 'replan') {
-    const replanPlans: ResponsePlanRead[] = sortedPlans;
+    const pendingPlanId = inc?.pending_replan_plan_id ?? rep?.pending_plan_id;
+    const pendingPlan = pendingPlanId ? planList.find((p) => p.id === pendingPlanId) : undefined;
+    const pendingSetId = pendingPlan ? getCandidateSetId(pendingPlan) : null;
+    const replanCandidates = pendingSetId
+      ? planList.filter((p) => getCandidateSetId(p) === pendingSetId)
+      : pendingPlan
+      ? [pendingPlan]
+      : [];
+    const replanPlans = sortCandidatePlans(replanCandidates);
+    const activeReplanPlan = replanPlans.find((p) => p.id === selId) ?? replanPlans[0] ?? null;
+    const selectedReplanPlanId = activeReplanPlan?.id ?? null;
+
     return (
       <Fragment>
         {replanPlans.length === 0 ? (
@@ -211,7 +242,7 @@ function PlanTab({ state }: { state: OpsState }) {
             {replanPlans.map((p, idx) => {
               const etaSec = p.metrics?.max_arrival_eta_seconds;
               const routeRef = p.routes?.[0]?.routing_source || p.metrics?.routing_source || 'Standard route';
-              const isSelected = p.id === selectedPlanId || (idx === 0 && !selId);
+              const isSelected = p.id === selectedReplanPlanId;
               return (
                 <div key={p.id} style={{ flex: 1, cursor: 'pointer' }} onClick={() => setSelId(p.id)}>
                   <Card
@@ -248,6 +279,37 @@ function PlanTab({ state }: { state: OpsState }) {
       </Fragment>
     );
   }
+
+  let normalCandidates: ResponsePlanRead[] = [];
+  if (inc?.current_plan_id) {
+    const currentPlan = planList.find((p) => p.id === inc.current_plan_id);
+    const currentSetId = currentPlan ? getCandidateSetId(currentPlan) : null;
+    if (currentSetId) {
+      normalCandidates = planList.filter((p) => getCandidateSetId(p) === currentSetId);
+    } else if (currentPlan) {
+      normalCandidates = [currentPlan];
+    } else {
+      normalCandidates = [];
+    }
+  } else {
+    // If no current plan exists on the incident, look for the newest recommended plan candidate set
+    const recommendedPlans = planList.filter((p) => p.status === 'RECOMMENDED');
+    const recommendedPlan = recommendedPlans[recommendedPlans.length - 1];
+    const recSetId = recommendedPlan ? getCandidateSetId(recommendedPlan) : null;
+    if (recSetId) {
+      normalCandidates = planList.filter((p) => getCandidateSetId(p) === recSetId);
+    } else if (recommendedPlan) {
+      normalCandidates = [recommendedPlan];
+    } else {
+      normalCandidates = [];
+    }
+  }
+
+  const sortedPlans = sortCandidatePlans(normalCandidates);
+  const activePlan = sortedPlans.find((p) => p.id === selId) ?? sortedPlans[0] ?? null;
+  const selectedPlanId = activePlan?.id ?? null;
+
+  const resourceMap = new Map((resources.data ?? []).map((r) => [r.id, r.name || r.id]));
 
   if (sortedPlans.length === 0) {
     return (

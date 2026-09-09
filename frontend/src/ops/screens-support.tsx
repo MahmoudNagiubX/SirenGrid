@@ -44,12 +44,12 @@ export function DemoScreen() {
 
   const simStatusRows: [string, string][] = [
     ['Simulation enabled', sim ? (sim.enabled ? 'Yes' : 'No') : '—'],
-    ['Loaded scenario', sim?.loaded_scenario_id || 'None'],
-    ['Random seed', sim?.seed !== null && sim?.seed !== undefined ? `${sim.seed}` : '—'],
+    ['Loaded scenario', sim ? (sim.loaded_scenario_id ?? 'None') : '—'],
+    ['Random seed', sim && sim.seed !== null && sim.seed !== undefined ? `${sim.seed}` : '—'],
     ['Runtime version', sim ? `${sim.runtime_version}` : '—'],
     ['Event index', sim ? `${sim.event_index}` : '—'],
-    ['Last event type', sim?.last_event_type || 'None'],
-    ['Data reality', sim?.reality || 'SIMULATED'],
+    ['Last event type', sim ? (sim.last_event_type ?? 'None') : '—'],
+    ['Data reality', sim ? sim.reality : '—'],
   ];
 
   return (
@@ -61,33 +61,24 @@ export function DemoScreen() {
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 12, overflowY: 'auto', minWidth: 0 }}>
           <SubHead>Scenarios</SubHead>
           <div style={{ display: 'flex', gap: 12 }}>
-            {DEMO_SCENARIOS.map(([t, s]) => {
-              const isActuallyLoaded = Boolean(
-                sim?.loaded_scenario_id && t.toLowerCase().includes(sim.loaded_scenario_id.toLowerCase()),
-              );
-              return (
-                <Card
-                  key={t}
-                  padding={14}
-                  style={{
-                    flex: 1,
-                    border: isActuallyLoaded ? '1.5px solid var(--color-accent)' : '1px solid var(--color-border-hairline)',
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-                    <span style={{ fontSize: 13, fontWeight: 600 }}>{t}</span>
-                    {isActuallyLoaded ? (
-                      <Badge tone="confirmed">Loaded</Badge>
-                    ) : (
-                      <Button variant="ghost" size="sm" disabled>
-                        Load
-                      </Button>
-                    )}
-                  </div>
-                  <div style={{ fontSize: 12.5, color: 'var(--color-text-secondary)', marginTop: 4 }}>{s}</div>
-                </Card>
-              );
-            })}
+            {DEMO_SCENARIOS.map(([t, s]) => (
+              <Card
+                key={t}
+                padding={14}
+                style={{
+                  flex: 1,
+                  border: '1px solid var(--color-border-hairline)',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 13, fontWeight: 600 }}>{t}</span>
+                  <Button variant="ghost" size="sm" disabled>
+                    Load
+                  </Button>
+                </div>
+                <div style={{ fontSize: 12.5, color: 'var(--color-text-secondary)', marginTop: 4 }}>{s}</div>
+              </Card>
+            ))}
           </div>
           <SubHead>Inject conditions</SubHead>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -110,7 +101,7 @@ export function DemoScreen() {
               {sim ? `Event #${sim.event_index}` : '—'}
             </div>
             <div style={{ fontSize: 12.5, color: 'var(--color-text-secondary)', marginTop: 2 }}>
-              Runtime version: {sim?.runtime_version ?? '—'}
+              Runtime version: {sim ? `${sim.runtime_version}` : '—'}
             </div>
             <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
               <Button variant="secondary" size="sm" disabled>Pause</Button>

@@ -214,7 +214,9 @@ export function ResourceScreen() {
                       ? h.simulated_load_ratio !== null
                         ? `${Math.round(h.simulated_load_ratio * 100)}% load`
                         : 'Accepting'
-                      : 'Not accepting'}
+                      : h.accepting_state === 'NOT_ACCEPTING'
+                      ? 'Not accepting'
+                      : 'Unknown'}
                   </span>
                 </div>
               ))
