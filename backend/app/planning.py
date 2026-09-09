@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
+import logging
 from typing import Any
 import uuid
 import time
@@ -1367,5 +1368,16 @@ def approve_response_plan(
         incident_id=plan.incident_id,
         payload=result,
     )
+
+    # Best-effort citizen push ("a responder is assigned"). Transport only —
+    # a push failure must never affect this committed approval.
+    try:
+        from app.mobile_notifications import notify_incident_response_state
+
+        notify_incident_response_state(db, incident_id=plan.incident_id)
+    except Exception:  # noqa: BLE001 - push is never operational truth
+        logging.getLogger("sirengrid.planning").debug(
+            "citizen response-assigned push skipped", exc_info=True
+        )
 
     return result

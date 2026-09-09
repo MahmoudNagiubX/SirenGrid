@@ -78,6 +78,10 @@ __all__ = [
     "MobileResponderRead",
     "MobileTrackingRouteRead",
     "MobileEmergencyTrackingRead",
+    "MobileDevicePlatform",
+    "MobileDeviceRegisterRequest",
+    "MobileDeviceUnregisterRequest",
+    "MobileDeviceRegisterResponse",
 ]
 
 
@@ -1630,3 +1634,34 @@ class MobileEmergencyTrackingRead(BaseModel):
     tracking_available: bool = False
     emergency_location: Coordinate | None = None
     route: MobileTrackingRouteRead | None = None
+
+
+class MobileDevicePlatform(str, Enum):
+    ANDROID = "ANDROID"
+    IOS = "IOS"
+
+
+class MobileDeviceRegisterRequest(BaseModel):
+    """Authenticated FCM device-token registration.
+
+    Identity is derived from the bearer session — no citizen identity fields are
+    accepted (``extra="forbid"``).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    token: str = Field(min_length=1, max_length=4096)
+    platform: MobileDevicePlatform
+    app_version: str | None = Field(default=None, max_length=32)
+
+
+class MobileDeviceUnregisterRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    token: str = Field(min_length=1, max_length=4096)
+
+
+class MobileDeviceRegisterResponse(BaseModel):
+    registered: bool
+    platform: MobileDevicePlatform
+    updated_at: str

@@ -48,6 +48,8 @@ __all__ = [
     "CitizenProfile",
     "CitizenSession",
     "CitizenIdempotencyRecord",
+    "CitizenDeviceToken",
+    "MobileNotificationLog",
     "new_timeline_event_id",
 ]
 
@@ -655,6 +657,81 @@ class CitizenIdempotencyRecord(Base):
     request_fingerprint: Mapped[str] = mapped_column(String(64))
     report_id: Mapped[str] = mapped_column(String(36))
     incident_id: Mapped[str] = mapped_column(String(36))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+
+class CitizenDeviceToken(Base):
+    """One push (FCM) registration token per citizen device.
+
+    A citizen may have several devices, so this is a dedicated table rather than
+    a mutable column on ``CitizenProfile``. Identity is always the authenticated
+    session's citizen — never supplied in a request body. The token is the
+    natural key: the same physical token re-registering just updates the owner
+    and ``last_seen_at`` (idempotent upsert; handles a device changing hands).
+    """
+
+    __tablename__ = "citizen_device_tokens"
+
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+    )
+    token: Mapped[str] = mapped_column(String(4096), unique=True)
+    citizen_reference: Mapped[str] = mapped_column(String(64), index=True)
+    platform: Mapped[str] = mapped_column(String(16))  # ANDROID | IOS
+    app_version: Mapped[str | None] = mapped_column(
+        String(32),
+        nullable=True,
+        default=None,
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+
+class MobileNotificationLog(Base):
+    """Best-effort dedupe for outbound citizen push.
+
+    A row per (citizen, event key) that has already been pushed, so a repeated
+    state read / retry does not spam the same transition. This is not a message
+    broker — just enough to keep pushes idempotent per operational transition.
+    """
+
+    __tablename__ = "mobile_notification_log"
+    __table_args__ = (
+        UniqueConstraint(
+            "citizen_reference",
+            "event_key",
+            name="uq_mobile_notification_event",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+    )
+    citizen_reference: Mapped[str] = mapped_column(String(64), index=True)
+    event_key: Mapped[str] = mapped_column(String(200))
+    notification_type: Mapped[str] = mapped_column(String(48))
+    request_id: Mapped[str | None] = mapped_column(
+        String(36), nullable=True, default=None
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),

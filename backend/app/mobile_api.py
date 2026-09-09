@@ -39,6 +39,7 @@ from app.mobile_auth import (
     verify_pin,
 )
 from app.models import (
+    CitizenDeviceToken,
     CitizenIdempotencyRecord,
     CitizenProfile,
     EmergencyResource,
@@ -57,6 +58,9 @@ from app.schemas import (
     FreshnessStatus,
     IncidentStatus,
     MobileCitizenProfileRead,
+    MobileDeviceRegisterRequest,
+    MobileDeviceRegisterResponse,
+    MobileDeviceUnregisterRequest,
     MobileEmergencyRequestCreate,
     MobileEmergencyRequestCreated,
     MobileEmergencyTrackingRead,
@@ -678,3 +682,95 @@ def get_emergency_request(
             detail="Emergency request not found",
         )
     return _tracking_from_state(db, report, incident)
+
+
+# ---------------------------------------------------------------------------
+# Device (FCM) token registration — the single canonical authenticated
+# contract. Identity is the bearer session's citizen; the body never carries
+# identity. Best-effort transport only: Firebase never becomes operational
+# truth.
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/devices/register",
+    status_code=status.HTTP_200_OK,
+    response_model=MobileDeviceRegisterResponse,
+)
+def register_device(
+    payload: MobileDeviceRegisterRequest,
+    context: Annotated[CitizenAuthContext, Depends(authenticate_citizen)],
+    db: Annotated[Session, Depends(get_db)],
+) -> MobileDeviceRegisterResponse:
+    """Idempotent upsert of one FCM token for the authenticated citizen.
+
+    Re-registering the same token updates its owner / platform / last-seen — so
+    a device that changes hands stops delivering the previous citizen's pushes.
+    """
+    citizen = context.profile
+    now = _utcnow()
+    token = payload.token.strip()
+
+    existing = db.scalars(
+        select(CitizenDeviceToken).where(CitizenDeviceToken.token == token)
+    ).first()
+    if existing is None:
+        existing = CitizenDeviceToken(token=token, created_at=now)
+        db.add(existing)
+
+    existing.citizen_reference = citizen.citizen_reference
+    existing.platform = payload.platform.value
+    existing.app_version = payload.app_version
+    existing.is_active = True
+    existing.updated_at = now
+    existing.last_seen_at = now
+
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        # Concurrent insert of the same token — reload and reconcile.
+        existing = db.scalars(
+            select(CitizenDeviceToken).where(CitizenDeviceToken.token == token)
+        ).first()
+        if existing is not None:
+            existing.citizen_reference = citizen.citizen_reference
+            existing.platform = payload.platform.value
+            existing.app_version = payload.app_version
+            existing.is_active = True
+            existing.updated_at = now
+            existing.last_seen_at = now
+            db.commit()
+    db.refresh(existing)
+
+    return MobileDeviceRegisterResponse(
+        registered=True,
+        platform=payload.platform,
+        updated_at=existing.updated_at.isoformat(),
+    )
+
+
+@router.post(
+    "/devices/unregister",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def unregister_device(
+    payload: MobileDeviceUnregisterRequest,
+    context: Annotated[CitizenAuthContext, Depends(authenticate_citizen)],
+    db: Annotated[Session, Depends(get_db)],
+) -> Response:
+    """Deactivate a token the caller owns (best-effort logout / privacy edge).
+
+    A token owned by a different citizen is left untouched — the endpoint still
+    returns 204 (no enumeration of another citizen's device).
+    """
+    citizen = context.profile
+    token = payload.token.strip()
+    row = db.scalars(
+        select(CitizenDeviceToken).where(CitizenDeviceToken.token == token)
+    ).first()
+    if row is not None and row.citizen_reference == citizen.citizen_reference:
+        row.is_active = False
+        row.updated_at = _utcnow()
+        db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

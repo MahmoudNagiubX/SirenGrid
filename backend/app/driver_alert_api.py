@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -86,6 +87,19 @@ def refresh_alert(
     db.refresh(alert)
     result = _serialize_alert(alert)
     publish_operations_event(event="resource.updated", incident_id=incident.id, payload=result)
+
+    # Best-effort clear-the-way push off the committed DriverAlert state
+    # (addendum §13.C/§21). Transport only; never affects the alert.
+    if alert.status == "ACTIVE":
+        try:
+            from app.mobile_notifications import notify_clear_the_way
+
+            notify_clear_the_way(db, alert_id=alert.id, incident_id=incident.id)
+        except Exception:  # noqa: BLE001 - push is never operational truth
+            logging.getLogger("sirengrid.driver_alert_api").debug(
+                "clear-the-way push skipped", exc_info=True
+            )
+
     return result
 
 
