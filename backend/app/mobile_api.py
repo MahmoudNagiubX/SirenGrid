@@ -48,6 +48,7 @@ from app.models import (
     TimelineEvent,
     new_timeline_event_id,
 )
+from app.responder_tracking import resolve_responder_tracking_snapshot
 from app.schemas import (
     CitizenRequestStatus,
     ConfidenceLevel,
@@ -63,6 +64,7 @@ from app.schemas import (
     MobileLoginResponse,
     MobileResponderRead,
     MobileService,
+    MobileTrackingRouteRead,
     ResourceType,
     ResponsePlanStatus,
     Severity,
@@ -333,6 +335,17 @@ def _build_mobile_provenance(
     return provenance
 
 
+def _finite_coordinate(lat: float | None, lon: float | None) -> Coordinate | None:
+    if (
+        isinstance(lat, (int, float))
+        and isinstance(lon, (int, float))
+        and math.isfinite(float(lat))
+        and math.isfinite(float(lon))
+    ):
+        return Coordinate(lat=float(lat), lon=float(lon))
+    return None
+
+
 def _tracking_from_state(
     db: Session,
     report: Report,
@@ -341,6 +354,12 @@ def _tracking_from_state(
     service = _service_from_incident(incident)
     responder: MobileResponderRead | None = None
     eta_seconds: float | None = None
+    route_read: MobileTrackingRouteRead | None = None
+    tracking_available = False
+    status = _project_status(incident.status)
+    # Operational emergency location = the incident's live Device GPS, never the
+    # citizen's registered address (mission section 13).
+    emergency_location = _finite_coordinate(incident.latitude, incident.longitude)
 
     responder_type = _SERVICE_RESPONDER_TYPE.get(service)
     if responder_type is not None and incident.current_plan_id:
@@ -365,6 +384,11 @@ def _tracking_from_state(
                     reality = DataReality(prov.get("data_reality"))
                 except ValueError:
                     reality = DataReality.SIMULATED
+                match_status = (
+                    match.status.value
+                    if hasattr(match.status, "value")
+                    else str(match.status)
+                )
                 responder = MobileResponderRead(
                     id=match.id,
                     label=match.name,
@@ -376,6 +400,7 @@ def _tracking_from_state(
                     ),
                     freshness_status=freshness,
                     data_reality=reality,
+                    operational_status=match_status,
                 )
                 for route in plan.routes_json or []:
                     if not isinstance(route, dict):
@@ -389,6 +414,36 @@ def _tracking_from_state(
                         eta_seconds = float(raw_eta)
                     break
 
+                # Deterministic read-only route projection along the approved
+                # route. Never mutates canonical state; follows current_plan_id.
+                snapshot = resolve_responder_tracking_snapshot(
+                    db,
+                    incident=incident,
+                    plan=plan,
+                    resource=match,
+                    now=None,
+                )
+                if snapshot is not None:
+                    tracking_available = True
+                    status = snapshot.tracking_state
+                    responder = responder.model_copy(
+                        update={
+                            "location": snapshot.effective_location,
+                            "data_reality": snapshot.data_reality,
+                            "freshness_status": snapshot.freshness_status,
+                            "last_updated": snapshot.last_updated.isoformat(),
+                        }
+                    )
+                    if snapshot.remaining_eta_seconds is not None:
+                        eta_seconds = snapshot.remaining_eta_seconds
+                    route_read = MobileTrackingRouteRead(
+                        geometry=snapshot.route_geometry,
+                        remaining_eta_seconds=snapshot.remaining_eta_seconds,
+                        progress_fraction=snapshot.progress_fraction,
+                        data_reality=snapshot.data_reality,
+                        tracking_source=snapshot.tracking_source,
+                    )
+
     last_updated = None
     if responder is not None and responder.last_updated is not None:
         last_updated = responder.last_updated
@@ -399,10 +454,13 @@ def _tracking_from_state(
         request_id=report.id,
         incident_id=incident.id,
         service=service,
-        status=_project_status(incident.status),
+        status=status,
         eta_seconds=eta_seconds,
         responder=responder,
         last_updated=last_updated,
+        tracking_available=tracking_available,
+        emergency_location=emergency_location,
+        route=route_read,
     )
 
 

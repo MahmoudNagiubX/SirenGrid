@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import app.models as _models  # noqa: F401
 import pytest
@@ -9,6 +9,7 @@ from app.db import init_db
 from app.main import app
 from app.mobile_auth import generate_pin_salt, hash_pin
 from app.models import (
+    Approval,
     CitizenIdempotencyRecord,
     CitizenProfile,
     EmergencyResource,
@@ -519,6 +520,9 @@ def test_tracking_never_leaks_internal_planning_data(
         "eta_seconds",
         "responder",
         "last_updated",
+        "tracking_available",
+        "emergency_location",
+        "route",
     }
     blob = str(data)
     for forbidden in (
@@ -529,6 +533,8 @@ def test_tracking_never_leaks_internal_planning_data(
         "metrics",
         "evidence",
         "operator",
+        "candidate",
+        "penalty",
     ):
         assert forbidden not in blob
 
@@ -571,8 +577,105 @@ def test_ambulance_intake_planning_and_tracking_end_to_end(
     )
     assert track.status_code == 200
     data = track.json()
-    assert data["status"] == "RESPONSE_ASSIGNED"
+    # Approved responder tracking has begun; the citizen-facing state is the
+    # simulated-route projection state, not the internal incident status label.
+    assert data["status"] == "EN_ROUTE"
+    assert data["tracking_available"] is True
     assert data["responder"] is not None
     assert data["responder"]["data_reality"] == "SIMULATED"
     assert data["responder"]["id"] in plan["resource_ids"]
-    assert data["eta_seconds"] is None or data["eta_seconds"] > 0
+    assert data["responder"]["operational_status"] is not None
+    assert data["eta_seconds"] is not None and data["eta_seconds"] > 0
+    # Emergency location is the incident Device GPS, echoed for the citizen map.
+    assert data["emergency_location"] == {"lat": NASR_CITY["lat"], "lon": NASR_CITY["lon"]}
+    # Only the assigned responder's approved route, tagged as simulated.
+    assert data["route"] is not None
+    assert data["route"]["geometry"]["type"] == "LineString"
+    assert data["route"]["data_reality"] == "SIMULATED"
+    assert data["route"]["tracking_source"] == "SIMULATED_ROUTE_PROJECTION"
+    assert 0.0 <= data["route"]["progress_fraction"] < 1.0
+
+    # Winding the approval time back past the route ETA advances the projection
+    # to the destination with a non-negative (zero) ETA and ARRIVED state.
+    approval_row = db_session.scalars(
+        select(Approval).where(Approval.incident_id == incident_id)
+    ).first()
+    approval_row.created_at = datetime.now(timezone.utc) - timedelta(hours=1)
+    db_session.commit()
+
+    arrived = client.get(
+        f"/api/v1/mobile/emergency-requests/{body['request_id']}", headers=headers
+    ).json()
+    assert arrived["status"] == "ARRIVED"
+    assert arrived["eta_seconds"] == 0
+    assert arrived["route"]["progress_fraction"] == 1.0
+    # Destination point equals the emergency location's last route vertex.
+    assert arrived["route"]["geometry"]["coordinates"][-1] == pytest.approx(
+        data["route"]["geometry"]["coordinates"][-1]
+    )
+
+
+def test_pre_approval_tracking_is_unavailable(
+    client: TestClient, db_session: Session, citizen: CitizenProfile
+) -> None:
+    """A generated-but-unapproved plan produces no responder movement."""
+    seed_resources(db=db_session)
+    headers = login(client)
+    body = create_request(client, headers, service="AMBULANCE").json()
+    gen = client.post(f"/api/v1/incidents/{body['incident_id']}/plans/generate")
+    assert gen.status_code == 201, gen.text
+
+    data = client.get(
+        f"/api/v1/mobile/emergency-requests/{body['request_id']}", headers=headers
+    ).json()
+    assert data["tracking_available"] is False
+    assert data["responder"] is None
+    assert data["route"] is None
+    assert data["status"] == "UNDER_REVIEW"
+    # Emergency Device GPS is still echoed for the citizen map.
+    assert data["emergency_location"] == {"lat": NASR_CITY["lat"], "lon": NASR_CITY["lon"]}
+
+
+def test_police_request_has_no_invented_responder_tracking(
+    client: TestClient, db_session: Session, citizen: CitizenProfile
+) -> None:
+    seed_resources(db=db_session)
+    headers = login(client)
+    body = create_request(client, headers, service="POLICE").json()
+    data = client.get(
+        f"/api/v1/mobile/emergency-requests/{body['request_id']}", headers=headers
+    ).json()
+    assert data["service"] == "POLICE"
+    assert data["tracking_available"] is False
+    assert data["responder"] is None
+    assert data["route"] is None
+
+
+def test_terminal_request_stops_projected_movement(
+    client: TestClient, db_session: Session, citizen: CitizenProfile
+) -> None:
+    seed_resources(db=db_session)
+    headers = login(client)
+    body = create_request(client, headers, service="AMBULANCE").json()
+    incident_id = body["incident_id"]
+    plan = client.post(
+        f"/api/v1/incidents/{incident_id}/plans/generate"
+    ).json()
+    client.post(
+        f"/api/v1/plans/{plan['id']}/approve",
+        json={
+            "expected_incident_version": plan["incident_version"],
+            "expected_plan_version": plan["plan_version"],
+            "operator_reference": "dispatcher-op-01",
+        },
+    )
+    incident = db_session.get(Incident, incident_id)
+    incident.status = IncidentStatus.CLOSED
+    db_session.commit()
+
+    data = client.get(
+        f"/api/v1/mobile/emergency-requests/{body['request_id']}", headers=headers
+    ).json()
+    assert data["status"] == "COMPLETED"
+    assert data["tracking_available"] is False
+    assert data["route"] is None

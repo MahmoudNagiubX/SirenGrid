@@ -76,6 +76,7 @@ __all__ = [
     "MobileEmergencyRequestCreated",
     "CitizenRequestStatus",
     "MobileResponderRead",
+    "MobileTrackingRouteRead",
     "MobileEmergencyTrackingRead",
 ]
 
@@ -1597,6 +1598,24 @@ class MobileResponderRead(BaseModel):
     last_updated: str | None = None
     freshness_status: FreshnessStatus = FreshnessStatus.UNKNOWN
     data_reality: DataReality = DataReality.SIMULATED
+    # Optional, backward-compatible addition: the responder's canonical
+    # operational status (``ResourceStatus``) when an assigned responder exists.
+    operational_status: str | None = None
+
+
+class MobileTrackingRouteRead(BaseModel):
+    """Citizen-safe view of the assigned responder's approved route only.
+
+    Carries no candidate scores, coverage penalties, alternate plans, or other
+    internal planning explanation — just what the citizen map needs to draw the
+    responder moving toward the emergency.
+    """
+
+    geometry: dict[str, Any]
+    remaining_eta_seconds: float | None = None
+    progress_fraction: float
+    data_reality: DataReality
+    tracking_source: str
 
 
 class MobileEmergencyTrackingRead(BaseModel):
@@ -1607,3 +1626,7 @@ class MobileEmergencyTrackingRead(BaseModel):
     eta_seconds: float | None = None
     responder: MobileResponderRead | None = None
     last_updated: str | None = None
+    # Optional, backward-compatible additions for the citizen tracking map.
+    tracking_available: bool = False
+    emergency_location: Coordinate | None = None
+    route: MobileTrackingRouteRead | None = None
