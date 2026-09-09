@@ -417,6 +417,37 @@ export interface TrafficSnapshotRead {
   prototype_policy: TrafficPrototypePolicyRead;
 }
 
+export interface BenchmarkMetricSummary {
+  total_count: number;
+  available_count: number;
+  missing_count: number;
+  availability_rate: number;
+  mean?: number;
+  median?: number;
+}
+
+export interface BenchmarkEngineAggregate {
+  count: number;
+  outcome_counts: Record<string, number>;
+  incident_eta_seconds: BenchmarkMetricSummary;
+}
+
+export interface BenchmarkValidationRead {
+  case_id: string;
+  scenario_id: string;
+  passed: boolean;
+}
+
+export interface BenchmarkArtifactRead {
+  aggregate: {
+    baseline: BenchmarkEngineAggregate;
+    sirengrid: BenchmarkEngineAggregate;
+  };
+  validation: BenchmarkValidationRead[];
+  metadata: Record<string, unknown>;
+  provenance: Record<string, unknown>;
+}
+
 export interface ReplanEvaluationRead {
   id: string;
   incident_id: string;

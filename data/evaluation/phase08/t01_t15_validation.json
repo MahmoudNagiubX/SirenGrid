@@ -1,0 +1,137 @@
+[
+  {
+    "actual": "ACTIVE_UNCONFIRMED",
+    "case_id": "T01",
+    "evidence": "manual/control-room intake creates ACTIVE_UNCONFIRMED immediately",
+    "expected": "ACTIVE_UNCONFIRMED",
+    "passed": true,
+    "result": "PASS",
+    "scenario_id": "T01_urgent_activation"
+  },
+  {
+    "actual": "AUTO_ASSOCIATE",
+    "case_id": "T02",
+    "evidence": "distance_m=0.0; context=source_reference_match",
+    "expected": "AUTO_ASSOCIATE",
+    "passed": true,
+    "result": "PASS",
+    "scenario_id": "T02_duplicate_report"
+  },
+  {
+    "actual": "CONFLICT",
+    "case_id": "T03",
+    "evidence": "claims_preserved=2; values=[2, 5]",
+    "expected": "CONFLICT",
+    "passed": true,
+    "result": "PASS",
+    "scenario_id": "T03_conflicting_details"
+  },
+  {
+    "actual": "True",
+    "case_id": "T04",
+    "evidence": "reasons=['ACTIVE_ROUTE_CLOSURE']",
+    "expected": "True",
+    "passed": true,
+    "result": "PASS",
+    "scenario_id": "T04_blocked_road"
+  },
+  {
+    "actual": "True",
+    "case_id": "T05",
+    "evidence": "joint_coverage_trigger=['NEWLY_JOINT_UNDERCOVERED_ZONE']",
+    "expected": "True",
+    "passed": true,
+    "result": "PASS",
+    "scenario_id": "T05_coverage_tradeoff"
+  },
+  {
+    "actual": "hospital-open",
+    "case_id": "T06",
+    "evidence": "explicit simulated overload remains visible and a feasible alternative is ranked",
+    "expected": "hospital-open",
+    "passed": true,
+    "result": "PASS",
+    "scenario_id": "T06_hospital_overload"
+  },
+  {
+    "actual": "CONTINUATION_AVAILABLE",
+    "case_id": "T07",
+    "evidence": "rejected recommendation retains the existing alternative/manual continuation statuses",
+    "expected": "CONTINUATION_AVAILABLE",
+    "passed": true,
+    "result": "PASS",
+    "scenario_id": "T07_human_rejection"
+  },
+  {
+    "actual": "LOCATION_REQUIRED",
+    "case_id": "T08",
+    "evidence": "BaselineInsufficientResourcesError",
+    "expected": "LOCATION_REQUIRED",
+    "passed": true,
+    "result": "PASS",
+    "scenario_id": "T08_missing_location"
+  },
+  {
+    "actual": "REQUIRES_REPLAN",
+    "case_id": "T09",
+    "evidence": "INSUFFICIENT_RESOURCES",
+    "expected": "REQUIRES_REPLAN",
+    "passed": true,
+    "result": "PASS",
+    "scenario_id": "T09_resource_unavailable"
+  },
+  {
+    "actual": "FORWARD_ONLY",
+    "case_id": "T10",
+    "evidence": "route-progress geometry contains only the forward lookahead region",
+    "expected": "FORWARD_ONLY",
+    "passed": true,
+    "result": "PASS",
+    "scenario_id": "T10_public_alert"
+  },
+  {
+    "actual": "KNOWN_FACTS_ONLY",
+    "case_id": "T11",
+    "evidence": "{\"eta_seconds\": 90, \"incident_category\": \"traffic_collision\", \"incoming_resources\": [\"ambulance-1\"], \"receiving_hospital\": {\"id\": \"hospital-1\", \"name\": \"Fixture Hospital\"}, \"severity\": \"HIGH\"}",
+    "expected": "KNOWN_FACTS_ONLY",
+    "passed": true,
+    "result": "PASS",
+    "scenario_id": "T11_hospital_prealert"
+  },
+  {
+    "actual": "DISABLED",
+    "case_id": "T12",
+    "evidence": "manual_fallback_required=True",
+    "expected": "DISABLED",
+    "passed": true,
+    "result": "PASS",
+    "scenario_id": "T12_ai_failure"
+  },
+  {
+    "actual": "RECALCULATE",
+    "case_id": "T13",
+    "evidence": "authoritative operator correction advances the planning input version once",
+    "expected": "RECALCULATE",
+    "passed": true,
+    "result": "PASS",
+    "scenario_id": "T13_operator_correction"
+  },
+  {
+    "actual": "STALE",
+    "case_id": "T14",
+    "evidence": "stale traffic remains explicit; no replacement live value is fabricated",
+    "expected": "STALE",
+    "passed": true,
+    "result": "PASS",
+    "scenario_id": "T14_stale_operational_data"
+  },
+  {
+    "actual": "REQUIRES_REVIEW",
+    "case_id": "T15",
+    "evidence": "first_commit=('shared-resource',); no automatic preemption",
+    "expected": "REQUIRES_REVIEW",
+    "passed": true,
+    "result": "PASS",
+    "scenario_id": "T15_competing_incident"
+  }
+]

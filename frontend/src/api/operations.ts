@@ -1,5 +1,6 @@
 import { ApiError, request, requireArray, requireObject } from './client';
 import type {
+  BenchmarkArtifactRead,
   HealthRead,
   HospitalRead,
   IncidentOperationalStateRead,
@@ -38,6 +39,10 @@ export async function listHospitals(): Promise<HospitalRead[]> {
 
 export async function getTrafficSnapshot(): Promise<TrafficSnapshotRead> {
   return requireObject<TrafficSnapshotRead>(await request('/traffic/snapshot'), 'traffic snapshot');
+}
+
+export async function getPhase08Benchmark(): Promise<BenchmarkArtifactRead> {
+  return requireObject<BenchmarkArtifactRead>(await request('/benchmark/phase08'), 'Phase 08 benchmark artifact');
 }
 
 export async function getSimulationStatus(): Promise<SimulationStatusRead> {
