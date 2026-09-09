@@ -11,6 +11,10 @@ import {
 } from '../data/mock';
 import { useOperations } from '../state/OperationsContext';
 import { RecoveryNotice } from '../recovery/RecoveryNotice';
+import {
+  getMobileSourceSummary,
+  isUnconfirmedMobileSeverity,
+} from '../lib/mobileProvenance';
 import type { TimelineEventRead } from '../api/types';
 
 /** Ported from ui_kits/operations_center/workspace.jsx (StatusStrip, StateSwitch, IncidentRail, TimelineDock). */
@@ -247,6 +251,8 @@ export function IncidentRail({
         {filtered.map((inc) => {
           const on = selected === inc.id;
           const sevTone = inc.severity.toLowerCase() as 'low' | 'moderate' | 'high' | 'critical';
+          const severityPending = isUnconfirmedMobileSeverity(inc);
+          const mobileSummary = getMobileSourceSummary(inc);
           const arLabel = INCIDENT_TYPE_AR[inc.incident_type.toLowerCase()] ?? '';
           return (
             <button
@@ -275,11 +281,18 @@ export function IncidentRail({
                   {humanizeType(inc.incident_type)}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
-                  <Badge severity={sevTone} />
+                  {severityPending ? <Badge tone="neutral">Pending</Badge> : <Badge severity={sevTone} />}
                   <span style={{ fontSize: 13, color: 'var(--color-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {inc.location_text || 'Location unresolved'}
                   </span>
                 </div>
+                {mobileSummary && (
+                  <div style={{ marginTop: 5 }}>
+                    <Badge tone="info">
+                      Mobile Request{mobileSummary.locationSource === 'DEVICE_GPS' ? ' · Device GPS' : ''}
+                    </Badge>
+                  </div>
+                )}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginTop: 4 }}>
                   <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-text-secondary)', whiteSpace: 'nowrap' }}>
                     {humanizeStatus(inc.status)} · {formatIncidentTime(inc.created_at)}

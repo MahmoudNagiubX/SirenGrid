@@ -1,7 +1,13 @@
 import { Fragment, useState } from 'react';
 import { Alert, Badge, Button, Card, ConfidenceMeter, GlassPanel, IconTile } from '../components';
 import { Ico } from '../lib/icon';
-import { AiBlock, ApprovalBar, Prov, SubHead } from './primitives';
+import {
+  getMobileCitizenContext,
+  getMobileLocationSummary,
+  getMobileSourceSummary,
+  isUnconfirmedMobileSeverity,
+} from '../lib/mobileProvenance';
+import { AiBlock, ApprovalBar, Fact, Prov, SubHead } from './primitives';
 import {
   DEC_TABS,
   type DecisionTab,
@@ -171,16 +177,33 @@ function OverviewTab({ state, onSelectTab }: { state: OpsState; onSelectTab: (t:
     );
   }
 
-  const sev = inc?.severity ? humanize(inc.severity) : '—';
-  const sevTone = inc?.severity?.toLowerCase() === 'critical' ? 'var(--color-critical)' : 'var(--color-text-primary)';
+  // Mobile placeholder severity is NOT authoritative — never render it as a
+  // known severity. The operator fact-correction path is unchanged; once a real
+  // severity is recorded, severity_authority clears and normal display returns.
+  const severityPending = isUnconfirmedMobileSeverity(inc);
+  const sev = severityPending
+    ? 'Pending confirmation'
+    : inc?.severity
+    ? humanize(inc.severity)
+    : '—';
+  const sevTone = severityPending
+    ? 'var(--color-text-muted)'
+    : inc?.severity?.toLowerCase() === 'critical'
+    ? 'var(--color-critical)'
+    : 'var(--color-text-primary)';
   const confLevel = inc?.confidence_level?.toLowerCase() as 'low' | 'medium' | 'high' | undefined;
+
+  const mobileSummary = getMobileSourceSummary(inc);
+  const citizenCtx = getMobileCitizenContext(inc);
+  const locSummary = getMobileLocationSummary(inc);
+  const hasEmergencyGps = !!inc && inc.latitude != null && inc.longitude != null;
 
   return (
     <Fragment>
       <div style={{ display: 'flex', gap: 14, padding: '2px 0 8px' }}>
         <div style={{ flex: 1 }}>
           <SubHead>Severity</SubHead>
-          <div style={{ fontSize: 18, fontWeight: 600, color: sevTone, marginTop: 5 }}>{sev}</div>
+          <div style={{ fontSize: severityPending ? 15 : 18, fontWeight: 600, color: sevTone, marginTop: 5 }}>{sev}</div>
         </div>
         <span style={{ width: 1, background: 'var(--color-border-hairline)' }} />
         <div style={{ flex: 1.1 }}>
@@ -190,6 +213,52 @@ function OverviewTab({ state, onSelectTab }: { state: OpsState; onSelectTab: (t:
           </div>
         </div>
       </div>
+      {mobileSummary && (
+        <Fragment>
+          <SubHead>Request source</SubHead>
+          {mobileSummary.operatorReviewRequired && (
+            <Alert tone="attention" title="Operator review required">
+              This mobile request is queued for operator review. No automated dispatch occurs.
+            </Alert>
+          )}
+          <Fact label="Request source" value="Mobile App" />
+          {citizenCtx?.citizenReference && (
+            <Fact label="Citizen reference" value={citizenCtx.citizenReference} />
+          )}
+          {citizenCtx?.identityStatus && (
+            <Fact label="Identity" value={humanize(citizenCtx.identityStatus)} />
+          )}
+          {citizenCtx?.phone && <Fact label="Phone" value={citizenCtx.phone} />}
+          {citizenCtx?.registeredAddress && (
+            <Fact label="Registered address" value={citizenCtx.registeredAddress} />
+          )}
+          <Fact
+            label="Emergency location"
+            value={
+              hasEmergencyGps
+                ? `${inc!.latitude!.toFixed(5)}, ${inc!.longitude!.toFixed(5)}`
+                : undefined
+            }
+            unknown={!hasEmergencyGps}
+          />
+          <Fact
+            label="Location source"
+            value={locSummary?.locationSource === 'DEVICE_GPS' ? 'Device GPS' : locSummary?.locationSource ?? 'Device GPS'}
+          />
+          {locSummary?.locationAccuracyM != null && (
+            <Fact label="Location accuracy" value={`${Math.round(locSummary.locationAccuracyM)} m`} />
+          )}
+          <Fact
+            label="Request time"
+            value={
+              inc?.created_at
+                ? new Date(inc.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+                : undefined
+            }
+            unknown={!inc?.created_at}
+          />
+        </Fragment>
+      )}
       <SubHead>Known</SubHead>
       <Row a="Type" b={inc?.incident_type ? humanize(inc.incident_type) : 'Unknown'} />
       <Row a="Trapped" b={inc?.trapped_person === true ? 'Yes' : inc?.trapped_person === false ? 'No' : 'Unknown'} tone={inc?.trapped_person === null ? 'var(--color-text-muted)' : undefined} />
@@ -1044,6 +1113,7 @@ export function DecisionWorkspace({
     ? `${inc.id} · ${inc.created_at ? new Date(inc.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}`
     : '—';
   const headerSevTone = inc ? (inc.severity.toLowerCase() as 'low' | 'moderate' | 'high' | 'critical') : 'low';
+  const headerSeverityPending = isUnconfirmedMobileSeverity(inc);
 
   return (
     <GlassPanel padding={0} style={{ width: 400, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
@@ -1053,7 +1123,12 @@ export function DecisionWorkspace({
             <div style={{ fontSize: 18, fontWeight: 600, letterSpacing: '-0.015em' }}>{headerTitle}</div>
             <div style={{ fontSize: 13, color: 'var(--color-text-muted)', marginTop: 2 }}>{headerSub}</div>
           </div>
-          {inc && <Badge severity={headerSevTone} />}
+          {inc &&
+            (headerSeverityPending ? (
+              <Badge tone="neutral">Pending confirmation</Badge>
+            ) : (
+              <Badge severity={headerSevTone} />
+            ))}
         </div>
         <div role="tablist" style={{ display: 'flex', gap: 3, padding: 3, borderRadius: 'var(--radius-md)', background: 'var(--gray-100)' }}>
           {DEC_TABS.map(([id, label]) => {
