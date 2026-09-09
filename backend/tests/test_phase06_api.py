@@ -9,6 +9,7 @@ from sqlalchemy import Engine
 from sqlalchemy.orm import Session
 
 import app.models as _models  # noqa: F401
+from app.ai import StructuredExtractionResult, StructuredExtractionStatus
 from app.config import settings
 from app.db import init_db
 from app.main import app
@@ -124,6 +125,180 @@ def test_default_structured_processing_is_visible_and_does_not_mutate_incident(
     assert current is not None
     assert current.version == 1
     assert current.status == IncidentStatus.ACTIVE_UNCONFIRMED
+
+
+def test_structured_processing_uses_non_empty_report_text(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    report = client.post(
+        "/api/v1/reports",
+        json={
+            "source_type": "control_room_text",
+            "source_reference": "text-processing",
+            "raw_text": "Two casualties reported near Tayaran.",
+        },
+    )
+    assert report.status_code == 201, report.text
+    seen: dict[str, str] = {}
+
+    def fake_process(text: str, **_: object) -> StructuredExtractionResult:
+        seen["text"] = text
+        return StructuredExtractionResult(
+            status=StructuredExtractionStatus.DISABLED,
+            error_code="provider_not_selected",
+            manual_fallback_required=True,
+        )
+
+    monkeypatch.setattr("app.phase06_api.process_structured_extraction", fake_process)
+
+    processed = client.post(f"/api/v1/reports/{report.json()['id']}/process")
+
+    assert processed.status_code == 200, processed.text
+    assert seen["text"] == "Two casualties reported near Tayaran."
+
+
+def test_structured_processing_without_any_text_remains_truthfully_unavailable(
+    client: TestClient,
+) -> None:
+    report = client.post(
+        "/api/v1/reports",
+        json={
+            "source_type": "control_room_audio",
+            "source_reference": "empty-processing",
+            "raw_text": "",
+        },
+    )
+    assert report.status_code == 201, report.text
+
+    processed = client.post(f"/api/v1/reports/{report.json()['id']}/process")
+
+    assert processed.status_code == 200, processed.text
+    assert processed.json()["status"] == "DISABLED"
+    assert processed.json()["result"]["manual_fallback_required"] is True
+
+
+def test_structured_processing_uses_manual_transcript_for_media_report(
+    client: TestClient,
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "phase06_media_dir", tmp_path)
+    uploaded = client.post(
+        "/api/v1/reports/intake/audio",
+        files={"file": ("caller.wav", WAV_BYTES, "audio/wav")},
+        data={"source_reference": "manual-processing"},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    report_id = uploaded.json()["id"]
+    transcript_text = "Operator transcript: collision near Tayaran."
+    transcript = client.post(
+        f"/api/v1/reports/{report_id}/manual-transcript",
+        json={
+            "operator_reference": "transcript-operator",
+            "transcript": transcript_text,
+        },
+    )
+    assert transcript.status_code == 200, transcript.text
+    seen: dict[str, str] = {}
+
+    def fake_process(text: str, **_: object) -> StructuredExtractionResult:
+        seen["text"] = text
+        return StructuredExtractionResult(
+            status=StructuredExtractionStatus.DISABLED,
+            error_code="provider_not_selected",
+            manual_fallback_required=True,
+        )
+
+    monkeypatch.setattr("app.phase06_api.process_structured_extraction", fake_process)
+
+    processed = client.post(f"/api/v1/reports/{report_id}/process")
+
+    assert processed.status_code == 200, processed.text
+    assert seen["text"] == transcript_text
+
+
+def test_structured_processing_uses_asr_transcript_for_media_report(
+    client: TestClient,
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "phase06_media_dir", tmp_path)
+    monkeypatch.setattr(
+        "app.phase06_api.configured_groq_transcriber",
+        lambda path, model, timeout: "ASR transcript: collision near Tayaran.",
+    )
+    uploaded = client.post(
+        "/api/v1/reports/intake/audio",
+        files={"file": ("caller.wav", WAV_BYTES, "audio/wav")},
+        data={"source_reference": "asr-processing"},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    report_id = uploaded.json()["id"]
+    transcribed = client.post(f"/api/v1/reports/{report_id}/transcribe")
+    assert transcribed.status_code == 200, transcribed.text
+    seen: dict[str, str] = {}
+
+    def fake_process(text: str, **_: object) -> StructuredExtractionResult:
+        seen["text"] = text
+        return StructuredExtractionResult(
+            status=StructuredExtractionStatus.DISABLED,
+            error_code="provider_not_selected",
+            manual_fallback_required=True,
+        )
+
+    monkeypatch.setattr("app.phase06_api.process_structured_extraction", fake_process)
+
+    processed = client.post(f"/api/v1/reports/{report_id}/process")
+
+    assert processed.status_code == 200, processed.text
+    assert seen["text"] == "ASR transcript: collision near Tayaran."
+
+
+def test_structured_processing_prefers_manual_transcript_over_asr(
+    client: TestClient,
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "phase06_media_dir", tmp_path)
+    monkeypatch.setattr(
+        "app.phase06_api.configured_groq_transcriber",
+        lambda path, model, timeout: "ASR transcript should not win.",
+    )
+    uploaded = client.post(
+        "/api/v1/reports/intake/audio",
+        files={"file": ("caller.wav", WAV_BYTES, "audio/wav")},
+        data={"source_reference": "precedence-processing"},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    report_id = uploaded.json()["id"]
+    transcribed = client.post(f"/api/v1/reports/{report_id}/transcribe")
+    assert transcribed.status_code == 200, transcribed.text
+    manual_text = "Manual correction must be processed first."
+    transcript = client.post(
+        f"/api/v1/reports/{report_id}/manual-transcript",
+        json={
+            "operator_reference": "transcript-operator",
+            "transcript": manual_text,
+        },
+    )
+    assert transcript.status_code == 200, transcript.text
+    seen: dict[str, str] = {}
+
+    def fake_process(text: str, **_: object) -> StructuredExtractionResult:
+        seen["text"] = text
+        return StructuredExtractionResult(
+            status=StructuredExtractionStatus.DISABLED,
+            error_code="provider_not_selected",
+            manual_fallback_required=True,
+        )
+
+    monkeypatch.setattr("app.phase06_api.process_structured_extraction", fake_process)
+
+    processed = client.post(f"/api/v1/reports/{report_id}/process")
+
+    assert processed.status_code == 200, processed.text
+    assert seen["text"] == manual_text
 
 
 def test_operator_resolves_claim_with_one_version_increment_and_history_retained(

@@ -89,7 +89,8 @@ def extract_corridor_signals(
     metric_line = transform(_TO_METERS, line)
     route_length = metric_line.length
     if route_length <= 0:
-        raise ValueError("Approved route geometry must have positive length")
+        # A valid same-node route has no physical corridor to clear.
+        return []
 
     seen: set[str] = set()
     base_time = datetime.fromisoformat(now_iso)

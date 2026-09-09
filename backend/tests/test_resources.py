@@ -1753,7 +1753,6 @@ def test_release_and_reassignment_clear_previous_movement_state(
 @pytest.mark.parametrize(
     "coordinates",
     [
-        [[31.34, 30.05], [31.34, 30.05]],
         [[31.34, 30.05], ["invalid", 30.06]],
         [[31.34, 30.05], [181.0, 30.06]],
     ],

@@ -203,16 +203,22 @@ class ProvenanceMetadata(BaseModel):
 
 class ResourceRequirement(BaseModel):
     model_config = ConfigDict(
+        extra="forbid",
         json_schema_extra={
             "example": {
                 "resource_type": "AMBULANCE",
                 "count": 2,
+                "required_capability_tags": ["advanced_life_support"],
             }
         }
     )
 
     resource_type: ResourceType
     count: int = Field(ge=1, le=5)
+    required_capability_tags: list[str] | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
 
 
 class ManualIncidentCreate(BaseModel):

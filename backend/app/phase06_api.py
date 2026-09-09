@@ -111,6 +111,37 @@ def _utc(value: datetime) -> datetime:
     return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
 
 
+def _latest_transcript_text(report: Report, transcript_type: str) -> str | None:
+    candidates: list[tuple[str, int, str]] = []
+    for index, item in enumerate(report.evidence_items_json or []):
+        if item.get("type") != transcript_type:
+            continue
+        extracted_facts = item.get("extracted_facts")
+        if not isinstance(extracted_facts, dict):
+            continue
+        transcript = extracted_facts.get("transcript")
+        if not isinstance(transcript, str) or not transcript.strip():
+            continue
+        created_at = item.get("created_at")
+        if not isinstance(created_at, str):
+            provenance = item.get("provenance")
+            created_at = provenance.get("created_at", "") if isinstance(provenance, dict) else ""
+        candidates.append((created_at, index, transcript))
+    if not candidates:
+        return None
+    return max(candidates, key=lambda candidate: (candidate[0], candidate[1]))[2]
+
+
+def _structured_processing_text(report: Report) -> str:
+    manual_transcript = _latest_transcript_text(report, "MANUAL_TRANSCRIPT")
+    if manual_transcript is not None:
+        return manual_transcript
+    asr_transcript = _latest_transcript_text(report, "ASR_TRANSCRIPT")
+    if asr_transcript is not None:
+        return asr_transcript
+    return report.raw_text if report.raw_text and report.raw_text.strip() else ""
+
+
 def _report_fusion_view(report: Report) -> FusionReport:
     provenance = report.provenance_json or {}
     location = report.location_json or {}
@@ -315,7 +346,7 @@ def process_report(
         report.id,
     )
     result = process_structured_extraction(
-        report.raw_text,
+        _structured_processing_text(report),
         evidence_id=evidence_id,
         report_id=report.id,
     )

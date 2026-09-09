@@ -133,6 +133,105 @@ def test_manual_intake_creates_and_activates_immediately(
     assert event.details_json["status"] == IncidentStatus.ACTIVE_UNCONFIRMED.value
 
 
+def test_manual_intake_preserves_required_capability_tags(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    response = client.post(
+        "/api/v1/intake/manual",
+        json={
+            "incident_type": "traffic_collision",
+            "severity": "HIGH",
+            "location": {"lat": 30.0561, "lon": 31.3452},
+            "required_resources": [
+                {
+                    "resource_type": "AMBULANCE",
+                    "count": 1,
+                    "required_capability_tags": ["advanced_life_support"],
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    expected = [
+        {
+            "resource_type": "AMBULANCE",
+            "count": 1,
+            "required_capability_tags": ["advanced_life_support"],
+        }
+    ]
+    body = response.json()
+    assert body["required_resources"] == expected
+    assert body["required_resources_json"] == expected
+    stored = db_session.get(Incident, body["id"])
+    assert stored is not None
+    assert stored.required_resources_json == expected
+
+
+def test_fact_correction_preserves_required_capability_tags(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    created = client.post(
+        "/api/v1/intake/manual",
+        json={
+            "incident_type": "traffic_collision",
+            "severity": "HIGH",
+            "location": {"lat": 30.0561, "lon": 31.3452},
+            "required_resources": [{"resource_type": "AMBULANCE", "count": 1}],
+        },
+    )
+    assert created.status_code == 201, created.text
+    incident_id = created.json()["id"]
+    expected = [
+        {
+            "resource_type": "AMBULANCE",
+            "count": 1,
+            "required_capability_tags": ["advanced_life_support"],
+        }
+    ]
+
+    patched = client.patch(
+        f"/api/v1/incidents/{incident_id}/facts",
+        json={
+            "expected_incident_version": 1,
+            "required_resources": expected,
+            "operator_reference": "capability-operator",
+        },
+    )
+
+    assert patched.status_code == 200, patched.text
+    body = patched.json()["incident"]
+    assert body["required_resources"] == expected
+    assert body["required_resources_json"] == expected
+    stored = db_session.get(Incident, incident_id)
+    assert stored is not None
+    assert stored.required_resources_json == expected
+
+
+def test_unknown_capability_requirement_field_is_rejected(
+    client: TestClient,
+) -> None:
+    response = client.post(
+        "/api/v1/intake/manual",
+        json={
+            "incident_type": "traffic_collision",
+            "severity": "HIGH",
+            "location": {"lat": 30.0561, "lon": 31.3452},
+            "required_resources": [
+                {
+                    "resource_type": "AMBULANCE",
+                    "count": 1,
+                    "required_capabilty_tags": ["advanced_life_support"],
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 422, response.text
+
+
 def test_single_report_activates_immediately_no_second_report_needed(
     client: TestClient,
     db_session: Session,
