@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import os
+import re
 import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -30,6 +32,8 @@ from app.db import get_db
 from app.models import CitizenProfile, CitizenSession
 
 __all__ = [
+    "PIN_MAX_LENGTH",
+    "PIN_MIN_LENGTH",
     "PIN_PBKDF2_ITERATIONS",
     "SESSION_TTL_HOURS",
     "CitizenAuthContext",
@@ -40,12 +44,27 @@ __all__ = [
     "hash_token",
     "issue_session",
     "mask_national_id",
+    "national_id_fingerprint",
+    "national_id_last4",
+    "normalize_phone",
     "verify_pin",
 ]
 
 PIN_PBKDF2_ITERATIONS = 120_000
+PIN_MIN_LENGTH = 4
+PIN_MAX_LENGTH = 8
 SESSION_TTL_HOURS = 12
 _TOKEN_BYTES = 32
+
+# Server-side pepper for the National ID duplicate-detection fingerprint. This
+# is NOT a decryption key — the fingerprint is one-way and only the last four
+# digits are ever stored alongside it. A real deployment sets
+# ``CITIZEN_NATIONAL_ID_PEPPER``; the demo fallback keeps tests deterministic
+# and guards only synthetic identities. Never commit a production value.
+_NATIONAL_ID_PEPPER = os.getenv(
+    "CITIZEN_NATIONAL_ID_PEPPER",
+    "sirengrid-demo-synthetic-identity-pepper",
+).encode("utf-8")
 
 
 def _utcnow() -> datetime:
@@ -88,6 +107,28 @@ def hash_token(raw_token: str) -> str:
 def mask_national_id(national_id_last4: str) -> str:
     """Return the client-safe masked National ID, e.g. ``**********1234``."""
     return "*" * 10 + (national_id_last4 or "")
+
+
+def national_id_last4(national_id: str) -> str:
+    """Return the last four digits kept for display. Never stores the rest."""
+    digits = re.sub(r"\D", "", national_id or "")
+    return digits[-4:]
+
+
+def national_id_fingerprint(national_id: str) -> str:
+    """One-way HMAC-SHA256 fingerprint for synthetic-ID duplicate detection.
+
+    Uses a server-side pepper (not a plain hash of a 14-digit value, which is
+    trivially brute-forced). The full ID is never persisted or logged; only
+    this digest and the last four digits are stored.
+    """
+    digits = re.sub(r"\D", "", national_id or "")
+    return hmac.new(_NATIONAL_ID_PEPPER, digits.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def normalize_phone(phone: str) -> str:
+    """Canonical phone form for storage + uniqueness: trimmed, no spaces/dashes."""
+    return re.sub(r"[\s\-()]", "", (phone or "").strip())
 
 
 def issue_session(db: Session, citizen: CitizenProfile) -> tuple[str, CitizenSession]:

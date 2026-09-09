@@ -35,6 +35,9 @@ DEMO_CITIZEN = {
     "display_name": "Demo Citizen",
     "phone": "01000000000",
     "registered_address_text": "12 Demo Street, Nasr City, Cairo",
+    # Account context only — never used as an emergency dispatch location.
+    "registered_latitude": 30.0566,
+    "registered_longitude": 31.3300,
     "national_id_last4": "1234",
     "identity_status": "DEMO_VERIFIED",
     "identity_provider": "SYNTHETIC_DEMO_IDENTITY",
@@ -176,6 +179,8 @@ def seed_demo_citizen(db: Session) -> CitizenProfile:
         display_name=DEMO_CITIZEN["display_name"],
         phone=DEMO_CITIZEN["phone"],
         registered_address_text=DEMO_CITIZEN["registered_address_text"],
+        registered_latitude=DEMO_CITIZEN["registered_latitude"],
+        registered_longitude=DEMO_CITIZEN["registered_longitude"],
         national_id_last4=DEMO_CITIZEN["national_id_last4"],
         identity_status=DEMO_CITIZEN["identity_status"],
         identity_provider=DEMO_CITIZEN["identity_provider"],

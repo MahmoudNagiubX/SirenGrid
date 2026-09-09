@@ -578,8 +578,29 @@ class CitizenProfile(Base):
     display_name: Mapped[str] = mapped_column(String)
     phone: Mapped[str] = mapped_column(String(32), unique=True)
     registered_address_text: Mapped[str] = mapped_column(String)
+    # Account context only — the citizen's saved home/registered location. It is
+    # NEVER used as an emergency dispatch location; every emergency request
+    # carries a fresh Device GPS fix instead.
+    registered_latitude: Mapped[float | None] = mapped_column(
+        Float,
+        nullable=True,
+        default=None,
+    )
+    registered_longitude: Mapped[float | None] = mapped_column(
+        Float,
+        nullable=True,
+        default=None,
+    )
     # Synthetic only. The API never returns more than these four digits.
     national_id_last4: Mapped[str] = mapped_column(String(4))
+    # One-way HMAC fingerprint of the synthetic National ID, for duplicate
+    # detection at registration. Not reversible; the full ID is never stored.
+    national_id_fingerprint: Mapped[str | None] = mapped_column(
+        String(64),
+        unique=True,
+        nullable=True,
+        default=None,
+    )
     identity_status: Mapped[str] = mapped_column(String, default="DEMO_VERIFIED")
     identity_provider: Mapped[str] = mapped_column(
         String,

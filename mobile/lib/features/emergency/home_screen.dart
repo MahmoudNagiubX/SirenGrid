@@ -71,75 +71,13 @@ class _HomeScreenState extends State<HomeScreen> {
           Expanded(
             child: Stack(
               children: [
-                SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(
-                    SgSpace.page,
-                    14,
-                    SgSpace.page,
-                    196,
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (widget.showClearTheWay) ...[
-                        SgAlertBanner(
-                          message: context.tr('home.clear_the_way'),
-                          icon: 'siren',
-                          onDismiss: widget.onDismissClearTheWay,
-                        ),
-                        const SizedBox(height: 16),
-                      ],
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Flexible(
-                            child: Text(
-                              context.tr('home.question'),
-                              style: SgType.cardHeading.copyWith(
-                                color: SgColors.heading,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          SgStatusChip(
-                            context.tr('home.step1'),
-                            tone: SgChipTone.neutral,
-                            dot: false,
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      GridView(
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        gridDelegate:
-                            const SliverGridDelegateWithFixedCrossAxisCount(
-                              crossAxisCount: 2,
-                              mainAxisSpacing: 12,
-                              crossAxisSpacing: 12,
-                              mainAxisExtent: 126,
-                            ),
-                        children: [
-                          for (final s in EmergencyService.values)
-                            SgServiceCard(
-                              key: Key('service_card_${s.name}'),
-                              icon: s.icon,
-                              label: context.tr(s.labelKey),
-                              selected: _selected == s,
-                              onTap: () => setState(() => _selected = s),
-                            ),
-                        ],
-                      ),
-                      _LocationStrip(
-                        onRequestPermission: () {
-                          context.read<LocationCubit>().requestPermission();
-                        },
-                        onOpenSettings: () {
-                          context.read<LocationCubit>().openLocationSettings();
-                        },
-                      ),
-                    ],
+                LayoutBuilder(
+                  builder: (context, constraints) => _ServiceArea(
+                    available: constraints.maxHeight,
+                    showClearTheWay: widget.showClearTheWay,
+                    onDismissClearTheWay: widget.onDismissClearTheWay,
+                    selected: _selected,
+                    onSelect: (s) => setState(() => _selected = s),
                   ),
                 ),
                 Positioned(
@@ -184,6 +122,168 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// The area below the hero: service question + 2×2 service grid + (conditional)
+/// location action card. Sizes the grid to the space the device actually gives
+/// it so the whole Home screen fits one viewport with no scroll on the demo
+/// phone. Only extreme text scale / very short viewports fall back to a scroll.
+class _ServiceArea extends StatelessWidget {
+  const _ServiceArea({
+    required this.available,
+    required this.showClearTheWay,
+    required this.onDismissClearTheWay,
+    required this.selected,
+    required this.onSelect,
+  });
+
+  final double available;
+  final bool showClearTheWay;
+  final VoidCallback? onDismissClearTheWay;
+  final EmergencyService selected;
+  final ValueChanged<EmergencyService> onSelect;
+
+  // Reserved at the bottom for the floating Request CTA (button 60 + 14 inset +
+  // 16 breathing room above it).
+  static const double _ctaReserve = 90;
+  static const double _topPad = 14;
+  static const double _headingBand = 40;
+  static const double _headingGap = 12;
+
+  @override
+  Widget build(BuildContext context) {
+    final readiness = context.watch<LocationCubit>().state;
+    final needsLocationAction =
+        readiness == LocationReadiness.servicesOff ||
+        readiness == LocationReadiness.permissionBlocked ||
+        readiness == LocationReadiness.permissionRequired;
+
+    final bottomReserve = _ctaReserve + (needsLocationAction ? 92.0 : 0.0);
+    final gridArea =
+        available - _topPad - _headingBand - _headingGap - bottomReserve;
+    final cellExtent = ((gridArea - 12) / 2).clamp(102.0, 132.0);
+    // Enough room for two rows of usable cards + gap? Otherwise let it scroll.
+    final fitsWithoutScroll = !showClearTheWay && gridArea >= 216;
+
+    final heading = Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Flexible(
+          child: Text(
+            context.tr('home.question'),
+            style: SgType.cardHeading.copyWith(
+              color: SgColors.heading,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        SgStatusChip(
+          context.tr('home.step1'),
+          tone: SgChipTone.neutral,
+          dot: false,
+        ),
+      ],
+    );
+
+    final grid = _ServiceGrid(
+      selected: selected,
+      onSelect: onSelect,
+      cellExtent: cellExtent,
+    );
+
+    final locationStrip = _LocationStrip(
+      onRequestPermission: () =>
+          context.read<LocationCubit>().requestPermission(),
+      onOpenSettings: () =>
+          context.read<LocationCubit>().openLocationSettings(),
+    );
+
+    if (fitsWithoutScroll) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(
+          SgSpace.page,
+          _topPad,
+          SgSpace.page,
+          0,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            heading,
+            const SizedBox(height: _headingGap),
+            grid,
+            locationStrip,
+            const Spacer(),
+          ],
+        ),
+      );
+    }
+
+    // Accessibility / very short viewport fallback — a real scroll is allowed
+    // here so nothing is ever clipped.
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(
+        SgSpace.page,
+        _topPad,
+        SgSpace.page,
+        180,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (showClearTheWay) ...[
+            SgAlertBanner(
+              message: context.tr('home.clear_the_way'),
+              icon: 'siren',
+              onDismiss: onDismissClearTheWay,
+            ),
+            const SizedBox(height: 16),
+          ],
+          heading,
+          const SizedBox(height: _headingGap),
+          _ServiceGrid(selected: selected, onSelect: onSelect, cellExtent: 120),
+          locationStrip,
+        ],
+      ),
+    );
+  }
+}
+
+class _ServiceGrid extends StatelessWidget {
+  const _ServiceGrid({
+    required this.selected,
+    required this.onSelect,
+    required this.cellExtent,
+  });
+
+  final EmergencyService selected;
+  final ValueChanged<EmergencyService> onSelect;
+  final double cellExtent;
+
+  @override
+  Widget build(BuildContext context) {
+    return GridView(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        mainAxisSpacing: 12,
+        crossAxisSpacing: 12,
+        mainAxisExtent: cellExtent,
+      ),
+      children: [
+        for (final s in EmergencyService.values)
+          SgServiceCard(
+            key: Key('service_card_${s.name}'),
+            icon: s.icon,
+            label: context.tr(s.labelKey),
+            selected: selected == s,
+            onTap: () => onSelect(s),
+          ),
+      ],
     );
   }
 }

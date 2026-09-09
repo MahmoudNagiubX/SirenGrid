@@ -126,6 +126,40 @@ class AuthCubit extends Cubit<AuthState> {
     }
   }
 
+  /// Create a new synthetic-identity account, then behave exactly like a fresh
+  /// login: persist the bearer, load the profile, emit [Authenticated]. Extends
+  /// the existing auth — it never bypasses [_loadProfile] or the session store.
+  Future<void> register(Map<String, dynamic> body) async {
+    emit(const AuthInProgress());
+    try {
+      final res = await _api.post('/auth/register', body: body);
+      if (res.statusCode == 201 || res.statusCode == 200) {
+        final data = jsonDecode(res.body) as Map<String, dynamic>;
+        final token = data['access_token'];
+        if (token is! String || token.isEmpty) {
+          emit(
+            const AuthFailure(
+              'Contract mismatch: register response has no access_token.',
+              loginFailure: true,
+            ),
+          );
+          return;
+        }
+        await SecureStore.saveAccessToken(token);
+        _api.setAccessToken(token);
+        await _loadProfile(isRestore: false);
+      } else if (res.statusCode == 409) {
+        emit(const AuthFailure('register.err_duplicate', loginFailure: true));
+      } else if (res.statusCode == 422) {
+        emit(const AuthFailure('register.err_validation', loginFailure: true));
+      } else {
+        emit(const AuthFailure('login.err_server', loginFailure: true));
+      }
+    } catch (_) {
+      emit(const AuthFailure('login.err_network', loginFailure: true));
+    }
+  }
+
   Future<void> _loadProfile({required bool isRestore}) async {
     try {
       final res = await _api.get('/me');

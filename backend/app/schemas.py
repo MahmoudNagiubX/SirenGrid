@@ -1,11 +1,18 @@
 from __future__ import annotations
 
 import math
+import re
 from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 __all__ = [
     "DataReality",
@@ -71,6 +78,7 @@ __all__ = [
     "MobileLoginRequest",
     "MobileCitizenProfileRead",
     "MobileLoginResponse",
+    "MobileRegisterRequest",
     "MobileLocation",
     "MobileEmergencyRequestCreate",
     "MobileEmergencyRequestCreated",
@@ -1565,6 +1573,74 @@ class MobileLoginResponse(BaseModel):
     token_type: str = "bearer"
     expires_at: datetime
     profile: MobileCitizenProfileRead
+
+
+class MobileRegisterRequest(BaseModel):
+    """Citizen self-registration on top of the existing phone + PIN auth.
+
+    Identity here is SYNTHETIC / DEMO. The full ``national_id`` is validated for
+    shape, used once to derive a last-4 + one-way fingerprint, and then
+    discarded — it is never stored, logged, or returned. ``registered_*`` is
+    account context only and never an emergency dispatch location.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    display_name: str = Field(min_length=1, max_length=120)
+    phone: str = Field(min_length=6, max_length=32)
+    national_id: str = Field(min_length=14, max_length=32)
+    pin: str = Field(min_length=4, max_length=8)
+    pin_confirm: str = Field(min_length=4, max_length=8)
+    registered_address_text: str = Field(min_length=3, max_length=240)
+    registered_latitude: float | None = Field(default=None, ge=-90.0, le=90.0)
+    registered_longitude: float | None = Field(
+        default=None, ge=-180.0, le=180.0
+    )
+
+    @field_validator("display_name", "registered_address_text")
+    @classmethod
+    def _trimmed_nonblank(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("must not be blank")
+        return cleaned
+
+    @field_validator("phone")
+    @classmethod
+    def _valid_eg_mobile(cls, value: str) -> str:
+        cleaned = re.sub(r"[\s\-()]", "", value.strip())
+        if not re.fullmatch(r"01\d{9}", cleaned):
+            raise ValueError(
+                "phone must be an Egyptian mobile number (01 + 9 digits)"
+            )
+        return cleaned
+
+    @field_validator("national_id")
+    @classmethod
+    def _valid_synthetic_national_id(cls, value: str) -> str:
+        digits = re.sub(r"\D", "", value)
+        if not re.fullmatch(r"\d{14}", digits):
+            raise ValueError("national_id must be 14 digits")
+        return digits
+
+    @field_validator("pin", "pin_confirm")
+    @classmethod
+    def _numeric_pin(cls, value: str) -> str:
+        if not re.fullmatch(r"\d{4,8}", value):
+            raise ValueError("pin must be 4–8 digits")
+        return value
+
+    @model_validator(mode="after")
+    def _pins_match_and_coords_paired(self) -> "MobileRegisterRequest":
+        if self.pin != self.pin_confirm:
+            raise ValueError("pin and pin_confirm do not match")
+        lat, lon = self.registered_latitude, self.registered_longitude
+        if (lat is None) != (lon is None):
+            raise ValueError(
+                "registered_latitude and registered_longitude must be "
+                "provided together"
+            )
+        return self
 
 
 class MobileLocation(BaseModel):

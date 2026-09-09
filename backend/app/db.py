@@ -54,6 +54,38 @@ def init_db(target_engine: Engine | None = None) -> None:
     if target.dialect.name == "sqlite":
         _ensure_sqlite_phase07_columns(target)
         _ensure_sqlite_nullable_incident_location(target)
+        _ensure_sqlite_citizen_registration_columns(target)
+
+
+def _ensure_sqlite_citizen_registration_columns(target: Engine) -> None:
+    """Add the additive citizen-registration columns to an existing local DB.
+
+    ``registered_latitude`` / ``registered_longitude`` hold the account's saved
+    location (never an emergency location); ``national_id_fingerprint`` backs
+    synthetic-ID duplicate detection. All are nullable, so existing rows and the
+    seeded demo citizen are untouched.
+    """
+    inspector = inspect(target)
+    if "citizen_profiles" not in inspector.get_table_names():
+        return
+    existing = {
+        column["name"] for column in inspector.get_columns("citizen_profiles")
+    }
+    additions = {
+        "registered_latitude": "FLOAT",
+        "registered_longitude": "FLOAT",
+        "national_id_fingerprint": "VARCHAR(64)",
+    }
+    missing = {
+        name: ddl for name, ddl in additions.items() if name not in existing
+    }
+    if not missing:
+        return
+    with target.begin() as connection:
+        for name, ddl in missing.items():
+            connection.execute(
+                text(f"ALTER TABLE citizen_profiles ADD COLUMN {name} {ddl}")
+            )
 
 
 def _ensure_sqlite_nullable_incident_location(target: Engine) -> None:

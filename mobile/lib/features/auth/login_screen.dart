@@ -8,6 +8,7 @@ import '../../design/sg_icon.dart';
 import '../../design/tokens.dart';
 import '../../l10n/strings.dart';
 import 'auth_cubit.dart';
+import 'register_screen.dart';
 
 /// Screen 0 — Login (brief §15). Phone + PIN only. No registration / OTP /
 /// social / National ID / forgot-password. Renders loading, invalid-credentials
@@ -130,7 +131,9 @@ class _LoginScreenState extends State<LoginScreen> {
                             loading: busy,
                             onPressed: busy ? null : _submit,
                           ),
-                          const SizedBox(height: 14),
+                          const SizedBox(height: 12),
+                          _CreateAccountLink(enabled: !busy),
+                          const SizedBox(height: 12),
                           Text(
                             context.tr('login.demo_note'),
                             textAlign: TextAlign.center,
@@ -154,6 +157,43 @@ class _LoginScreenState extends State<LoginScreen> {
 
   static String _resolve(BuildContext context, String key) =>
       key.contains('.') ? context.tr(key) : key;
+}
+
+class _CreateAccountLink extends StatelessWidget {
+  const _CreateAccountLink({required this.enabled});
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: GestureDetector(
+        onTap: enabled
+            ? () => Navigator.of(context).push(
+                MaterialPageRoute<void>(builder: (_) => const RegisterScreen()),
+              )
+            : null,
+        behavior: HitTestBehavior.opaque,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Text.rich(
+            TextSpan(
+              text: '${context.tr('login.no_account')} ',
+              style: SgType.caption.copyWith(color: SgColors.textMuted),
+              children: [
+                TextSpan(
+                  text: context.tr('login.create_account'),
+                  style: SgType.caption.copyWith(
+                    color: SgColors.infoStrong,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _ErrorBanner extends StatelessWidget {

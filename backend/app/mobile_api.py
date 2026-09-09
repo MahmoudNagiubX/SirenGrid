@@ -34,8 +34,13 @@ from app.incidents import serialize_incident
 from app.mobile_auth import (
     CitizenAuthContext,
     authenticate_citizen,
+    generate_pin_salt,
+    hash_pin,
     issue_session,
     mask_national_id,
+    national_id_fingerprint,
+    national_id_last4,
+    normalize_phone,
     verify_pin,
 )
 from app.models import (
@@ -66,6 +71,7 @@ from app.schemas import (
     MobileEmergencyTrackingRead,
     MobileLoginRequest,
     MobileLoginResponse,
+    MobileRegisterRequest,
     MobileResponderRead,
     MobileService,
     MobileTrackingRouteRead,
@@ -266,6 +272,85 @@ def mobile_login(
 
     raw_token, session = issue_session(db, citizen)
     expires_at = session.expires_at  # tz-aware in memory; keep before commit
+    db.commit()
+
+    return MobileLoginResponse(
+        access_token=raw_token,
+        token_type="bearer",
+        expires_at=expires_at,
+        profile=_profile_payload(citizen),
+    )
+
+
+@router.post(
+    "/auth/register",
+    status_code=status.HTTP_201_CREATED,
+    response_model=MobileLoginResponse,
+)
+def mobile_register(
+    payload: MobileRegisterRequest,
+    db: Annotated[Session, Depends(get_db)],
+) -> MobileLoginResponse:
+    """Create a synthetic-identity citizen account and issue a session.
+
+    Extends — never replaces — the existing phone + PIN auth: the PIN is hashed
+    with the same helpers, and ``issue_session`` mints the same opaque bearer.
+    The full National ID is reduced to last-4 + a one-way fingerprint and then
+    dropped; ``registered_*`` is stored as account context only.
+    """
+    phone = normalize_phone(payload.phone)
+    if db.scalars(
+        select(CitizenProfile).where(CitizenProfile.phone == phone)
+    ).first():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An account with this phone number already exists.",
+        )
+
+    fingerprint = national_id_fingerprint(payload.national_id)
+    if db.scalars(
+        select(CitizenProfile).where(
+            CitizenProfile.national_id_fingerprint == fingerprint
+        )
+    ).first():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This identity is already registered.",
+        )
+
+    salt = generate_pin_salt()
+    now = _utcnow()
+    citizen = CitizenProfile(
+        citizen_reference=f"citizen-{uuid.uuid4().hex[:12]}",
+        display_name=payload.display_name,
+        phone=phone,
+        registered_address_text=payload.registered_address_text,
+        registered_latitude=payload.registered_latitude,
+        registered_longitude=payload.registered_longitude,
+        national_id_last4=national_id_last4(payload.national_id),
+        national_id_fingerprint=fingerprint,
+        identity_status="DEMO_VERIFIED",
+        identity_provider="SYNTHETIC_DEMO_IDENTITY",
+        identity_verified_at=now,
+        pin_hash=hash_pin(payload.pin, salt),
+        pin_salt=salt,
+        is_active=True,
+        data_reality=DataReality.SYNTHETIC,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(citizen)
+    try:
+        db.flush()
+    except IntegrityError as exc:  # race: unique phone / fingerprint
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An account with these details already exists.",
+        ) from exc
+
+    raw_token, session = issue_session(db, citizen)
+    expires_at = session.expires_at
     db.commit()
 
     return MobileLoginResponse(

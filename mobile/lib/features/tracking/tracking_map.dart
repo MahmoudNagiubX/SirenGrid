@@ -337,7 +337,9 @@ class TrackingMapState extends State<TrackingMap>
                 point: s.emergencyLocation!,
                 width: SgMapPin.size.width,
                 height: SgMapPin.size.height,
-                alignment: Alignment.bottomCenter,
+                // Dot is drawn at the child's centre -> anchor at centre so it
+                // stays welded to this LatLng through every zoom/pan/recenter.
+                alignment: Alignment.center,
                 child: const SgMapPin(label: 'You are here'),
               ),
             if (_displayedResponder != null)
