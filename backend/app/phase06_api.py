@@ -107,6 +107,28 @@ def _incident_claims(db: Session, incident_id: str) -> list[EvidenceClaim]:
     return claims
 
 
+def _latest_transcript_text(report: Report, transcript_type: str) -> str | None:
+    candidates: list[tuple[str, int, str]] = []
+    for index, item in enumerate(report.evidence_items_json or []):
+        if item.get("type") != transcript_type:
+            continue
+        extracted_facts = item.get("extracted_facts")
+        transcript = extracted_facts.get("transcript") if isinstance(extracted_facts, dict) else None
+        if not isinstance(transcript, str) or not transcript.strip():
+            continue
+        candidates.append((str(item.get("created_at") or ""), index, transcript))
+    return max(candidates, key=lambda candidate: (candidate[0], candidate[1]))[2] if candidates else None
+
+
+def _structured_processing_text(report: Report) -> str:
+    """Select truthful textual evidence without mutating the source report."""
+    return (
+        _latest_transcript_text(report, "MANUAL_TRANSCRIPT")
+        or _latest_transcript_text(report, "ASR_TRANSCRIPT")
+        or (report.raw_text if report.raw_text and report.raw_text.strip() else "")
+    )
+
+
 def _utc(value: datetime) -> datetime:
     return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
 
@@ -317,7 +339,7 @@ def process_report(
         report.id,
     )
     result = process_structured_extraction(
-        report.raw_text,
+        _structured_processing_text(report),
         evidence_id=evidence_id,
         report_id=report.id,
     )
