@@ -1,3 +1,7 @@
+// A public `accessToken` named parameter deliberately initialises the private
+// `_accessToken` field (kept private so it is only mutated via setAccessToken),
+// while staying easy to seed from tests.
+// ignore_for_file: prefer_initializing_formals
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
@@ -15,8 +19,9 @@ import 'config.dart';
 ///
 /// It does NOT know about auth flows, retries or business logic.
 class ApiClient {
-  ApiClient({http.Client? client, this._accessToken})
-    : _client = client ?? http.Client();
+  ApiClient({http.Client? client, String? accessToken})
+    : _client = client ?? http.Client(),
+      _accessToken = accessToken;
 
   final http.Client _client;
   String? _accessToken;
