@@ -157,7 +157,7 @@ function incidentIcon(type: string): string {
   const lower = type.toLowerCase();
   if (lower.includes('fire')) return 'flame';
   if (lower.includes('medical') || lower.includes('ambulance')) return 'heart-pulse';
-  return 'alert-triangle';
+  return 'triangle-alert';
 }
 
 function formatIncidentTime(ts: string | null): string {

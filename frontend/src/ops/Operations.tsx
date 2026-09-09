@@ -10,6 +10,18 @@ import {
   type OverlayKey,
 } from '../data/mock';
 
+/**
+ * P08-PRE-001: only the `coverage` map control is bound to a canonical production
+ * layer (zones). Traffic / Corridor / Closures stay visible but disabled + OFF
+ * with a truthful reason; they never activate legacy DenseMap SVG graphics.
+ */
+const MAP_CONTROL_NOT_BOUND = 'Not connected to a canonical map layer in this build';
+const MAP_CONTROL_DISABLED: Partial<Record<OverlayKey, string>> = {
+  traffic: MAP_CONTROL_NOT_BOUND,
+  corridor: MAP_CONTROL_NOT_BOUND,
+  closure: MAP_CONTROL_NOT_BOUND,
+};
+
 import { useOperations } from '../state/OperationsContext';
 import { RealMapCanvas } from '../map/RealMapCanvas';
 import type { RealMapMarker, RealMapOverlayState } from '../map/mapTypes';
@@ -132,10 +144,12 @@ export function Operations({ initialState = 'idle' }: { initialState?: OpsState 
     () => deriveRealtimeNotice({ state: realtimeState, recoveryReason: realtimeRecoveryReason }),
     [realtimeState, realtimeRecoveryReason],
   );
-  // §16: explicit REST reconciliation only — never touches the socket, never writes.
-  const handleRefreshData = useCallback(() => {
-    void refreshGlobal({ includeSelected: false });
-    if (selectedIncidentId) void refreshSelectedIncident(selectedIncidentId);
+  // §16 / P08-PRE-004: explicit REST reconciliation only — never touches the
+  // socket, never writes. Deterministic order: global reads first (they can
+  // resolve which incident is selected), then the selected incident's domains.
+  const handleRefreshData = useCallback(async () => {
+    await refreshGlobal({ includeSelected: false });
+    if (selectedIncidentId) await refreshSelectedIncident(selectedIncidentId);
   }, [refreshGlobal, refreshSelectedIncident, selectedIncidentId]);
   const realtimeRetry =
     realtimeNotice && (realtimeNotice.kind === 'DISCONNECTED' || realtimeNotice.kind === 'RECONNECTING')
@@ -225,7 +239,7 @@ export function Operations({ initialState = 'idle' }: { initialState?: OpsState 
               )}
             </div>
           ) : null}
-          <MapControls overlays={overlays} setOverlay={setOverlay} />
+          <MapControls overlays={overlays} setOverlay={setOverlay} disabledKeys={MAP_CONTROL_DISABLED} />
           <MapLegend items={LEGEND[state] ?? LEGEND.default} />
           <MapScale />
         </div>

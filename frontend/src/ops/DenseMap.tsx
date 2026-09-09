@@ -264,9 +264,12 @@ export function MapMarker({ icon, label, sub, tone = 'blue', left, top }: { icon
 export function MapControls({
   overlays,
   setOverlay,
+  disabledKeys,
 }: {
   overlays: Partial<Record<OverlayKey, boolean>>;
   setOverlay: (k: OverlayKey, v: boolean) => void;
+  /** Overlay keys not bound to a canonical production layer in this build, with a reason. */
+  disabledKeys?: Partial<Record<OverlayKey, string>>;
 }) {
   const rows: [OverlayKey, string, string][] = [
     ['traffic', 'Traffic', 'gauge'],
@@ -277,13 +280,17 @@ export function MapControls({
   return (
     <GlassPanel padding={6} style={{ position: 'absolute', top: 16, right: 16, display: 'flex', flexDirection: 'column', gap: 4 }}>
       {rows.map(([k, l, i]) => {
-        const on = !!overlays[k];
+        const reason = disabledKeys?.[k];
+        const disabled = reason !== undefined;
+        // A control with no canonical layer is always OFF and cannot be toggled.
+        const on = disabled ? false : !!overlays[k];
         return (
           <button
             key={k}
-            onClick={() => setOverlay(k, !on)}
+            onClick={disabled ? undefined : () => setOverlay(k, !on)}
+            disabled={disabled}
             aria-pressed={on}
-            title={l}
+            title={reason ?? l}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -292,7 +299,8 @@ export function MapControls({
               border: 'none',
               background: on ? 'var(--color-accent-soft)' : 'transparent',
               borderRadius: 'var(--radius-md)',
-              cursor: 'pointer',
+              cursor: disabled ? 'not-allowed' : 'pointer',
+              opacity: disabled ? 0.45 : 1,
               fontFamily: 'var(--font-en)',
               fontSize: 13,
               fontWeight: 600,
