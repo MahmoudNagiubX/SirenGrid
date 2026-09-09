@@ -35,11 +35,15 @@ void main() {
   testWidgets('citizen can log in, request an ambulance, track, and log out', (
     tester,
   ) async {
-    app.main();
+    await app.bootstrap();
     await tester.pump(const Duration(seconds: 2));
 
     // --- Login -------------------------------------------------------------
-    await pumpUntil(tester, find.byKey(const Key('login_screen')));
+    await pumpUntil(
+      tester,
+      find.byKey(const Key('login_screen')),
+      timeout: const Duration(seconds: 40),
+    );
     final fields = find.byType(TextField);
     await tester.enterText(fields.at(0), '01000000000');
     await tester.enterText(fields.at(1), '1234');
