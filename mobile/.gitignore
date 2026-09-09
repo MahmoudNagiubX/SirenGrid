@@ -1,0 +1,71 @@
+# Flutter / Dart
+.dart_tool/
+.packages
+.pub/
+.pub-cache/
+.flutter-plugins
+.flutter-plugins-dependencies
+build/
+coverage/
+
+# Generated documentation
+doc/api/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs / temp
+*.log
+*.tmp
+*.temp
+
+# Android generated / signing
+android/.gradle/
+android/local.properties
+android/key.properties
+android/app/debug/
+android/app/profile/
+android/app/release/
+*.jks
+*.keystore
+
+# iOS generated
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/ephemeral/
+ios/Flutter/.last_build_id
+ios/Runner.xcworkspace/xcuserdata/
+ios/Runner.xcodeproj/xcuserdata/
+
+# macOS
+macos/Pods/
+macos/Flutter/ephemeral/
+
+# Windows generated
+windows/flutter/ephemeral/
+
+# Linux generated
+linux/flutter/ephemeral/
+
+# Web generated
+web/.dart_tool/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Firebase client configuration
+# Keep ignored until Firebase setup is intentionally finalized.
+android/app/google-services.json
+ios/Runner/GoogleService-Info.plist
+
+# Symbolication / obfuscation
+app.*.symbols
+app.*.map.json
