@@ -40,6 +40,8 @@ from app.schemas import (
     IncidentStatus,
     ManualIncidentCreate,
     ReportRead,
+    ResourceRequirement,
+    ResourceType,
 )
 from app.websocket import publish_operations_event
 
@@ -54,6 +56,7 @@ class ClaimResolutionRequest(BaseModel):
     field_name: str = Field(min_length=1, max_length=80)
     value: Any
     selected_evidence_id: str | None = None
+    required_resources: list[ResourceRequirement] | None = Field(default=None, min_length=1)
 
 
 class ReportAssociationRequest(BaseModel):
@@ -95,6 +98,28 @@ class ReportIncidentActivationRequest(ManualIncidentCreate):
     model_config = ConfigDict(extra="forbid")
     confidence_level: ConfidenceLevel
     operator_reference: str = Field(min_length=1)
+
+
+_CANONICAL_SERVICE_RESOURCE_TYPES: dict[str, ResourceType] = {
+    "ambulance": ResourceType.AMBULANCE,
+    "fire rescue": ResourceType.FIRE_RESCUE,
+}
+
+
+def _validated_required_service_types(value: Any, requirements: list[ResourceRequirement] | None) -> None:
+    if not isinstance(value, list) or not value or any(not isinstance(item, str) for item in value):
+        raise HTTPException(status_code=422, detail="required_services claim must contain service names")
+    if requirements is None:
+        raise HTTPException(status_code=422, detail="explicit required_resources are required to resolve required_services")
+    mapped: set[ResourceType] = set()
+    for service in value:
+        normalized = " ".join(service.strip().casefold().replace("_", " ").replace("-", " ").split())
+        resource_type = _CANONICAL_SERVICE_RESOURCE_TYPES.get(normalized)
+        if resource_type is None:
+            raise HTTPException(status_code=422, detail=f"required service '{service}' is unsupported or ambiguous")
+        mapped.add(resource_type)
+    if not mapped.issubset({requirement.resource_type for requirement in requirements}):
+        raise HTTPException(status_code=422, detail="explicit required_resources must cover every resolved service")
 
 
 def _report_claims(report: Report) -> list[EvidenceClaim]:
@@ -858,7 +883,8 @@ def resolve_incident_claim(
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     _acquire_write_lock(db)
-    if payload.field_name not in FACT_FIELD_NAMES:
+    is_required_services = payload.field_name == "required_services"
+    if payload.field_name not in FACT_FIELD_NAMES and not is_required_services:
         raise HTTPException(status_code=422, detail="field is not an approved incident fact")
     claims = [
         claim
@@ -871,12 +897,25 @@ def resolve_incident_claim(
     ):
         raise HTTPException(status_code=409, detail="selected evidence claim does not match the value")
 
+    if is_required_services:
+        if not payload.selected_evidence_id:
+            raise HTTPException(status_code=422, detail="selected_evidence_id is required when resolving required_services")
+        selected_claim = next((claim for claim in claims if claim.evidence_id == payload.selected_evidence_id and claim.value == payload.value), None)
+        if selected_claim is None or selected_claim.fact_state.value != "ASSERTED":
+            raise HTTPException(status_code=422, detail="required_services must be resolved from an asserted selected claim")
+        _validated_required_service_types(payload.value, payload.required_resources)
+    elif payload.required_resources is not None:
+        raise HTTPException(status_code=422, detail="required_resources is only valid for required_services resolution")
+
     try:
         patch_payload = IncidentFactsPatchRequest.model_validate(
             {
                 "expected_incident_version": payload.expected_incident_version,
                 "operator_reference": payload.operator_reference,
-                payload.field_name: payload.value,
+                "required_resources" if is_required_services else payload.field_name: (
+                    [requirement.model_dump(mode="json") for requirement in payload.required_resources or []]
+                    if is_required_services else payload.value
+                ),
             }
         )
     except ValidationError as exc:
@@ -906,6 +945,7 @@ def resolve_incident_claim(
             "operator_reference": payload.operator_reference,
             "incident_version": incident.version,
             "timestamp": now_utc.isoformat(),
+            **({"confirmed_required_resources": [requirement.model_dump(mode="json") for requirement in payload.required_resources or []]} if is_required_services else {}),
         },
         created_at=now_utc,
     )
