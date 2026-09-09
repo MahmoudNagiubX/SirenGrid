@@ -111,6 +111,7 @@ export class OperationsSocketClient {
 
   private isStopped: boolean = false;
   private isReconnecting: boolean = false;
+  private hasOpenedOnce: boolean = false;
   private reconnectAttempt: number = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -228,13 +229,18 @@ export class OperationsSocketClient {
 
   private handleOpen(): void {
     const wasReconnecting = this.isReconnecting;
+    // A RECONNECTED notice is only truthful when a session had previously
+    // reached OPEN and then dropped. Failed initial connection attempts before
+    // the first-ever OPEN must not be reported as a reconnection.
+    const hadEstablishedSession = this.hasOpenedOnce;
     this.isReconnecting = false;
     this.reconnectAttempt = 0;
     this.clearReconnectTimer();
+    this.hasOpenedOnce = true;
 
     this.setState('OPEN');
 
-    if (wasReconnecting) {
+    if (wasReconnecting && hadEstablishedSession) {
       this.emitRecovery({
         reason: 'RECONNECTED',
         previousVersion: this.currentLastVersion,
