@@ -1,57 +1,55 @@
 import { useState } from 'react';
+import { Alert, Badge } from '../components';
+import { useOperationsData } from '../state/OperationsContext';
+import { DenseMap, MapControls, MapLegend, MapMarker, MapScale, projectCoordinate } from './DenseMap';
 import { DecisionWorkspace } from './DecisionWorkspace';
-import { DenseMap, FacilityPin, MapControls, MapLegend, MapMarker, MapScale } from './DenseMap';
 import { IncidentRail, TimelineDock } from './workspace';
-import {
-  FACILITIES,
-  LEGEND,
-  MARKERS,
-  STATE_META,
-  type DecisionTab,
-  type OpsState,
-  type OverlayKey,
-} from '../data/mock';
+import { LEGEND, STATE_META, type DecisionTab, type OpsState, type OverlayKey } from '../data/mock';
 
-/**
- * Ported from the `Operations` component in ui_kits/operations_center/index.html.
- *
- * One integrated workspace: incident rail + dense map hero + history dock + decision workspace.
- * Each operational state drives the map view, overlays, route rendering, markers, legend and the
- * default decision tab together.
- */
+function routeGeometry(plan: { routes: Record<string, unknown>[] } | null): Record<string, unknown> | null {
+  const route = plan?.routes.find((item) => item.geometry || item.route_geometry);
+  if (!route) return null;
+  return (route.geometry || route.route_geometry) as Record<string, unknown>;
+}
+
 export function Operations({ initialState = 'idle' }: { initialState?: OpsState }) {
+  const data = useOperationsData();
   const [state, setStateRaw] = useState<OpsState>(STATE_META[initialState] ? initialState : 'idle');
   const [tab, setTab] = useState<DecisionTab>(STATE_META[STATE_META[initialState] ? initialState : 'idle'].tab);
-  const [selected, setSelected] = useState('INC-2418');
   const [dock, setDock] = useState(false);
   const [userOverlays, setUserOverlays] = useState<Partial<Record<OverlayKey, boolean>>>({});
-
-  const setState = (s: OpsState) => {
-    setStateRaw(s);
-    setTab(STATE_META[s].tab);
-    setUserOverlays({});
-  };
-
-  const meta = STATE_META[state];
-  const overlays = { ...meta.map.overlays, ...userOverlays };
-  const setOverlay = (k: OverlayKey, v: boolean) => setUserOverlays((o) => ({ ...o, [k]: v }));
+  const incident = data.selectedIncident.data;
+  const plans = data.plans.data ?? [];
+  const activePlan = incident?.current_plan_id ? plans.find((plan) => plan.id === incident.current_plan_id) ?? null : null;
+  const route = routeGeometry(activePlan);
+  const overlays = { ...STATE_META[state].map.overlays, ...userOverlays };
+  const setState = (next: OpsState) => { setStateRaw(next); setTab(STATE_META[next].tab); setUserOverlays({}); };
+  const markerIncident = incident?.location ? projectCoordinate(incident.location) : null;
+  const markerResources = (data.resources.data ?? []).filter((resource) => resource.assigned_incident_id === incident?.id || state === 'idle').slice(0, 8);
+  const markerHospitals = data.operationalState.data?.hospital_options?.options.slice(0, 4) ?? [];
 
   return (
     <div style={{ flex: 1, display: 'flex', gap: 14, padding: 16, minHeight: 0 }}>
-      <IncidentRail selected={selected} setSelected={setSelected} state={state} setState={setState} />
+      <IncidentRail selected={data.selectedIncidentId ?? ''} setSelected={data.setSelectedIncidentId} state={state} setState={setState} />
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
+        {data.incidents.error && <Alert tone="attention" title="Backend unavailable">{data.incidents.error}</Alert>}
+        {data.actionError && <Alert tone="attention" title="Action not completed">{data.actionError}</Alert>}
         <div style={{ flex: 1, position: 'relative', borderRadius: 'var(--radius-lg)', overflow: 'hidden', border: '1px solid var(--color-border-hairline)', minHeight: 0 }}>
-          <DenseMap view={meta.map.view} overlays={overlays} route={meta.map.route}>
-            {(FACILITIES[meta.map.view] ?? []).map(([i, l, t, left, top], k) => (
-              <FacilityPin key={'f' + k} icon={i} label={l} tone={t} left={left} top={top} />
-            ))}
-            {(MARKERS[state] ?? []).map(([i, l, s, t, left, top], k) => (
-              <MapMarker key={k} icon={i} label={l} sub={s} tone={t} left={left} top={top} />
-            ))}
-            <MapControls overlays={overlays} setOverlay={setOverlay} />
+          <DenseMap view={STATE_META[state].map.view} overlays={overlays} route={STATE_META[state].map.route} backendMode routeGeometry={route}>
+            {markerIncident && <MapMarker icon="triangle-alert" label={incident?.id ?? 'Incident'} sub={incident?.location_text ?? 'Location unresolved'} tone="red" left={markerIncident.left} top={markerIncident.top} />}
+            {markerResources.map((resource) => {
+              const point = projectCoordinate({ lat: resource.latitude, lon: resource.longitude });
+              return <MapMarker key={resource.id} icon={resource.resource_type === 'FIRE_RESCUE' ? 'truck' : 'ambulance'} label={resource.id} sub={resource.status.replaceAll('_', ' ')} tone="blue" left={point.left} top={point.top} />;
+            })}
+            {markerHospitals.map((option) => {
+              const point = projectCoordinate({ lat: option.hospital.latitude, lon: option.hospital.longitude });
+              return <MapMarker key={option.hospital.id} icon="hospital" label={option.hospital.name ?? option.hospital.id} sub={`Rank ${option.rank}`} tone="navy" left={point.left} top={point.top} />;
+            })}
+            <MapControls overlays={overlays} setOverlay={(key, value) => setUserOverlays((current) => ({ ...current, [key]: value }))} />
             <MapLegend items={LEGEND[state] ?? LEGEND.default} />
             <MapScale />
           </DenseMap>
+          {!incident?.location && <div style={{ position: 'absolute', left: 18, bottom: 18 }}><Badge tone="neutral">Location unresolved · backend truth</Badge></div>}
         </div>
         <TimelineDock open={dock} setOpen={setDock} />
       </div>

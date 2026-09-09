@@ -1,181 +1,39 @@
 import { useState } from 'react';
-import { Alert, Badge, Button, Card, GlassPanel, IconTile } from '../components';
+import { Alert, Badge, Button, Card, GlassPanel } from '../components';
 import { Ico } from '../lib/icon';
+import { useOperationsData } from '../state/OperationsContext';
 import { PanelHeader, Screen, SubHead } from './primitives';
-import {
-  BENCHMARK_METRICS,
-  BENCHMARK_METRICS_PLANNED,
-  DEMO_DATA_REALITY,
-  DEMO_INJECTS,
-  DEMO_SCENARIOS,
-} from '../data/mock';
 
-/** Ported from ui_kits/operations_center/screens-support.jsx. */
+const DEMO_SCENARIOS = [
+  ['T01_urgent_activation', 'Urgent activation / canonical planning'],
+  ['X07_valid_closure', 'Validated closure / material replan'],
+  ['X19_two_incidents_available', 'Two incidents / committed resources'],
+];
 
-function ScenarioRow({
-  icon,
-  title,
-  sub,
-  action,
-  tone = 'slate',
-  onFire,
-  fired,
-}: {
-  icon: string;
-  title: string;
-  sub: string;
-  action: string;
-  tone?: 'red' | 'navy' | 'blue' | 'slate';
-  onFire: () => void;
-  fired?: boolean;
-}) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', borderRadius: 'var(--radius-md)', background: 'var(--color-bg-surface)', border: '1px solid var(--color-border-hairline)' }}>
-      <IconTile icon={<Ico n={icon} />} tint={tone} size={34} />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13, fontWeight: 600 }}>{title}</div>
-        <div style={{ fontSize: 12.5, color: 'var(--color-text-secondary)' }}>{sub}</div>
-      </div>
-      {fired ? (
-        <Badge tone="confirmed">Injected</Badge>
-      ) : (
-        <Button variant="secondary" size="sm" onClick={onFire}>
-          {action}
-        </Button>
-      )}
-    </div>
-  );
+function scalar(value: unknown): string {
+  if (value === null || value === undefined) return '—';
+  if (typeof value === 'object') return 'See backend artifact';
+  return String(value);
+}
+
+function SocialPanel() {
+  const { socialSignals, selectedIncident, actionBusy, runSocialRefresh, runSocialDismiss, runSocialAssociate } = useOperationsData();
+  const signals = socialSignals.data ?? [];
+  return <GlassPanel padding={14}><PanelHeader icon="radio" title="Social intelligence" right={<Badge tone="neutral">UNVERIFIED</Badge>} /><div style={{ display: 'flex', gap: 8, marginBottom: 10 }}><Button size="sm" variant="secondary" onClick={() => void runSocialRefresh('synthetic')} disabled={actionBusy !== null}>Refresh demo feed</Button><Button size="sm" variant="ghost" onClick={() => void runSocialRefresh('bluesky')} disabled={actionBusy !== null}>Refresh Bluesky</Button></div>{socialSignals.error && <Alert tone="attention" title="Social provider unavailable">{socialSignals.error}</Alert>}{!signals.length && !socialSignals.loading && <div style={{ fontSize: 12.5, color: 'var(--color-text-muted)' }}>No public signals returned. Provider failure does not affect manual operations.</div>}{signals.slice(0, 6).map((signal) => <Card key={signal.id} padding={10} style={{ marginBottom: 8 }}><div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><span style={{ fontSize: 12.5, fontWeight: 600 }}>{signal.source_reference}</span><Badge tone="simulated">{signal.data_reality}</Badge></div><div style={{ fontSize: 12.5, marginTop: 4 }}>{signal.raw_text || 'No text retained'}</div><div style={{ fontSize: 11.5, color: 'var(--color-text-muted)', marginTop: 4 }}>{signal.association_outcome ?? signal.processing_status}</div><div style={{ display: 'flex', gap: 6, marginTop: 8 }}>{!signal.incident_id && <><Button size="sm" variant="secondary" onClick={() => void runSocialAssociate(signal.id)} disabled={actionBusy !== null || !selectedIncident.data}>Associate to selected incident</Button><Button size="sm" variant="ghost" onClick={() => void runSocialDismiss(signal.id)} disabled={actionBusy !== null}>Dismiss</Button></>}</div></Card>)}</GlassPanel>;
 }
 
 export function DemoScreen() {
-  const [fired, setFired] = useState<Record<string, boolean>>({});
-  const fire = (k: string) => setFired((f) => ({ ...f, [k]: true }));
-  return (
-    <Screen>
-      <Alert tone="simulated" title="Demo & simulation controls">
-        These controls exist only to drive the prototype demonstration. They inject simulated conditions into the operational model —
-        they never represent live city infrastructure.
-      </Alert>
-      <div style={{ flex: 1, display: 'flex', gap: 14, minHeight: 0 }}>
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 12, overflowY: 'auto', minWidth: 0 }}>
-          <SubHead>Scenarios</SubHead>
-          <div style={{ display: 'flex', gap: 12 }}>
-            {DEMO_SCENARIOS.map(([t, s, active]) => (
-              <Card key={t} padding={14} style={{ flex: 1, border: active ? '1.5px solid var(--color-accent)' : '1px solid var(--color-border-hairline)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-                  <span style={{ fontSize: 13, fontWeight: 600 }}>{t}</span>
-                  {active ? <Badge tone="confirmed">Loaded</Badge> : <Button variant="ghost" size="sm">Load</Button>}
-                </div>
-                <div style={{ fontSize: 12.5, color: 'var(--color-text-secondary)', marginTop: 4 }}>{s}</div>
-              </Card>
-            ))}
-          </div>
-          <SubHead>Inject conditions</SubHead>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {DEMO_INJECTS.map((row) => (
-              <ScenarioRow
-                key={row.key}
-                icon={row.icon}
-                tone={row.tone}
-                title={row.title}
-                sub={row.sub}
-                action={row.action}
-                fired={fired[row.key]}
-                onFire={() => fire(row.key)}
-              />
-            ))}
-          </div>
-        </div>
-        <div style={{ width: 340, display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <GlassPanel padding={14}>
-            <PanelHeader icon="sliders-horizontal" title="Simulation clock" />
-            <div style={{ fontSize: 30, fontWeight: 600, letterSpacing: '-0.01em' }}>21:07:42</div>
-            <div style={{ fontSize: 12.5, color: 'var(--color-text-secondary)', marginTop: 2 }}>Scenario elapsed 9 min 42 s</div>
-            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-              <Button variant="secondary" size="sm">Pause</Button>
-              <Button variant="secondary" size="sm">×2 speed</Button>
-            </div>
-          </GlassPanel>
-          <GlassPanel padding={14}>
-            <PanelHeader icon="database" title="Data reality" />
-            {DEMO_DATA_REALITY.map(([a, b]) => (
-              <div key={a} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--color-border-hairline)', fontSize: 12 }}>
-                <span style={{ color: 'var(--color-text-secondary)' }}>{a}</span>
-                <span style={{ fontWeight: 500 }}>{b}</span>
-              </div>
-            ))}
-          </GlassPanel>
-          <Button variant="critical" size="md">Reset demo state</Button>
-        </div>
-      </div>
-    </Screen>
-  );
+  const { simulation, actionBusy, runSimulationLoad, runSimulationReset, runSimulationEvent } = useOperationsData();
+  const [loadedScenario, setLoadedScenario] = useState<string | null>(null);
+  const enabled = simulation.data?.enabled === true;
+  return <Screen><Alert tone="simulated" title="Demo & simulation controls">These controls mutate backend simulation state only. They are disabled by default and never represent live city infrastructure.</Alert>{simulation.error && <Alert tone="attention" title="Simulation controls unavailable">{simulation.error}</Alert>}<div style={{ flex: 1, display: 'flex', gap: 14, minHeight: 0 }}><div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 12, overflowY: 'auto', minWidth: 0 }}><SubHead>Backend scenarios</SubHead>{DEMO_SCENARIOS.map(([id, label]) => <Card key={id} padding={14} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}><div><div style={{ fontSize: 13, fontWeight: 600 }}>{label}</div><div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>{id} · SYNTHETIC fixture</div></div><Button size="sm" variant="secondary" disabled={!enabled || actionBusy !== null} onClick={() => { setLoadedScenario(id); void runSimulationLoad(id); }}>{loadedScenario === id ? 'Loaded' : 'Load'}</Button></Card>)}<SubHead>Explicit event advancement</SubHead><Card padding={14}><div style={{ display: 'flex', alignItems: 'center', gap: 10 }}><Ico n="clock" /><div style={{ flex: 1, fontSize: 13 }}>No background scheduler. Advance the loaded manifest in order.</div><Button size="sm" variant="secondary" disabled={!enabled || actionBusy !== null || !simulation.data?.scenario_id} onClick={() => void runSimulationEvent()}>Next event</Button></div></Card></div><div style={{ width: 340, display: 'flex', flexDirection: 'column', gap: 12 }}><GlassPanel padding={14}><PanelHeader icon="sliders-horizontal" title="Simulation status" /><div style={{ fontSize: 14, fontWeight: 600 }}>{enabled ? 'Enabled for demo' : 'Disabled by backend configuration'}</div><div style={{ fontSize: 12.5, color: 'var(--color-text-secondary)', marginTop: 5 }}>Scenario: {simulation.data?.scenario_id ?? 'None'}</div><div style={{ fontSize: 12.5, color: 'var(--color-text-secondary)' }}>Next event: {simulation.data?.next_event_index ?? '—'}</div><Badge tone="simulated">SIMULATED / DEMO ONLY</Badge></GlassPanel><Button variant="critical" size="md" disabled={!enabled || actionBusy !== null} onClick={() => void runSimulationReset()}>Reset demo state</Button></div></div><SocialPanel /></Screen>;
 }
 
 export function BenchmarkScreen() {
-  return (
-    <Screen>
-      <Alert tone="attention" title="No performance claims yet">
-        Benchmark scenarios have not been run for this prototype. Structural differences are described below; numeric improvements are
-        intentionally left as “awaiting measured benchmark” rather than estimated.
-      </Alert>
-      <div style={{ display: 'flex', gap: 14, flex: 1, minHeight: 0 }}>
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0, overflowY: 'auto' }}>
-          <div style={{ display: 'flex', gap: 12 }}>
-            <GlassPanel padding={16} style={{ flex: 1 }}>
-              <PanelHeader icon="circle-dot" title="Baseline dispatch" tint="slate" />
-              <div style={{ fontSize: 12.5, color: 'var(--color-text-secondary)', lineHeight: 1.7 }}>
-                Send the nearest available ambulance and rescue unit, route by current fastest path, transport to the nearest suitable
-                hospital. No coverage modelling, no plan comparison, no automatic re-evaluation when conditions change.
-              </div>
-            </GlassPanel>
-            <GlassPanel padding={16} style={{ flex: 1, border: '1px solid var(--blue-300)' }}>
-              <PanelHeader icon="shield-check" title="SirenGrid-assisted" tint="navy" />
-              <div style={{ fontSize: 12.5, color: 'var(--color-text-secondary)', lineHeight: 1.7 }}>
-                Interpret the call into structured facts, generate and compare candidate plans, model city coverage impact, rank hospitals
-                by ETA + capability + modelled load, and re-evaluate on every material change — each critical action explicitly approved
-                by the operator.
-              </div>
-            </GlassPanel>
-          </div>
-          <GlassPanel padding={0} style={{ overflow: 'hidden' }}>
-            <div style={{ display: 'flex', padding: '11px 16px', borderBottom: '1px solid var(--color-border-hairline)', fontSize: 12, fontWeight: 600, letterSpacing: '.05em', color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>
-              <span style={{ flex: 1.5 }}>Metric</span>
-              <span style={{ flex: 1 }}>Baseline</span>
-              <span style={{ flex: 1 }}>SirenGrid</span>
-              <span style={{ width: 210 }}>Result</span>
-            </div>
-            {BENCHMARK_METRICS.map(([m, b, s, r], i) => (
-              <div key={i} style={{ display: 'flex', padding: '12px 16px', borderBottom: '1px solid var(--color-border-hairline)', fontSize: 12.5, alignItems: 'center' }}>
-                <span style={{ flex: 1.5, fontWeight: 500 }}>{m}</span>
-                <span style={{ flex: 1, color: 'var(--color-text-secondary)' }}>{b}</span>
-                <span style={{ flex: 1, color: 'var(--color-text-secondary)' }}>{s}</span>
-                <span style={{ width: 210 }}>
-                  <Badge tone={r === 'Structural difference' ? 'info' : 'neutral'}>{r}</Badge>
-                </span>
-              </div>
-            ))}
-          </GlassPanel>
-        </div>
-        <div style={{ width: 320, display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <GlassPanel padding={14}>
-            <PanelHeader icon="list-checks" title="Planned evaluation set" />
-            <div style={{ fontSize: 12.5, color: 'var(--color-text-secondary)', lineHeight: 1.7 }}>
-              30–50 synthetic scenarios varying incident location, congestion, closed roads, unit positions, hospital capacity and a second
-              active incident.
-            </div>
-          </GlassPanel>
-          <GlassPanel padding={14}>
-            <PanelHeader icon="gauge" title="Metrics to be measured" />
-            {BENCHMARK_METRICS_PLANNED.map((m) => (
-              <div key={m} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--color-border-hairline)', fontSize: 12 }}>
-                <span>{m}</span>
-                <span style={{ color: 'var(--color-text-muted)' }}>—</span>
-              </div>
-            ))}
-          </GlassPanel>
-        </div>
-      </div>
-    </Screen>
-  );
+  const { benchmark } = useOperationsData();
+  const aggregate = benchmark.data?.aggregate;
+  const baseline = aggregate?.baseline as Record<string, unknown> | undefined;
+  const sirengrid = aggregate?.sirengrid as Record<string, unknown> | undefined;
+  const engineRows: [string, Record<string, unknown> | undefined][] = [['Baseline', baseline], ['SirenGrid', sirengrid]];
+  return <Screen><Alert tone="attention" title="Committed Phase 08 benchmark artifact">This view displays backend-owned measured results. Missing measurements remain unavailable; no browser-side benchmark claim is calculated.</Alert>{benchmark.error && <Alert tone="attention" title="Benchmark artifact unavailable">{benchmark.error}</Alert>}<div style={{ display: 'flex', gap: 14, flex: 1, minHeight: 0 }}><div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0, overflowY: 'auto' }}><GlassPanel padding={0} style={{ overflow: 'hidden' }}><div style={{ display: 'flex', padding: '11px 16px', borderBottom: '1px solid var(--color-border-hairline)', fontSize: 12, fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase' }}><span style={{ flex: 1 }}>Engine</span><span style={{ flex: 1 }}>Scenarios</span><span style={{ flex: 1 }}>Success</span><span style={{ flex: 1 }}>Unavailable</span></div>{engineRows.map(([label, values]) => <div key={label} style={{ display: 'flex', padding: '13px 16px', borderBottom: '1px solid var(--color-border-hairline)', fontSize: 13 }}><span style={{ flex: 1, fontWeight: 600 }}>{label}</span><span style={{ flex: 1 }}>{scalar(values?.scenario_count)}</span><span style={{ flex: 1 }}>{scalar(values?.success_count ?? values?.passed_count)}</span><span style={{ flex: 1 }}>{scalar(values?.unavailable_count)}</span></div>)}</GlassPanel><GlassPanel padding={14}><PanelHeader icon="file-check" title="Benchmark provenance" />{Object.entries(benchmark.data?.metadata ?? {}).slice(0, 8).map(([key, value]) => <div key={key} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '6px 0', borderBottom: '1px solid var(--color-border-hairline)', fontSize: 12 }}><span style={{ color: 'var(--color-text-secondary)' }}>{key.replaceAll('_', ' ')}</span><span>{scalar(value)}</span></div>)}</GlassPanel></div><div style={{ width: 320, display: 'flex', flexDirection: 'column', gap: 12 }}><GlassPanel padding={14}><PanelHeader icon="shield-check" title="Reality" right={<Badge tone="simulated">SYNTHETIC</Badge>} /><div style={{ fontSize: 12.5, lineHeight: 1.6, color: 'var(--color-text-secondary)' }}>The artifact is a fixed Phase 08 benchmark fixture grounded in real-public/derived static assets. It is not a production SLA or a live traffic claim.</div></GlassPanel><GlassPanel padding={14}><PanelHeader icon="list-checks" title="Validation" />{(benchmark.data?.validation ?? []).slice(0, 15).map((item) => <div key={String(item.scenario_id)} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', fontSize: 12 }}><span>{String(item.scenario_id)}</span><Badge tone={item.passed === true ? 'confirmed' : 'neutral'}>{item.passed === true ? 'PASS' : 'FAIL'}</Badge></div>)}</GlassPanel></div></div></Screen>;
 }

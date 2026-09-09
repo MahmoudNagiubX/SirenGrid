@@ -3,11 +3,9 @@
 Faithful implementation of the approved **SirenGrid Claude Design** system
 (`claude.ai/design` project `be6b3892-1609-4aa6-b86a-49cdad7abadf`).
 
-This is a **frontend-only, design-implementation phase**. It renders the complete
-interface against isolated mock data and is ready for backend integration in a
-later dedicated phase. No operational logic (ETA, routing, plan ranking, coverage,
-hospital suitability, replan materiality, confidence) is computed here — the UI
-only *displays* those values.
+The interface is integrated with the SirenGrid backend. Backend REST responses
+are the operational source of truth; the UI does not compute ETA, routing, plan
+ranking, coverage, hospital suitability, replan materiality, or confidence.
 
 ## Stack
 
@@ -56,11 +54,22 @@ Screenshots used as visual acceptance references: `screenshots/{landing,landing2
 - **Benchmark** — baseline vs SirenGrid-assisted, no invented performance numbers.
 - **Scenario / Demo controls** — reached from the status-strip utility icon; clearly labelled simulated.
 
-## Mock data — temporary
+## Backend integration
 
-Every demo value lives in **`src/data/mock.ts`**, isolated so it can be replaced by
-real API responses without touching presentation components. Nothing else in `src/`
-hardcodes operational values.
+Set `VITE_API_BASE_URL` when the API is not at the local default
+(`http://localhost:8000/api/v1`). Copy `.env.example` to `.env`; browser
+configuration must contain public values only. Backend credentials remain
+server-side.
+
+Operational screens load incidents, resources, plans, routes, hospitals,
+evidence, social signals, benchmark artifacts, and simulation status from the
+backend. `src/data/mock.ts` contains presentation and design configuration only;
+it is not an operational fallback. If the backend is unavailable, the UI shows
+an error state rather than presenting fake live data.
+
+Simulation controls are explicitly gated by the backend and labeled
+`SIMULATED / DEMO ONLY`. WebSocket messages trigger REST refreshes; REST remains
+the canonical state source.
 
 ## Product semantics preserved
 

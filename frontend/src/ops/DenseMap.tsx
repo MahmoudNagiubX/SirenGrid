@@ -4,6 +4,7 @@ import { Ico } from '../lib/icon';
 import { IconTile } from '../components';
 import type { LegendItem, MapView, OverlayKey, RouteMode, MapTone } from '../data/mock';
 import { GLASS_CHIP } from './glassChip';
+import type { JsonRecord } from '../api/types';
 
 /**
  * Ported from ui_kits/operations_center/map.jsx.
@@ -120,15 +121,38 @@ export interface DenseMapProps {
   view?: MapView;
   overlays?: Partial<Record<OverlayKey, boolean>>;
   route?: RouteMode;
+  backendMode?: boolean;
+  routeGeometry?: JsonRecord | null;
   children?: ReactNode;
 }
 
-export function DenseMap({ view = 'city', overlays = {}, route = 'plan', children }: DenseMapProps) {
+const MAP_BOUNDS = { minLon: 31.25, maxLon: 31.45, minLat: 30.00, maxLat: 30.12 };
+
+// eslint-disable-next-line react-refresh/only-export-components
+export function projectCoordinate(coordinate: { lat: number; lon: number }): { left: string; top: string } {
+  const left = ((coordinate.lon - MAP_BOUNDS.minLon) / (MAP_BOUNDS.maxLon - MAP_BOUNDS.minLon)) * 100;
+  const top = (1 - (coordinate.lat - MAP_BOUNDS.minLat) / (MAP_BOUNDS.maxLat - MAP_BOUNDS.minLat)) * 100;
+  return { left: `${Math.max(0, Math.min(100, left))}%`, top: `${Math.max(0, Math.min(100, top))}%` };
+}
+
+function geometryPath(geometry: JsonRecord | null | undefined): string | null {
+  if (!geometry || geometry.type !== 'LineString' || !Array.isArray(geometry.coordinates)) return null;
+  const points = geometry.coordinates.filter((point): point is [number, number] => Array.isArray(point) && point.length >= 2 && typeof point[0] === 'number' && typeof point[1] === 'number');
+  if (points.length === 0) return null;
+  return points.map(([lon, lat], index) => {
+    const x = ((lon - MAP_BOUNDS.minLon) / (MAP_BOUNDS.maxLon - MAP_BOUNDS.minLon)) * MAP_W;
+    const y = (1 - (lat - MAP_BOUNDS.minLat) / (MAP_BOUNDS.maxLat - MAP_BOUNDS.minLat)) * MAP_H;
+    return `${index === 0 ? 'M' : 'L'} ${x} ${y}`;
+  }).join(' ');
+}
+
+export function DenseMap({ view = 'city', overlays = {}, route = 'plan', backendMode = false, routeGeometry, children }: DenseMapProps) {
   const box = view === 'incident' ? '250 210 1000 562' : view === 'hospital' ? '330 200 1080 607' : '0 0 1600 900';
   const showTraffic = overlays.traffic !== false;
   const replan = route === 'replan';
   const primary = replan ? ROUTE_ALT : ROUTE_MAIN;
   const previous = replan ? ROUTE_MAIN : ROUTE_ALT;
+  const actualRoute = geometryPath(routeGeometry);
   return (
     <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', background: 'var(--map-land)' }}>
       <svg width="100%" height="100%" viewBox={box} preserveAspectRatio="xMidYMid slice" style={{ position: 'absolute', inset: 0 }}>
@@ -161,7 +185,7 @@ export function DenseMap({ view = 'city', overlays = {}, route = 'plan', childre
         {NODES.map(([x, y], i) => (
           <circle key={'n' + i} cx={x} cy={y} r="4.2" fill="#fff" stroke="var(--map-road-highway)" strokeWidth="1.8" />
         ))}
-        {overlays.coverage && (
+        {overlays.coverage && !backendMode && (
           <g>
             <circle cx="300" cy="230" r="190" fill="var(--map-coverage-fill)" stroke="var(--map-coverage-line)" strokeWidth="1.6" strokeDasharray="8 8" />
             <circle cx="1240" cy="630" r="210" fill="var(--map-coverage-fill)" stroke="var(--map-coverage-line)" strokeWidth="1.6" strokeDasharray="8 8" />
@@ -181,8 +205,15 @@ export function DenseMap({ view = 'city', overlays = {}, route = 'plan', childre
             </g>
           </g>
         )}
-        {overlays.corridor && <path d={primary} fill="none" stroke="var(--map-corridor)" strokeWidth="24" opacity="0.22" strokeLinecap="round" />}
-        {route !== 'none' && (
+        {overlays.corridor && !backendMode && <path d={primary} fill="none" stroke="var(--map-corridor)" strokeWidth="24" opacity="0.22" strokeLinecap="round" />}
+        {actualRoute && (
+          <g>
+            <path d={actualRoute} fill="none" stroke="var(--map-route-primary)" strokeWidth="20" opacity="0.14" strokeLinecap="round" strokeLinejoin="round" />
+            <path d={actualRoute} fill="none" stroke="#fff" strokeWidth="13" opacity="0.95" strokeLinecap="round" strokeLinejoin="round" />
+            <path d={actualRoute} fill="none" stroke="var(--map-route-primary)" strokeWidth="8" strokeLinecap="round" strokeLinejoin="round" />
+          </g>
+        )}
+        {!backendMode && !actualRoute && route !== 'none' && (
           <g>
             <path d={primary} fill="none" stroke="var(--map-route-primary)" strokeWidth="20" opacity="0.14" strokeLinecap="round" strokeLinejoin="round" />
             <path d={previous} fill="none" stroke="#fff" strokeWidth="10" opacity="0.9" strokeLinecap="round" strokeLinejoin="round" />
@@ -192,7 +223,7 @@ export function DenseMap({ view = 'city', overlays = {}, route = 'plan', childre
             <path d={primary} fill="none" stroke="rgba(255,255,255,.85)" strokeWidth="3" strokeDasharray="10 26" strokeLinecap="round" style={{ animation: 'sg-dash 1.6s linear infinite' }} />
           </g>
         )}
-        {overlays.closure && (
+        {overlays.closure && !backendMode && (
           <g>
             <circle cx={CLOSURE[0]} cy={CLOSURE[1]} r="22" fill="#fff" stroke="var(--color-critical)" strokeWidth="3" />
             <path
@@ -203,11 +234,11 @@ export function DenseMap({ view = 'city', overlays = {}, route = 'plan', childre
             />
           </g>
         )}
-        <g>
+        {!backendMode && <g>
           <circle cx="663" cy="357" r="54" fill="var(--map-incident)" opacity="0.12" />
           <circle cx="663" cy="357" r="20" fill="var(--map-incident)" opacity="0.22" style={{ transformOrigin: '663px 357px', animation: 'sg-pulse 2.4s ease-out infinite' }} />
           <circle cx="663" cy="357" r="11" fill="var(--map-incident)" stroke="#fff" strokeWidth="3.5" />
-        </g>
+        </g>}
         <g fontFamily="var(--font-en)" fontWeight="600" stroke="var(--map-label-halo)" style={{ paintOrder: 'stroke' }}>
           {ARTERIALS.map((a, i) => (
             <text key={'al' + i} x={a.lx} y={a.ly} fontSize="15" fill="var(--map-label)" transform={`rotate(${a.rot} ${a.lx} ${a.ly})`} strokeWidth="4.5">
