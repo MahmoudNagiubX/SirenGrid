@@ -5,6 +5,7 @@ import { ResourceScreen } from './ops/screens-resources';
 import { BenchmarkScreen, DemoScreen } from './ops/screens-support';
 import { Landing } from './pages/Landing';
 import { STATE_META, type OpsState, type TopNav } from './data/mock';
+import { OperationsProvider } from './state/OperationsContext';
 
 type View = 'landing' | TopNav;
 
@@ -44,24 +45,26 @@ export function App() {
   }
 
   return (
-    <div style={{ height: '100vh', overflowX: 'auto', overflowY: 'hidden' }}>
-      <div
-        style={{
-          minWidth: 1440,
-          height: '100vh',
-          display: 'flex',
-          flexDirection: 'column',
-          background: 'var(--color-bg-app)',
-          fontFamily: 'var(--font-en)',
-          color: 'var(--color-text-primary)',
-        }}
-      >
-        <StatusStrip nav={view} setNav={(n) => (n === 'landing' ? setView('landing') : setView(n))} />
-        {view === 'operations' && <Operations key={opsState} initialState={opsState} />}
-        {view === 'resources' && <ResourceScreen />}
-        {view === 'benchmark' && <BenchmarkScreen />}
-        {view === 'demo' && <DemoScreen />}
+    <OperationsProvider>
+      <div style={{ height: '100vh', overflowX: 'auto', overflowY: 'hidden' }}>
+        <div
+          style={{
+            minWidth: 1440,
+            height: '100vh',
+            display: 'flex',
+            flexDirection: 'column',
+            background: 'var(--color-bg-app)',
+            fontFamily: 'var(--font-en)',
+            color: 'var(--color-text-primary)',
+          }}
+        >
+          <StatusStrip nav={view} setNav={(n) => (n === 'landing' ? setView('landing') : setView(n))} />
+          {view === 'operations' && <Operations key={opsState} initialState={opsState} />}
+          {view === 'resources' && <ResourceScreen />}
+          {view === 'benchmark' && <BenchmarkScreen />}
+          {view === 'demo' && <DemoScreen />}
+        </div>
       </div>
-    </div>
+    </OperationsProvider>
   );
 }

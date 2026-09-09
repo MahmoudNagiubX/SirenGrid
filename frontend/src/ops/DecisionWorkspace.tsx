@@ -3,41 +3,81 @@ import { Alert, Badge, Button, Card, ConfidenceMeter, GlassPanel, IconTile } fro
 import { Ico } from '../lib/icon';
 import { AiBlock, ApprovalBar, Prov, SubHead } from './primitives';
 import {
-  ACTIVE_EXECUTED,
-  ACTIVE_UNITS,
-  COVERAGE_ZONES,
   DEC_TABS,
-  EVIDENCE_ITEMS,
-  EVIDENCE_TRANSCRIPT_AR,
-  FOCUS_INCIDENT,
-  HISTORY_EVENTS,
-  HOSPITALS,
-  PLANS,
-  PLAN_COMPARE,
-  REPLAN_ROUTES,
   type DecisionTab,
   type OpsState,
+  type ProvKind,
 } from '../data/mock';
+import { useOperations } from '../state/OperationsContext';
+import type { HospitalOptionRead, ResponsePlanRead, TimelineEventRead } from '../api/types';
 
-/** Ported from ui_kits/operations_center/decision.jsx. */
+/** Ported from ui_kits/operations_center/decision.jsx — bound to canonical backend read state. */
+
+function formatSeconds(secs: number | null | undefined): string {
+  if (secs === null || secs === undefined || isNaN(secs)) return '—';
+  const m = Math.floor(secs / 60);
+  const s = Math.round(secs % 60);
+  return `${m}:${s < 10 ? '0' : ''}${s}`;
+}
+
+function humanize(str: string): string {
+  return str
+    .replace(/_/g, ' ')
+    .toLowerCase()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
 
 function StateBanner({ state }: { state: OpsState }) {
-  const MAP: Partial<Record<OpsState, [string, 'red' | 'navy', string, string, string, string]>> = {
-    replan: ['octagon-x', 'red', 'Abbas El Akkad eastbound closed', '21:06 · approved route invalid', 'var(--color-critical-soft)', 'var(--red-200)'],
-    active: ['check', 'navy', 'Plan v2 approved · executing', 'A1 3:10 · F3 4:05 · corridor 4/6', 'var(--color-confirmed-soft)', 'var(--blue-300)'],
-    coverage: ['shield-check', 'navy', 'Coverage impact', 'Zone C 92% → 78% after dispatch', 'var(--gray-100)', 'var(--color-border-hairline)'],
-  };
-  const m = MAP[state];
-  if (!m) return null;
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 11, padding: 12, borderRadius: 'var(--radius-md)', background: m[4], border: `1px solid ${m[5]}` }}>
-      <IconTile icon={<Ico n={m[0]} />} tint={m[1]} size={32} />
-      <div>
-        <div style={{ fontSize: 14, fontWeight: 600 }}>{m[2]}</div>
-        <div style={{ fontSize: 13, color: 'var(--color-text-muted)' }}>{m[3]}</div>
+  const { selectedIncident, replan } = useOperations();
+  const inc = selectedIncident.data;
+  const rep = replan.data;
+
+  if (state === 'replan') {
+    const title = rep?.trigger_reasons && rep.trigger_reasons.length > 0
+      ? rep.trigger_reasons.map(humanize).join(', ')
+      : 'Replan evaluation';
+    const sub = rep?.pending_plan_id
+      ? `Pending replacement plan ${rep.pending_plan_id}`
+      : rep?.status ? `Status: ${humanize(rep.status)}` : 'No active replan trigger';
+
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 11, padding: 12, borderRadius: 'var(--radius-md)', background: 'var(--color-critical-soft)', border: '1px solid var(--red-200)' }}>
+        <IconTile icon={<Ico n="octagon-x" />} tint="red" size={32} />
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 600 }}>{title}</div>
+          <div style={{ fontSize: 13, color: 'var(--color-text-muted)' }}>{sub}</div>
+        </div>
       </div>
-    </div>
-  );
+    );
+  }
+
+  if (state === 'active') {
+    const title = inc?.current_plan_id ? `Plan ${inc.current_plan_id} active · executing` : 'Active response executing';
+    const sub = inc?.status ? `Incident status: ${humanize(inc.status)}` : 'No active incident';
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 11, padding: 12, borderRadius: 'var(--radius-md)', background: 'var(--color-confirmed-soft)', border: '1px solid var(--blue-300)' }}>
+        <IconTile icon={<Ico n="check" />} tint="navy" size={32} />
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 600 }}>{title}</div>
+          <div style={{ fontSize: 13, color: 'var(--color-text-muted)' }}>{sub}</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (state === 'coverage') {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 11, padding: 12, borderRadius: 'var(--radius-md)', background: 'var(--gray-100)', border: '1px solid var(--color-border-hairline)' }}>
+        <IconTile icon={<Ico n="shield-check" />} tint="navy" size={32} />
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 600 }}>Coverage impact</div>
+          <div style={{ fontSize: 13, color: 'var(--color-text-muted)' }}>Coverage detail available in Phase 04 map integration</div>
+        </div>
+      </div>
+    );
+  }
+
+  return null;
 }
 
 function Row({ a, b, tone }: { a: string; b: string; tone?: string }) {
@@ -49,112 +89,224 @@ function Row({ a, b, tone }: { a: string; b: string; tone?: string }) {
   );
 }
 
-function OverviewTab({ state }: { state: OpsState }) {
+function OverviewTab({ state, onSelectTab }: { state: OpsState; onSelectTab: (t: DecisionTab) => void }) {
+  const { selectedIncident, timeline, resources } = useOperations();
+  const inc = selectedIncident.data;
+
   if (state === 'coverage') {
     return (
       <Fragment>
         <SubHead>Zone coverage · before → after</SubHead>
-        {COVERAGE_ZONES.map(([z, b, a]) => (
-          <div key={z} style={{ padding: '6px 0' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, marginBottom: 6 }}>
-              <span>{z}</span>
-              <span style={{ color: 'var(--color-text-muted)' }}>
-                {b}% → <b style={{ color: a < 85 ? 'var(--color-critical)' : 'var(--color-text-primary)' }}>{a}%</b>
-              </span>
-            </div>
-            <div style={{ height: 7, borderRadius: 4, background: 'var(--gray-200)' }}>
-              <div style={{ width: a + '%', height: '100%', borderRadius: 4, background: a < 85 ? 'var(--color-critical)' : 'var(--color-accent)' }} />
-            </div>
-          </div>
-        ))}
-        <AiBlock title="Balance recommendation" footer={<Button variant="primary" size="sm">Send for approval</Button>}>
-          Repositioning A5 into the Makram Ebeid corridor restores Zone C to ~92% without changing the INC-2418 response.
+        <div style={{ padding: '12px 0', fontSize: 13.5, color: 'var(--color-text-muted)', lineHeight: 1.6 }}>
+          Coverage detail available in Phase 04 map integration.
+        </div>
+        <AiBlock title="Balance recommendation" footer={<Button variant="primary" size="sm" disabled>Send for approval</Button>}>
+          Balancing and reposition recommendations are calculated by backend planning models when coverage drops. Command wiring arrives in Phase 06.
         </AiBlock>
       </Fragment>
     );
   }
+
   if (state === 'active') {
+    const executedEvents = (timeline.data ?? []).slice(-3);
+    const assignedResources = (resources.data ?? []).filter(
+      (r) => r.assigned_incident_id === inc?.id || (inc?.current_plan_id && r.status !== 'AVAILABLE'),
+    );
+
     return (
       <Fragment>
         <SubHead>Executed</SubHead>
-        {ACTIVE_EXECUTED.map(([a, b]) => (
-          <div key={a} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid var(--color-border-hairline)' }}>
-            <span style={{ fontSize: 14 }}>{a}</span>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--color-text-muted)' }}>
-              {b}
-              <span style={{ width: 17, height: 17, display: 'flex', color: 'var(--color-confirmed)' }}>
-                <Ico n="circle-check" />
+        {executedEvents.length === 0 ? (
+          <div style={{ padding: '8px 0', fontSize: 13, color: 'var(--color-text-muted)' }}>No execution events recorded.</div>
+        ) : (
+          executedEvents.map((evt) => (
+            <div key={evt.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid var(--color-border-hairline)' }}>
+              <span style={{ fontSize: 14 }}>{humanize(evt.event_type)}</span>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--color-text-muted)' }}>
+                {evt.created_at ? new Date(evt.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}
+                <span style={{ width: 17, height: 17, display: 'flex', color: 'var(--color-confirmed)' }}>
+                  <Ico n="circle-check" />
+                </span>
               </span>
-            </span>
-          </div>
-        ))}
+            </div>
+          ))
+        )}
         <SubHead>Units</SubHead>
-        {ACTIVE_UNITS.map(([a, b]) => (
-          <Row key={a} a={a} b={b} />
-        ))}
+        {assignedResources.length === 0 ? (
+          <div style={{ padding: '8px 0', fontSize: 13, color: 'var(--color-text-muted)' }}>No units currently assigned.</div>
+        ) : (
+          assignedResources.map((u) => (
+            <Row key={u.id} a={u.name || u.id} b={humanize(u.status)} />
+          ))
+        )}
       </Fragment>
     );
   }
+
+  const sev = inc?.severity ? humanize(inc.severity) : '—';
+  const sevTone = inc?.severity?.toLowerCase() === 'critical' ? 'var(--color-critical)' : 'var(--color-text-primary)';
+  const confLevel = inc?.confidence_level?.toLowerCase() as 'low' | 'medium' | 'high' | undefined;
+
   return (
     <Fragment>
       <div style={{ display: 'flex', gap: 14, padding: '2px 0 8px' }}>
         <div style={{ flex: 1 }}>
           <SubHead>Severity</SubHead>
-          <div style={{ fontSize: 18, fontWeight: 600, color: 'var(--color-critical)', marginTop: 5 }}>Critical</div>
+          <div style={{ fontSize: 18, fontWeight: 600, color: sevTone, marginTop: 5 }}>{sev}</div>
         </div>
         <span style={{ width: 1, background: 'var(--color-border-hairline)' }} />
         <div style={{ flex: 1.1 }}>
           <SubHead>AI confidence</SubHead>
           <div style={{ marginTop: 7 }}>
-            <ConfidenceMeter level="high" label="High" />
+            <ConfidenceMeter level={confLevel ?? 'low'} label={confLevel ? humanize(confLevel) : 'Unknown'} />
           </div>
         </div>
       </div>
       <SubHead>Known</SubHead>
-      <Row a="Type" b="Multi-vehicle crash" />
-      <Row a="Trapped" b="1 person" />
-      <Row a="Road" b="2 lanes blocked" />
-      <SubHead>Unknown</SubHead>
-      <Row a="Casualty count" b="Not stated" tone="var(--color-text-muted)" />
-      <AiBlock title="AI interpretation">Major road crash with a trapped occupant. Routing avoids the eastbound carriageway.</AiBlock>
-      <Button variant="ghost" size="sm" full>View full evidence</Button>
+      <Row a="Type" b={inc?.incident_type ? humanize(inc.incident_type) : 'Unknown'} />
+      <Row a="Trapped" b={inc?.trapped_person === true ? 'Yes' : inc?.trapped_person === false ? 'No' : 'Unknown'} tone={inc?.trapped_person === null ? 'var(--color-text-muted)' : undefined} />
+      <Row a="Road" b={inc?.road_blockage === true ? 'Blocked' : inc?.road_blockage === false ? 'Clear' : 'Unknown'} tone={inc?.road_blockage === null ? 'var(--color-text-muted)' : undefined} />
+      <Row a="Location" b={inc?.location_text || 'Location unresolved'} />
+      <SubHead>Casualties</SubHead>
+      <Row
+        a="Casualty count"
+        b={inc?.casualty_count !== null && inc?.casualty_count !== undefined ? `${inc.casualty_count}` : inc?.casualty_range || 'Unknown'}
+        tone={inc?.casualty_count === null && !inc?.casualty_range ? 'var(--color-text-muted)' : undefined}
+      />
+      <AiBlock title="Incident interpretation">
+        Structured incident facts are available from the backend. No narrative AI explanation is provided by this read contract.
+      </AiBlock>
+      <Button variant="ghost" size="sm" full onClick={() => onSelectTab('evidence')}>View full evidence</Button>
     </Fragment>
   );
 }
 
 function PlanTab({ state }: { state: OpsState }) {
-  const [sel, setSel] = useState('B');
-  const [approved, setApproved] = useState(false);
+  const { plans, replan, resources } = useOperations();
+  const planList = plans.data ?? [];
+  const rep = replan.data;
+
+  const sortedPlans = [...planList].sort((a, b) => {
+    const rankA = a.candidate_rank ?? a.metrics?.candidate_rank ?? 999;
+    const rankB = b.candidate_rank ?? b.metrics?.candidate_rank ?? 999;
+    return rankA - rankB;
+  });
+
+  const [selId, setSelId] = useState<string | null>(null);
+  const selectedPlanId = selId ?? sortedPlans[0]?.id ?? null;
+  const activePlan = sortedPlans.find((p) => p.id === selectedPlanId) ?? sortedPlans[0] ?? null;
+
+  const resourceMap = new Map((resources.data ?? []).map((r) => [r.id, r.name || r.id]));
+
   if (state === 'replan') {
+    const replanPlans: ResponsePlanRead[] = sortedPlans;
     return (
       <Fragment>
-        <div style={{ display: 'flex', gap: 10 }}>
-          {REPLAN_ROUTES.map(([t, eta, via, on]) => (
-            <Card key={t} padding={13} style={{ flex: 1, borderColor: on ? 'var(--color-accent)' : 'var(--color-border-hairline)' }}>
-              <SubHead>{t}</SubHead>
-              <div style={{ fontSize: 24, fontWeight: 600, marginTop: 4, color: on ? 'var(--color-accent)' : 'var(--color-text-muted)' }}>{eta}</div>
-              <div style={{ fontSize: 13, color: 'var(--color-text-muted)', marginTop: 2 }}>via {via}</div>
-            </Card>
-          ))}
-        </div>
-        <AiBlock title="Why it changed">Closure invalidates v2. El Nasr Rd. adds 45 s but stays clear. Hospital unchanged.</AiBlock>
-        <ApprovalBar approved={approved} note={approved ? 'Replan v3 active · v2 archived' : 'Re-approval required before reroute'} onApprove={() => setApproved(true)} />
+        {replanPlans.length === 0 ? (
+          <div style={{ padding: 16, textAlign: 'center', color: 'var(--color-text-muted)', fontSize: 13 }}>
+            No pending replan evaluation for this incident.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', gap: 10 }}>
+            {replanPlans.map((p, idx) => {
+              const etaSec = p.metrics?.max_arrival_eta_seconds;
+              const routeRef = p.routes?.[0]?.routing_source || p.metrics?.routing_source || 'Standard route';
+              const isSelected = p.id === selectedPlanId || (idx === 0 && !selId);
+              return (
+                <div key={p.id} style={{ flex: 1, cursor: 'pointer' }} onClick={() => setSelId(p.id)}>
+                  <Card
+                    padding={13}
+                    style={{
+                      borderColor: isSelected ? 'var(--color-accent)' : 'var(--color-border-hairline)',
+                    }}
+                  >
+                    <SubHead>{`Candidate ${idx + 1}`}</SubHead>
+                    <div style={{ fontSize: 24, fontWeight: 600, marginTop: 4, color: isSelected ? 'var(--color-accent)' : 'var(--color-text-muted)' }}>
+                      {formatSeconds(etaSec)}
+                    </div>
+                    <div style={{ fontSize: 13, color: 'var(--color-text-muted)', marginTop: 2 }}>
+                      via {routeRef}
+                    </div>
+                  </Card>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        <AiBlock title="Replan evaluation">
+          {rep?.explanation && typeof rep.explanation === 'object' && Object.keys(rep.explanation).length > 0
+            ? JSON.stringify(rep.explanation)
+            : rep?.trigger_reasons && rep.trigger_reasons.length > 0
+            ? `Replan triggered by: ${rep.trigger_reasons.map(humanize).join(', ')}.`
+            : 'Replan evaluation is backend-authoritative. Materiality is determined by the server engine.'}
+        </AiBlock>
+        <ApprovalBar
+          approved={false}
+          disabled={true}
+          note="Human command wiring arrives in Phase 06"
+        />
       </Fragment>
     );
   }
+
+  if (sortedPlans.length === 0) {
+    return (
+      <Fragment>
+        <div style={{ padding: 24, textAlign: 'center', color: 'var(--color-text-muted)', fontSize: 13.5 }}>
+          No candidate response plans generated yet.
+        </div>
+        <ApprovalBar
+          approved={false}
+          disabled={true}
+          note="Human command wiring arrives in Phase 06"
+        />
+      </Fragment>
+    );
+  }
+
+  const displayCandidates = sortedPlans.slice(0, 3);
+
+  const getCoverageStr = (p: ResponsePlanRead): string => {
+    const cov = p.score_breakdown?.post_dispatch_joint_population_weighted_coverage
+      ?? p.metrics?.phase04?.post_dispatch_joint?.population_weighted_coverage;
+    if (typeof cov === 'number') {
+      return `${Math.round(cov * 100)}%`;
+    }
+    return '—';
+  };
+
+  const getEtaStr = (p: ResponsePlanRead): string => {
+    const eta = p.metrics?.max_arrival_eta_seconds ?? p.routes?.[0]?.eta_seconds;
+    return formatSeconds(eta);
+  };
+
+  const getUnitsCountStr = (p: ResponsePlanRead): string => {
+    return `${p.resource_ids.length} units`;
+  };
+
+  const compareRows: [string, (p: ResponsePlanRead) => string][] = [
+    ['ETA', getEtaStr],
+    ['Coverage', getCoverageStr],
+    ['Units', getUnitsCountStr],
+  ];
+
+  const candidateLabels = ['A', 'B', 'C'];
+
   return (
     <Fragment>
       <div style={{ borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border-hairline)', overflow: 'hidden' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '78px 1fr 1fr 1fr', background: 'var(--gray-100)', fontSize: 12, fontWeight: 700, letterSpacing: '0.06em', color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>
-          {['', 'A', 'B', 'C'].map((h, i) => (
-            <div key={i} style={{ padding: '9px 10px', textAlign: i ? 'center' : 'left' }}>{h}</div>
+        <div style={{ display: 'grid', gridTemplateColumns: `78px repeat(${displayCandidates.length}, 1fr)`, background: 'var(--gray-100)', fontSize: 12, fontWeight: 700, letterSpacing: '0.06em', color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>
+          <div style={{ padding: '9px 10px', textAlign: 'left' }}></div>
+          {displayCandidates.map((_, i) => (
+            <div key={i} style={{ padding: '9px 10px', textAlign: 'center' }}>{candidateLabels[i]}</div>
           ))}
         </div>
-        {PLAN_COMPARE.map(([label, vals]) => (
-          <div key={label} style={{ display: 'grid', gridTemplateColumns: '78px 1fr 1fr 1fr', borderTop: '1px solid var(--color-border-hairline)', alignItems: 'center' }}>
+        {compareRows.map(([label, getValue]) => (
+          <div key={label} style={{ display: 'grid', gridTemplateColumns: `78px repeat(${displayCandidates.length}, 1fr)`, borderTop: '1px solid var(--color-border-hairline)', alignItems: 'center' }}>
             <div style={{ padding: '10px', fontSize: 13, color: 'var(--color-text-muted)' }}>{label}</div>
-            {vals.map((v, i) => {
-              const bad = label === 'Coverage' && i === 0;
+            {displayCandidates.map((p, i) => {
+              const val = getValue(p);
+              const isSelected = p.id === selectedPlanId;
               return (
                 <div
                   key={i}
@@ -163,11 +315,11 @@ function PlanTab({ state }: { state: OpsState }) {
                     textAlign: 'center',
                     fontSize: 16,
                     fontWeight: 600,
-                    color: bad ? 'var(--color-critical)' : i === 1 ? 'var(--color-accent)' : 'var(--color-text-primary)',
-                    background: i === 1 ? 'var(--color-accent-soft)' : 'transparent',
+                    color: isSelected ? 'var(--color-accent)' : 'var(--color-text-primary)',
+                    background: isSelected ? 'var(--color-accent-soft)' : 'transparent',
                   }}
                 >
-                  {v}
+                  {val}
                 </div>
               );
             })}
@@ -175,140 +327,219 @@ function PlanTab({ state }: { state: OpsState }) {
         ))}
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {PLANS.map((p) => (
-          <button
-            key={p.id}
-            onClick={() => setSel(p.id)}
-            style={{
-              textAlign: 'left',
-              cursor: 'pointer',
-              fontFamily: 'var(--font-en)',
-              borderRadius: 'var(--radius-md)',
-              padding: 12,
-              border: sel === p.id ? '1.5px solid var(--color-accent)' : '1px solid var(--color-border-hairline)',
-              background: sel === p.id ? 'var(--color-accent-soft)' : 'var(--color-bg-surface)',
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 14, fontWeight: 600 }}>{p.name}</span>
-              {p.rec && <Badge tone="info">AI pick</Badge>}
-            </div>
-            <div style={{ fontSize: 13, color: 'var(--color-text-muted)', marginTop: 3 }}>{p.units}</div>
-          </button>
-        ))}
+        {sortedPlans.map((p, idx) => {
+          const isSelected = p.id === selectedPlanId;
+          const isRecommended = p.status === 'RECOMMENDED';
+          const unitsLabel = p.resource_ids.map((id) => resourceMap.get(id) || id).join(', ') || 'No units specified';
+          return (
+            <button
+              key={p.id}
+              onClick={() => setSelId(p.id)}
+              style={{
+                textAlign: 'left',
+                cursor: 'pointer',
+                fontFamily: 'var(--font-en)',
+                borderRadius: 'var(--radius-md)',
+                padding: 12,
+                border: isSelected ? '1.5px solid var(--color-accent)' : '1px solid var(--color-border-hairline)',
+                background: isSelected ? 'var(--color-accent-soft)' : 'var(--color-bg-surface)',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 14, fontWeight: 600 }}>
+                  {`Plan ${candidateLabels[idx] ?? idx + 1}`} · {p.id}
+                </span>
+                {isRecommended && <Badge tone="info">Recommended</Badge>}
+              </div>
+              <div style={{ fontSize: 13, color: 'var(--color-text-muted)', marginTop: 3 }}>
+                {unitsLabel}
+              </div>
+            </button>
+          );
+        })}
       </div>
-      <AiBlock title="Why Plan B">Plan A arrives 40 s sooner but drops Zone C to 81%. Plan B holds A2 and repositions A5.</AiBlock>
-      <ApprovalBar approved={approved} note={approved ? 'Plan v2 locked · audit entry created' : 'Dispatch and repositioning need approval'} onApprove={() => setApproved(true)} />
+      {activePlan && (
+        <AiBlock title={`Plan evaluation · ${activePlan.id}`}>
+          Backend candidate evaluation under policy {activePlan.score_breakdown?.policy_version || 'standard'}. Max ETA: {formatSeconds(activePlan.metrics?.max_arrival_eta_seconds)}. Post-dispatch joint coverage: {getCoverageStr(activePlan)}. Reserve exhausted: {activePlan.score_breakdown?.remaining_reserve_exhausted ? 'Yes' : 'No'}.
+        </AiBlock>
+      )}
+      <ApprovalBar
+        approved={false}
+        disabled={true}
+        note="Human command wiring arrives in Phase 06"
+      />
     </Fragment>
   );
 }
 
 function HospitalTab() {
-  const [sel, setSel] = useState('El Nozha Hospital');
-  const [all, setAll] = useState(false);
-  const list = all ? HOSPITALS : HOSPITALS.slice(0, 2);
+  const { operationalState } = useOperations();
+  const options = operationalState.data?.hospital_options?.options ?? [];
+  const [selName, setSelName] = useState<string | null>(null);
+
+  if (options.length === 0) {
+    return (
+      <Fragment>
+        <AiBlock title="Destination rationale">
+          Hospital options are ranked by the backend operational model.
+        </AiBlock>
+        <SubHead>Candidates</SubHead>
+        <div style={{ padding: 24, textAlign: 'center', color: 'var(--color-text-muted)', fontSize: 13.5 }}>
+          No hospital options evaluated for this incident.
+        </div>
+      </Fragment>
+    );
+  }
+
   return (
     <Fragment>
       <AiBlock title="Destination rationale">
-        Nasr Specialised is closer but at 96% load with no trauma bay. El Nozha has capacity for two casualties.
+        Hospital options are ranked by the backend operational model.
       </AiBlock>
-      <SubHead>Candidates · 2 casualties</SubHead>
+      <SubHead>{`Candidates · ${options.length} evaluated`}</SubHead>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
-        {list.map((h) => (
-          <button
-            key={h.n}
-            onClick={() => setSel(h.n)}
-            style={{
-              textAlign: 'left',
-              cursor: 'pointer',
-              fontFamily: 'var(--font-en)',
-              display: 'flex',
-              gap: 12,
-              alignItems: 'center',
-              padding: 13,
-              borderRadius: 'var(--radius-md)',
-              border: sel === h.n ? '1.5px solid var(--color-accent)' : '1px solid var(--color-border-hairline)',
-              background: sel === h.n ? 'var(--color-accent-soft)' : 'var(--color-bg-surface)',
-            }}
-          >
-            <IconTile icon={<Ico n="hospital" />} tint={h.load > 85 ? 'red' : 'navy'} size={38} />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 14.5, fontWeight: 600 }}>{h.n}</span>
-                {h.rec && <Badge tone="info">Recommended</Badge>}
-                {h.stale && <Badge tone="neutral">Stale</Badge>}
+        {options.map((opt: HospitalOptionRead) => {
+          const h = opt.hospital;
+          const isSelected = selName === (h.name || h.id);
+          const isRec = opt.rank === 1;
+          const isStale = h.operational_freshness_status === 'STALE';
+          const loadPct = h.simulated_load_ratio !== null ? Math.round(h.simulated_load_ratio * 100) : null;
+          const etaSec = typeof opt.route?.eta_seconds === 'number' ? opt.route.eta_seconds : null;
+
+          return (
+            <button
+              key={opt.option_id}
+              onClick={() => setSelName(h.name || h.id)}
+              style={{
+                textAlign: 'left',
+                cursor: 'pointer',
+                fontFamily: 'var(--font-en)',
+                display: 'flex',
+                gap: 12,
+                alignItems: 'center',
+                padding: 13,
+                borderRadius: 'var(--radius-md)',
+                border: isSelected ? '1.5px solid var(--color-accent)' : '1px solid var(--color-border-hairline)',
+                background: isSelected ? 'var(--color-accent-soft)' : 'var(--color-bg-surface)',
+              }}
+            >
+              <IconTile icon={<Ico n="hospital" />} tint={loadPct !== null && loadPct > 85 ? 'red' : 'navy'} size={38} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 14.5, fontWeight: 600 }}>{h.name || h.id}</span>
+                  {isRec && <Badge tone="info">Recommended</Badge>}
+                  {isStale && <Badge tone="neutral">Stale</Badge>}
+                </div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, color: 'var(--color-text-muted)', marginTop: 2 }}>
+                  <span>{h.static_capabilities.join(', ') || 'General'}</span>
+                  <span>· {humanize(h.accepting_state)}</span>
+                </div>
+                {loadPct !== null && (
+                  <Fragment>
+                    <div style={{ height: 7, borderRadius: 4, background: 'var(--gray-200)', marginTop: 8 }}>
+                      <div style={{ width: loadPct + '%', height: '100%', borderRadius: 4, background: loadPct > 85 ? 'var(--color-critical)' : 'var(--color-accent)' }} />
+                    </div>
+                    <div style={{ fontSize: 13, color: loadPct > 85 ? 'var(--color-critical)' : 'var(--color-text-muted)', marginTop: 4 }}>
+                      {loadPct}% modelled load
+                    </div>
+                  </Fragment>
+                )}
               </div>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, color: 'var(--color-text-muted)', marginTop: 2 }}>
-                <span>{h.cap}</span>
-                <span dir="rtl" style={{ fontFamily: 'var(--font-ar)' }}>{h.ar}</span>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontSize: 18, fontWeight: 600 }}>{formatSeconds(etaSec)}</div>
+                <div style={{ fontSize: 12.5, color: 'var(--color-text-muted)' }}>ETA</div>
               </div>
-              <div style={{ height: 7, borderRadius: 4, background: 'var(--gray-200)', marginTop: 8 }}>
-                <div style={{ width: h.load + '%', height: '100%', borderRadius: 4, background: h.load > 85 ? 'var(--color-critical)' : 'var(--color-accent)' }} />
-              </div>
-              <div style={{ fontSize: 13, color: h.load > 85 ? 'var(--color-critical)' : 'var(--color-text-muted)', marginTop: 4 }}>{h.load}% modelled load</div>
-            </div>
-            <div style={{ textAlign: 'right' }}>
-              <div style={{ fontSize: 18, fontWeight: 600 }}>{h.eta}</div>
-              <div style={{ fontSize: 12.5, color: 'var(--color-text-muted)' }}>ETA</div>
-            </div>
-          </button>
-        ))}
+            </button>
+          );
+        })}
       </div>
-      {!all && (
-        <Button variant="ghost" size="sm" full onClick={() => setAll(true)}>
-          View all 3 candidates
-        </Button>
+    </Fragment>
+  );
+}
+
+function deriveReportProv(r: { data_reality: string; source_type: string }): ProvKind {
+  if (r.source_type.includes('operator')) return 'operator';
+  if (r.source_type.includes('responder')) return 'responder';
+  if (r.data_reality === 'SIMULATED' || r.data_reality === 'SYNTHETIC') return 'sim';
+  return 'source';
+}
+
+function EvidenceTab() {
+  const { reports, selectedIncident } = useOperations();
+  const reportList = reports.data ?? [];
+  const requiresReview = selectedIncident.data?.status === 'REQUIRES_REVIEW';
+
+  return (
+    <Fragment>
+      <SubHead>{`Evidence · ${reportList.length}`}</SubHead>
+      {reportList.length === 0 ? (
+        <div style={{ padding: 16, color: 'var(--color-text-muted)', fontSize: 13 }}>
+          No evidence reports associated with this incident.
+        </div>
+      ) : (
+        reportList.map((r) => (
+          <Card key={r.id} padding={12} style={{ display: 'flex', gap: 11, alignItems: 'flex-start' }}>
+            <IconTile icon={<Ico n="file-text" />} tint="slate" size={32} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 14, fontWeight: 600 }}>{r.source_reference || r.source_type}</span>
+                <Prov kind={deriveReportProv(r)} />
+              </div>
+              <div style={{ fontSize: 13, color: 'var(--color-text-secondary)', marginTop: 4, lineHeight: 1.5 }}>
+                {r.raw_text}
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 4 }}>
+                Received {r.received_at ? new Date(r.received_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'} · {r.data_reality}
+              </div>
+            </div>
+          </Card>
+        ))
+      )}
+      {requiresReview && (
+        <Alert tone="attention" title="Operator review required">
+          Incident status indicates operator review is required before proceeding.
+        </Alert>
       )}
     </Fragment>
   );
 }
 
-function EvidenceTab() {
-  return (
-    <Fragment>
-      <SubHead>Evidence · 4</SubHead>
-      {EVIDENCE_ITEMS.map(([a, b, p, i]) => (
-        <Card key={a} padding={12} style={{ display: 'flex', gap: 11, alignItems: 'center' }}>
-          <IconTile icon={<Ico n={i} />} tint="slate" size={32} />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 14, fontWeight: 600 }}>{a}</span>
-              <Prov kind={p} />
-            </div>
-            <div style={{ fontSize: 13, color: 'var(--color-text-muted)', marginTop: 2 }}>{b}</div>
-          </div>
-        </Card>
-      ))}
-      <div
-        dir="rtl"
-        style={{ fontFamily: 'var(--font-ar)', fontSize: 15, background: 'var(--gray-50)', borderRadius: 'var(--radius-md)', padding: 14, lineHeight: 1.9, border: '1px solid var(--color-border-hairline)' }}
-      >
-        {EVIDENCE_TRANSCRIPT_AR}
-      </div>
-      <Alert tone="attention" title="Conflicting evidence">
-        Caller said two cars; the image suggests three. Operator review requested.
-      </Alert>
-    </Fragment>
-  );
+function deriveTimelineProv(evt: TimelineEventRead): ProvKind {
+  const d = evt.details as Record<string, unknown> | undefined;
+  if (d?.source === 'operator' || d?.operator_reference) return 'operator';
+  if (d?.source === 'responder') return 'responder';
+  if (d?.data_reality === 'SIMULATED' || d?.data_reality === 'SYNTHETIC') return 'sim';
+  return 'source';
 }
 
 function HistoryTab() {
+  const { timeline } = useOperations();
+  const events = timeline.data ?? [];
+
   return (
     <Fragment>
-      {HISTORY_EVENTS.map(([t, title, prov], i) => (
-        <div key={i} style={{ display: 'flex', gap: 13 }}>
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: 44, flexShrink: 0 }}>
-            <span style={{ fontSize: 13, color: 'var(--color-text-muted)', fontWeight: 600 }}>{t}</span>
-            <span style={{ width: 1, flex: 1, background: 'var(--color-border-hairline)', marginTop: 4 }} />
-          </div>
-          <div style={{ paddingBottom: 15, flex: 1 }}>
-            <div style={{ fontSize: 14, fontWeight: 600 }}>{title}</div>
-            <div style={{ marginTop: 5 }}>
-              <Prov kind={prov} />
+      {events.length === 0 ? (
+        <div style={{ padding: 16, color: 'var(--color-text-muted)', fontSize: 13 }}>
+          No history events recorded for this incident.
+        </div>
+      ) : (
+        events.map((evt, i) => (
+          <div key={evt.id || i} style={{ display: 'flex', gap: 13 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: 44, flexShrink: 0 }}>
+              <span style={{ fontSize: 13, color: 'var(--color-text-muted)', fontWeight: 600 }}>
+                {evt.created_at ? new Date(evt.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}
+              </span>
+              <span style={{ width: 1, flex: 1, background: 'var(--color-border-hairline)', marginTop: 4 }} />
+            </div>
+            <div style={{ paddingBottom: 15, flex: 1 }}>
+              <div style={{ fontSize: 14, fontWeight: 600 }}>{humanize(evt.event_type)}</div>
+              <div style={{ marginTop: 5 }}>
+                <Prov kind={deriveTimelineProv(evt)} />
+              </div>
             </div>
           </div>
-        </div>
-      ))}
+        ))
+      )}
     </Fragment>
   );
 }
@@ -322,17 +553,24 @@ export function DecisionWorkspace({
   tab: DecisionTab;
   setTab: (t: DecisionTab) => void;
 }) {
+  const { selectedIncident } = useOperations();
+  const inc = selectedIncident.data;
+
+  const headerTitle = inc ? humanize(inc.incident_type) : 'No incident selected';
+  const headerSub = inc
+    ? `${inc.id} · ${inc.created_at ? new Date(inc.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}`
+    : '—';
+  const headerSevTone = inc ? (inc.severity.toLowerCase() as 'low' | 'moderate' | 'high' | 'critical') : 'low';
+
   return (
     <GlassPanel padding={0} style={{ width: 400, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <div style={{ padding: '15px 16px 12px', borderBottom: '1px solid var(--color-border-hairline)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
           <div>
-            <div style={{ fontSize: 18, fontWeight: 600, letterSpacing: '-0.015em' }}>{FOCUS_INCIDENT.title}</div>
-            <div style={{ fontSize: 13, color: 'var(--color-text-muted)', marginTop: 2 }}>
-              {FOCUS_INCIDENT.id} · {FOCUS_INCIDENT.t}
-            </div>
+            <div style={{ fontSize: 18, fontWeight: 600, letterSpacing: '-0.015em' }}>{headerTitle}</div>
+            <div style={{ fontSize: 13, color: 'var(--color-text-muted)', marginTop: 2 }}>{headerSub}</div>
           </div>
-          <Badge severity="critical" />
+          {inc && <Badge severity={headerSevTone} />}
         </div>
         <div role="tablist" style={{ display: 'flex', gap: 3, padding: 3, borderRadius: 'var(--radius-md)', background: 'var(--gray-100)' }}>
           {DEC_TABS.map(([id, label]) => {
@@ -365,7 +603,7 @@ export function DecisionWorkspace({
       </div>
       <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12, overflowY: 'auto', minHeight: 0 }}>
         <StateBanner state={state} />
-        {tab === 'overview' && <OverviewTab state={state} />}
+        {tab === 'overview' && <OverviewTab state={state} onSelectTab={setTab} />}
         {tab === 'plan' && <PlanTab state={state} />}
         {tab === 'hospital' && <HospitalTab />}
         {tab === 'evidence' && <EvidenceTab />}

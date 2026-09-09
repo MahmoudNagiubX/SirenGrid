@@ -106,7 +106,17 @@ export function AiBlock({ title, children, footer }: { title: string; children: 
   );
 }
 
-export function ApprovalBar({ note, onApprove, approved }: { note: string; onApprove?: () => void; approved?: boolean }) {
+export function ApprovalBar({
+  note,
+  onApprove,
+  approved,
+  disabled,
+}: {
+  note: string;
+  onApprove?: () => void;
+  approved?: boolean;
+  disabled?: boolean;
+}) {
   return (
     <div
       style={{
@@ -129,10 +139,10 @@ export function ApprovalBar({ note, onApprove, approved }: { note: string; onApp
       {!approved && (
         <div style={{ display: 'flex', gap: 8 }}>
           <div style={{ flex: 1 }}>
-            <Button variant="primary" size="md" onClick={onApprove} full>Approve</Button>
+            <Button variant="primary" size="md" onClick={onApprove} disabled={disabled} full>Approve</Button>
           </div>
-          <Button variant="critical" size="md">Reject</Button>
-          <Button variant="ghost" size="md">Revise</Button>
+          <Button variant="critical" size="md" disabled={disabled}>Reject</Button>
+          <Button variant="ghost" size="md" disabled={disabled}>Revise</Button>
         </div>
       )}
     </div>

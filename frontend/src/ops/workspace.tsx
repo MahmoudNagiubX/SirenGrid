@@ -1,21 +1,32 @@
-import { Fragment } from 'react';
+import { Fragment, useState } from 'react';
 import { Badge, GlassPanel, IconTile, Input } from '../components';
 import { Ico } from '../lib/icon';
 import { Prov } from './primitives';
 import {
-  DOCK_EVENTS,
-  INCIDENTS,
-  RAIL_RESOURCES,
   STATES,
-  STATUS_KPIS,
   TOP_NAV,
   type OpsState,
+  type ProvKind,
   type TopNav,
 } from '../data/mock';
+import { useOperations } from '../state/OperationsContext';
+import type { TimelineEventRead } from '../api/types';
 
 /** Ported from ui_kits/operations_center/workspace.jsx (StatusStrip, StateSwitch, IncidentRail, TimelineDock). */
 
 export function StatusStrip({ nav, setNav }: { nav: TopNav; setNav: (n: TopNav) => void }) {
+  const { incidents } = useOperations();
+  const terminalStatuses = new Set(['CLOSED', 'CANCELLED_FALSE_REPORT', 'DUPLICATE_MERGED']);
+  const openCount = incidents.data
+    ? incidents.data.filter((i) => !terminalStatuses.has(i.status)).length
+    : null;
+
+  const kpis: [string, string][] = [
+    ['—', 'city coverage'],
+    ['—', 'avg response ETA'],
+    [openCount !== null ? `${openCount} active` : '— active', 'open incidents'],
+  ];
+
   return (
     <div style={{ height: 62, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 20px', background: 'var(--color-bg-surface)', borderBottom: '1px solid var(--color-border-hairline)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
@@ -59,7 +70,7 @@ export function StatusStrip({ nav, setNav }: { nav: TopNav; setNav: (n: TopNav) 
         </div>
       </div>
       <div style={{ display: 'flex', gap: 22, alignItems: 'center', whiteSpace: 'nowrap' }}>
-        {STATUS_KPIS.map(([v, l], i) => (
+        {kpis.map(([v, l], i) => (
           <Fragment key={l}>
             {i > 0 && <span style={{ width: 1, height: 22, background: 'var(--color-border-hairline)' }} />}
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 7 }}>
@@ -119,6 +130,43 @@ function StateSwitch({ state, setState }: { state: OpsState; setState: (s: OpsSt
   );
 }
 
+const INCIDENT_TYPE_AR: Record<string, string> = {
+  traffic_collision: 'تصادم مروري',
+  structure_fire: 'حريق مبنى',
+  medical_emergency: 'طوارئ طبية',
+  hazardous_materials: 'مواد خطرة',
+};
+
+function humanizeType(type: string): string {
+  return type
+    .replace(/_/g, ' ')
+    .toLowerCase()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function humanizeStatus(status: string): string {
+  return status
+    .replace(/_/g, ' ')
+    .toLowerCase()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function incidentIcon(type: string): string {
+  const lower = type.toLowerCase();
+  if (lower.includes('fire')) return 'flame';
+  if (lower.includes('medical') || lower.includes('ambulance')) return 'heart-pulse';
+  return 'alert-triangle';
+}
+
+function formatIncidentTime(ts: string | null): string {
+  if (!ts) return '—';
+  try {
+    return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  } catch {
+    return '—';
+  }
+}
+
 export function IncidentRail({
   selected,
   setSelected,
@@ -130,9 +178,41 @@ export function IncidentRail({
   state: OpsState;
   setState: (s: OpsState) => void;
 }) {
+  const [search, setSearch] = useState('');
+  const { incidents, resources } = useOperations();
+
+  const incidentList = incidents.data ?? [];
+  const filtered = incidentList.filter((inc) => {
+    if (!search.trim()) return true;
+    const q = search.toLowerCase();
+    return (
+      inc.id.toLowerCase().includes(q) ||
+      (inc.location_text ?? '').toLowerCase().includes(q) ||
+      inc.incident_type.toLowerCase().includes(q)
+    );
+  });
+
+  const resourcesList = resources.data ?? [];
+  const ambTotal = resourcesList.filter((r) => r.resource_type === 'AMBULANCE' || r.type === 'AMBULANCE').length;
+  const ambAvail = resourcesList.filter(
+    (r) => (r.resource_type === 'AMBULANCE' || r.type === 'AMBULANCE') && r.status === 'AVAILABLE',
+  ).length;
+  const fireTotal = resourcesList.filter((r) => r.resource_type === 'FIRE_RESCUE' || r.type === 'FIRE_RESCUE').length;
+  const fireAvail = resourcesList.filter(
+    (r) => (r.resource_type === 'FIRE_RESCUE' || r.type === 'FIRE_RESCUE') && r.status === 'AVAILABLE',
+  ).length;
+
+  const railResources: [string, string][] = [
+    ['Ambulances', resources.data ? `${ambAvail} / ${ambTotal}` : '—'],
+    ['Fire & rescue', resources.data ? `${fireAvail} / ${fireTotal}` : '—'],
+    ['Reserve held', '—'],
+  ];
+
   return (
     <div style={{ width: 312, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 11, minHeight: 0 }}>
       <Input
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
         placeholder="Search incident, street, unit"
         icon={
           <span style={{ width: 16, height: 16, display: 'flex', color: 'var(--color-text-muted)' }}>
@@ -142,8 +222,15 @@ export function IncidentRail({
       />
       <StateSwitch state={state} setState={setState} />
       <div style={{ display: 'flex', flexDirection: 'column', gap: 9, overflowY: 'auto', paddingRight: 2, flex: 1, minHeight: 0 }}>
-        {INCIDENTS.map((inc) => {
+        {filtered.length === 0 && (
+          <div style={{ padding: 16, textAlign: 'center', color: 'var(--color-text-muted)', fontSize: 13 }}>
+            {incidents.loading ? 'Loading incidents…' : 'No active incidents'}
+          </div>
+        )}
+        {filtered.map((inc) => {
           const on = selected === inc.id;
+          const sevTone = inc.severity.toLowerCase() as 'low' | 'moderate' | 'high' | 'critical';
+          const arLabel = INCIDENT_TYPE_AR[inc.incident_type.toLowerCase()] ?? '';
           return (
             <button
               key={inc.id}
@@ -165,20 +252,26 @@ export function IncidentRail({
                 boxShadow: on ? 'var(--shadow-sm)' : 'none',
               }}
             >
-              <IconTile icon={<Ico n={inc.icon} />} tint={inc.sev === 'critical' || inc.sev === 'high' ? 'red' : 'navy'} size={34} />
+              <IconTile icon={<Ico n={incidentIcon(inc.incident_type)} />} tint={sevTone === 'critical' || sevTone === 'high' ? 'red' : 'navy'} size={34} />
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.015em', lineHeight: 1.25 }}>{inc.title}</div>
+                <div style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.015em', lineHeight: 1.25 }}>
+                  {humanizeType(inc.incident_type)}
+                </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
-                  <Badge severity={inc.sev} />
-                  <span style={{ fontSize: 13, color: 'var(--color-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{inc.loc}</span>
+                  <Badge severity={sevTone} />
+                  <span style={{ fontSize: 13, color: 'var(--color-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {inc.location_text || 'Location unresolved'}
+                  </span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginTop: 4 }}>
                   <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-text-secondary)', whiteSpace: 'nowrap' }}>
-                    {inc.state} · {inc.t}
+                    {humanizeStatus(inc.status)} · {formatIncidentTime(inc.created_at)}
                   </span>
-                  <span dir="rtl" style={{ fontFamily: 'var(--font-ar)', fontSize: 13, color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>
-                    {inc.ar}
-                  </span>
+                  {arLabel && (
+                    <span dir="rtl" style={{ fontFamily: 'var(--font-ar)', fontSize: 13, color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>
+                      {arLabel}
+                    </span>
+                  )}
                 </div>
               </div>
             </button>
@@ -190,7 +283,7 @@ export function IncidentRail({
           <IconTile icon={<Ico n="truck" />} tint="navy" size={28} />
           <span style={{ fontSize: 14, fontWeight: 600 }}>Resources</span>
         </div>
-        {RAIL_RESOURCES.map(([a, b]) => (
+        {railResources.map(([a, b]) => (
           <div key={a} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13.5, padding: '5px 0' }}>
             <span style={{ color: 'var(--color-text-muted)' }}>{a}</span>
             <span style={{ fontWeight: 600 }}>{b}</span>
@@ -201,7 +294,19 @@ export function IncidentRail({
   );
 }
 
+function deriveProv(evt: TimelineEventRead): ProvKind {
+  const d = evt.details as Record<string, unknown> | undefined;
+  if (d?.source === 'operator' || d?.operator_reference) return 'operator';
+  if (d?.source === 'responder') return 'responder';
+  if (d?.data_reality === 'SIMULATED' || d?.data_reality === 'SYNTHETIC') return 'sim';
+  return 'source';
+}
+
 export function TimelineDock({ open, setOpen }: { open: boolean; setOpen: (o: boolean) => void }) {
+  const { selectedIncidentId, timeline } = useOperations();
+  const events = timeline.data ?? [];
+  const latestEvent = events.length > 0 ? events[events.length - 1] : null;
+
   return (
     <GlassPanel padding={0} style={{ flexShrink: 0 }}>
       <button
@@ -211,12 +316,14 @@ export function TimelineDock({ open, setOpen }: { open: boolean; setOpen: (o: bo
       >
         <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <IconTile icon={<Ico n="clock" />} tint="glass" size={28} />
-          <span style={{ fontSize: 14, fontWeight: 600 }}>History · INC-2418</span>
+          <span style={{ fontSize: 14, fontWeight: 600 }}>
+            History · {selectedIncidentId ?? 'No incident selected'}
+          </span>
         </span>
         <span style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--color-text-secondary)' }}>
-          {!open && (
+          {!open && latestEvent && (
             <span>
-              {DOCK_EVENTS[0][0]} · {DOCK_EVENTS[0][1]}
+              {formatIncidentTime(latestEvent.created_at)} · {humanizeStatus(latestEvent.event_type)}
             </span>
           )}
           <span style={{ width: 16, height: 16, display: 'flex' }}>
@@ -226,21 +333,31 @@ export function TimelineDock({ open, setOpen }: { open: boolean; setOpen: (o: bo
       </button>
       {open && (
         <div style={{ display: 'flex', padding: '2px 16px 14px', overflowX: 'auto' }}>
-          {DOCK_EVENTS.map(([t, e, p], i) => (
-            <div
-              key={i}
-              style={{
-                minWidth: 226,
-                paddingRight: 18,
-                marginRight: 18,
-                borderRight: i < DOCK_EVENTS.length - 1 ? '1px solid var(--color-border-hairline)' : 'none',
-              }}
-            >
-              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--color-accent)' }}>{t}</div>
-              <div style={{ fontSize: 13.5, lineHeight: 1.45, margin: '3px 0 6px' }}>{e}</div>
-              <Prov kind={p} />
+          {events.length === 0 ? (
+            <div style={{ padding: '8px 0', fontSize: 13, color: 'var(--color-text-muted)' }}>
+              No timeline events recorded for this incident.
             </div>
-          ))}
+          ) : (
+            events.map((evt, i) => (
+              <div
+                key={evt.id || i}
+                style={{
+                  minWidth: 226,
+                  paddingRight: 18,
+                  marginRight: 18,
+                  borderRight: i < events.length - 1 ? '1px solid var(--color-border-hairline)' : 'none',
+                }}
+              >
+                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--color-accent)' }}>
+                  {formatIncidentTime(evt.created_at)}
+                </div>
+                <div style={{ fontSize: 13.5, lineHeight: 1.45, margin: '3px 0 6px' }}>
+                  {humanizeStatus(evt.event_type)}
+                </div>
+                <Prov kind={deriveProv(evt)} />
+              </div>
+            ))
+          )}
         </div>
       )}
     </GlassPanel>

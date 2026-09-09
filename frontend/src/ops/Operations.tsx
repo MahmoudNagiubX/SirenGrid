@@ -12,6 +12,8 @@ import {
   type OverlayKey,
 } from '../data/mock';
 
+import { useOperations } from '../state/OperationsContext';
+
 /**
  * Ported from the `Operations` component in ui_kits/operations_center/index.html.
  *
@@ -20,9 +22,9 @@ import {
  * default decision tab together.
  */
 export function Operations({ initialState = 'idle' }: { initialState?: OpsState }) {
+  const { selectedIncidentId, setSelectedIncidentId } = useOperations();
   const [state, setStateRaw] = useState<OpsState>(STATE_META[initialState] ? initialState : 'idle');
   const [tab, setTab] = useState<DecisionTab>(STATE_META[STATE_META[initialState] ? initialState : 'idle'].tab);
-  const [selected, setSelected] = useState('INC-2418');
   const [dock, setDock] = useState(false);
   const [userOverlays, setUserOverlays] = useState<Partial<Record<OverlayKey, boolean>>>({});
 
@@ -38,7 +40,7 @@ export function Operations({ initialState = 'idle' }: { initialState?: OpsState 
 
   return (
     <div style={{ flex: 1, display: 'flex', gap: 14, padding: 16, minHeight: 0 }}>
-      <IncidentRail selected={selected} setSelected={setSelected} state={state} setState={setState} />
+      <IncidentRail selected={selectedIncidentId ?? ''} setSelected={(id) => setSelectedIncidentId(id)} state={state} setState={setState} />
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
         <div style={{ flex: 1, position: 'relative', borderRadius: 'var(--radius-lg)', overflow: 'hidden', border: '1px solid var(--color-border-hairline)', minHeight: 0 }}>
           <DenseMap view={meta.map.view} overlays={overlays} route={meta.map.route}>
