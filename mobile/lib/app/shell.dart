@@ -11,6 +11,7 @@ import '../features/emergency/home_cubit.dart';
 import '../features/emergency/home_screen.dart';
 import '../features/tracking/tracking_cubit.dart';
 import '../features/tracking/tracking_screen.dart';
+import '../l10n/strings.dart';
 import '../notifications/notification_coordinator.dart';
 
 /// Authenticated container — exactly three destinations (brief §17). Owns the
@@ -62,7 +63,22 @@ class _MainShellState extends State<MainShell> {
     context.read<TrackingCubit>().refreshNow();
     if (intent.isRequestScoped) {
       setState(() => _hasActiveRequest = true);
-      if (intent.fromTap) _goTo(1);
+      if (intent.fromTap) {
+        _goTo(1);
+      } else if (intent.title != null) {
+        // Foreground: present in-app rather than relying on the OS tray.
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            SnackBar(
+              content: Text(intent.body ?? intent.title!),
+              action: SnackBarAction(
+                label: context.tr('nav.track'),
+                onPressed: () => _goTo(1),
+              ),
+            ),
+          );
+      }
     }
   }
 

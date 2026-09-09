@@ -1,13 +1,21 @@
 plugins {
     id("com.android.application")
+    // START: FlutterFire Configuration
+    id("com.google.gms.google-services")
+    // END: FlutterFire Configuration
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
 
 android {
     namespace = "eg.sirengrid.sirengrid_citizen"
-    compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    // flutter_secure_storage 11.x requires compileSdk 37 (installed:
+    // platforms/android-37.0). AGP 9.1.0 warns but compiles fine; the warning
+    // is suppressed in gradle.properties.
+    compileSdk = maxOf(flutter.compileSdkVersion, 37)
+    // Pinned to a locally-installed NDK so the build never triggers the
+    // sdkmanager NDK auto-provision (which crashes under JDK 25 on this host).
+    ndkVersion = "28.2.13676358"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

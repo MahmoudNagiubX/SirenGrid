@@ -46,3 +46,9 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# Firebase Admin service-account keys — server secrets, never commit.
+# (google-services.json / firebase_options.dart are CLIENT config and ARE committed.)
+**/*-adminsdk-*.json
+**/serviceAccount*.json
+**/firebase-admin*.json

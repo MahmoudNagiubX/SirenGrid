@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "902695720024",
+    "project_id": "sirengrid",
+    "storage_bucket": "sirengrid.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:902695720024:android:e993e68db9ab1009b1662d",
+        "android_client_info": {
+          "package_name": "eg.sirengrid.sirengrid_citizen"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyABtlJ8zT1bPPDmySNvIekOEnhKkTw3Y2w"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

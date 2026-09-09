@@ -4,12 +4,13 @@ import 'dart:developer' as dev;
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 
-import 'firebase_options.dart';
+import 'package:sirengrid_citizen/firebase_options.dart';
+
 import 'messaging_port.dart';
 
-/// Returns the generated FlutterFire options, or `null` when the project has
-/// not been `flutterfire configure`d yet (the placeholder throws). Keeps the
-/// whole app runnable without real Firebase config (addendum §15).
+/// Returns the generated FlutterFire options, or `null` on an unsupported
+/// platform. Keeps the app runnable even if config is somehow unavailable
+/// (addendum §15).
 FirebaseOptions? _optionsOrNull() {
   try {
     return DefaultFirebaseOptions.currentPlatform;
