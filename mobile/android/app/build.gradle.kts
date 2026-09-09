@@ -28,6 +28,14 @@ android {
         minSdk = maxOf(flutter.minSdkVersion, 23)
         targetSdk = flutter.targetSdkVersion
         multiDexEnabled = true
+        // Demo target is the arm64 device (SM-A546E). Restricting ABIs keeps the
+        // transitive `jni` package's native build off x86_64, whose sysroot in
+        // the locally-installed NDK is incomplete on this host. A release build
+        // for the Play Store would re-add arm64-v8a + armeabi-v7a (+ x86_64).
+        ndk {
+            abiFilters.clear()
+            abiFilters.add("arm64-v8a")
+        }
         // Uses the version code from pubspec.yaml. When using split APKs, 1000 * ABI_VERSION
         // is added automatically by Flutter. (https://developer.android.com/studio/build/configure-apk-splits#configure-APK-versions)
         // You can force using the value of versionCode by specifying the `-P force-version-code-ignoring-abi=true`
