@@ -4,6 +4,7 @@ import type {
   HospitalRead,
   IncidentOperationalStateRead,
   IncidentRead,
+  MapLayerResponse,
   ReplanEvaluationRead,
   ReportRead,
   ResourceRead,
@@ -60,6 +61,18 @@ export async function getOperationalState(incidentId: string): Promise<IncidentO
     await request(`/incidents/${id(incidentId)}/operational-state`),
     'operational state',
   );
+}
+
+export async function getMapBoundary(): Promise<MapLayerResponse> {
+  return requireObject<MapLayerResponse>(await request('/map/boundary'), 'map boundary');
+}
+
+export async function getMapRoads(): Promise<MapLayerResponse> {
+  return requireObject<MapLayerResponse>(await request('/map/roads'), 'map roads');
+}
+
+export async function getMapZones(): Promise<MapLayerResponse> {
+  return requireObject<MapLayerResponse>(await request('/map/zones'), 'map zones');
 }
 
 export async function getReplan(incidentId: string): Promise<ReplanEvaluationRead | null> {

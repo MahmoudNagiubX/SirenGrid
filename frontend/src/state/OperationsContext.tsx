@@ -12,6 +12,9 @@ import { ApiError } from '../api/client';
 import {
   getHealth,
   getIncident,
+  getMapBoundary,
+  getMapRoads,
+  getMapZones,
   getOperationalState,
   getReplan,
   getSimulationStatus,
@@ -28,6 +31,7 @@ import type {
   HospitalRead,
   IncidentOperationalStateRead,
   IncidentRead,
+  MapLayerResponse,
   ReplanEvaluationRead,
   ReportRead,
   ResourceRead,
@@ -63,6 +67,10 @@ export interface OperationsContextValue {
   traffic: AsyncState<TrafficSnapshotRead>;
   simulation: AsyncState<SimulationStatusRead>;
 
+  mapBoundary: AsyncState<MapLayerResponse>;
+  mapRoads: AsyncState<MapLayerResponse>;
+  mapZones: AsyncState<MapLayerResponse>;
+
   selectedIncidentId: string | null;
   selectedIncident: AsyncState<IncidentRead>;
   reports: AsyncState<ReportRead[]>;
@@ -74,6 +82,7 @@ export interface OperationsContextValue {
   setSelectedIncidentId: (id: string | null) => void;
   refreshGlobal: () => Promise<void>;
   refreshSelectedIncident: (id?: string) => Promise<void>;
+  refreshMapLayers: () => Promise<void>;
 }
 
 const OperationsContext = createContext<OperationsContextValue | null>(null);
@@ -85,6 +94,10 @@ export function OperationsProvider({ children }: { children: ReactNode }) {
   const [hospitals, setHospitals] = useState<AsyncState<HospitalRead[]>>(emptyState);
   const [traffic, setTraffic] = useState<AsyncState<TrafficSnapshotRead>>(emptyState);
   const [simulation, setSimulation] = useState<AsyncState<SimulationStatusRead>>(emptyState);
+
+  const [mapBoundary, setMapBoundary] = useState<AsyncState<MapLayerResponse>>(emptyState);
+  const [mapRoads, setMapRoads] = useState<AsyncState<MapLayerResponse>>(emptyState);
+  const [mapZones, setMapZones] = useState<AsyncState<MapLayerResponse>>(emptyState);
 
   const [selectedIncidentId, setSelectedIncidentId] = useState<string | null>(null);
   const [selectedIncident, setSelectedIncident] = useState<AsyncState<IncidentRead>>(emptyState);
@@ -232,9 +245,43 @@ export function OperationsProvider({ children }: { children: ReactNode }) {
     }
   }, [refreshSelectedIncident]);
 
+  const refreshMapLayers = useCallback(async () => {
+    setMapBoundary((s) => ({ ...s, loading: true, error: null }));
+    setMapRoads((s) => ({ ...s, loading: true, error: null }));
+    setMapZones((s) => ({ ...s, loading: true, error: null }));
+
+    const [boundaryRes, roadsRes, zonesRes] = await Promise.allSettled([
+      getMapBoundary(),
+      getMapRoads(),
+      getMapZones(),
+    ]);
+
+    setMapBoundary(
+      boundaryRes.status === 'fulfilled'
+        ? { data: boundaryRes.value, loading: false, error: null }
+        : { data: null, loading: false, error: toApiError(boundaryRes.reason) },
+    );
+    setMapRoads(
+      roadsRes.status === 'fulfilled'
+        ? { data: roadsRes.value, loading: false, error: null }
+        : { data: null, loading: false, error: toApiError(roadsRes.reason) },
+    );
+    setMapZones(
+      zonesRes.status === 'fulfilled'
+        ? { data: zonesRes.value, loading: false, error: null }
+        : { data: null, loading: false, error: toApiError(zonesRes.reason) },
+    );
+  }, []);
+
   useEffect(() => {
     void refreshGlobal();
   }, [refreshGlobal]);
+
+  // Static/derived map layers: fetch once on provider mount, independent of
+  // incident selection. No polling, no automatic retry.
+  useEffect(() => {
+    void refreshMapLayers();
+  }, [refreshMapLayers]);
 
   useEffect(() => {
     if (selectedIncidentId && selectedIncidentId !== selectedRef.current) {
@@ -251,6 +298,9 @@ export function OperationsProvider({ children }: { children: ReactNode }) {
       hospitals,
       traffic,
       simulation,
+      mapBoundary,
+      mapRoads,
+      mapZones,
       selectedIncidentId,
       selectedIncident,
       reports,
@@ -261,6 +311,7 @@ export function OperationsProvider({ children }: { children: ReactNode }) {
       setSelectedIncidentId,
       refreshGlobal,
       refreshSelectedIncident,
+      refreshMapLayers,
     }),
     [
       health,
@@ -269,6 +320,9 @@ export function OperationsProvider({ children }: { children: ReactNode }) {
       hospitals,
       traffic,
       simulation,
+      mapBoundary,
+      mapRoads,
+      mapZones,
       selectedIncidentId,
       selectedIncident,
       reports,
@@ -278,6 +332,7 @@ export function OperationsProvider({ children }: { children: ReactNode }) {
       replan,
       refreshGlobal,
       refreshSelectedIncident,
+      refreshMapLayers,
     ],
   );
 

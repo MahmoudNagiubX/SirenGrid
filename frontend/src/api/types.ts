@@ -444,3 +444,9 @@ export interface SimulationStatusRead {
   last_event_type: string | null;
   reality: string;
 }
+
+export interface MapLayerResponse {
+  layer: string;
+  geojson: Record<string, unknown>;
+  provenance: Record<string, unknown>;
+}
