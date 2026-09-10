@@ -17,6 +17,7 @@
 import type {
   HospitalRead,
   IncidentRead,
+  OperationalResponderTrackingRead,
   PlanRoute,
   ReplanEvaluationRead,
   ResourceRead,
@@ -109,7 +110,7 @@ export function toIncidentMarker(
     id: incident.id,
     coordinate,
     kind: 'incident',
-    label: `${humanizeType(incident.incident_type)} · ${incident.id}`,
+    label: humanizeType(incident.incident_type),
     sublabel: incident.location_text ?? undefined,
     tone: severe ? 'critical' : 'primary',
     icon: 'incident',
@@ -121,11 +122,14 @@ export function toIncidentMarker(
 export function toResourceMarkers(
   resources: readonly ResourceRead[],
   selectedIncidentId: string | null,
+  tracking: readonly OperationalResponderTrackingRead[] = [],
 ): RealMapMarker[] {
   const markers: RealMapMarker[] = [];
+  const trackingByResource = new Map(tracking.map((item) => [item.resource_id, item]));
   for (const resource of resources) {
-    const lon = finiteNumber(resource.longitude);
-    const lat = finiteNumber(resource.latitude);
+    const snapshot = trackingByResource.get(resource.id);
+    const lon = finiteNumber(snapshot?.location.lon ?? resource.longitude);
+    const lat = finiteNumber(snapshot?.location.lat ?? resource.latitude);
     if (lon === null || lat === null) continue;
 
     const assignedToSelected =
@@ -150,8 +154,8 @@ export function toResourceMarkers(
       id: resource.id,
       coordinate: [lon, lat],
       kind: 'resource',
-      label: resource.name || resource.id,
-      sublabel: resource.status,
+      label: resource.name || humanizeType(rtype || 'response unit'),
+      sublabel: humanizeType(snapshot?.status ?? resource.status),
       tone,
       icon,
     });
@@ -170,8 +174,8 @@ export function toHospitalMarkers(hospitals: readonly HospitalRead[]): RealMapMa
       id: hospital.id,
       coordinate: [lon, lat],
       kind: 'hospital',
-      label: hospital.name || hospital.id,
-      sublabel: hospital.accepting_state,
+      label: hospital.name || 'Hospital',
+      sublabel: humanizeType(hospital.accepting_state),
       tone: 'neutral',
       icon: 'hospital',
     });
@@ -273,7 +277,12 @@ export function planToRealMapRoutes(
   role: RealMapRouteRole,
 ): RealMapRoute[] {
   const routes: RealMapRoute[] = [];
-  plan.routes.forEach((route: PlanRoute, index: number) => {
+  const routeRecords = Array.isArray(plan.routes) && plan.routes.length > 0
+    ? plan.routes
+    : Array.isArray(plan.routes_json)
+    ? plan.routes_json
+    : [];
+  routeRecords.forEach((route: PlanRoute, index: number) => {
     const coordinates = lineStringCoordinates(route.geometry);
     if (!coordinates) return;
     const resourceId =

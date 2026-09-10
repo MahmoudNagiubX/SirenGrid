@@ -17,6 +17,7 @@ import {
 import { useCommandRunner, useOperations } from '../state/OperationsContext';
 import {
   approvePlan,
+  cancelIncident,
   evaluateReplan,
   generateCandidates,
   generateHospitalOptions,
@@ -64,7 +65,7 @@ function StateBanner({ state }: { state: OpsState }) {
       ? rep.trigger_reasons.map(humanize).join(', ')
       : 'Replan evaluation';
     const sub = rep?.pending_plan_id
-      ? `Pending replacement plan ${rep.pending_plan_id}`
+      ? 'A replacement recommendation is ready for operator review. The current response remains active.'
       : rep?.status ? `Status: ${humanize(rep.status)}` : 'No active replan trigger';
 
     return (
@@ -79,7 +80,7 @@ function StateBanner({ state }: { state: OpsState }) {
   }
 
   if (state === 'active') {
-    const title = inc?.current_plan_id ? `Plan ${inc.current_plan_id} active · executing` : 'Active response executing';
+    const title = inc?.current_plan_id ? 'Response active' : 'Active response executing';
     const sub = inc?.status ? `Incident status: ${humanize(inc.status)}` : 'No active incident';
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: 11, padding: 12, borderRadius: 'var(--radius-md)', background: 'var(--color-confirmed-soft)', border: '1px solid var(--blue-300)' }}>
@@ -116,9 +117,27 @@ function Row({ a, b, tone }: { a: string; b: string; tone?: string }) {
   );
 }
 
-function OverviewTab({ state, onSelectTab }: { state: OpsState; onSelectTab: (t: DecisionTab) => void }) {
-  const { selectedIncident, timeline, resources, plans } = useOperations();
+function OverviewTab({
+  state,
+  onSelectTab,
+  onAdvance,
+}: {
+  state: OpsState;
+  onSelectTab: (t: DecisionTab) => void;
+  onAdvance: (state: OpsState) => void;
+}) {
+  const {
+    selectedIncident,
+    timeline,
+    resources,
+    plans,
+    operationalState,
+    refreshGlobal,
+    refreshSelectedIncident,
+  } = useOperations();
+  const { busyAction, message, run } = useCommandRunner();
   const inc = selectedIncident.data;
+  const mobileSummary = getMobileSourceSummary(inc);
 
   if (state === 'coverage') {
     return (
@@ -146,6 +165,7 @@ function OverviewTab({ state, onSelectTab }: { state: OpsState; onSelectTab: (t:
         (incidentId && r.assigned_incident_id === incidentId) ||
         (currentPlanResourceIds.size > 0 && currentPlanResourceIds.has(r.id)),
     );
+    const tracking = operationalState.data?.responder_tracking ?? [];
 
     return (
       <Fragment>
@@ -170,7 +190,34 @@ function OverviewTab({ state, onSelectTab }: { state: OpsState; onSelectTab: (t:
           <div style={{ padding: '8px 0', fontSize: 13, color: 'var(--color-text-muted)' }}>No units currently assigned.</div>
         ) : (
           assignedResources.map((u) => (
-            <Row key={u.id} a={u.name || u.id} b={humanize(u.status)} />
+            <Row key={u.id} a={u.name || humanize(u.resource_type ?? u.type ?? 'response unit')} b={humanize(u.status)} />
+          ))
+        )}
+        <SubHead>Responder tracking</SubHead>
+        {tracking.length === 0 ? (
+          <div style={{ padding: '8px 0', fontSize: 13, color: 'var(--color-text-muted)' }}>
+            No safe tracking projection is available for the current approved response.
+          </div>
+        ) : (
+          tracking.map((item) => (
+            <Card key={item.resource_id} padding={12}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
+                <span style={{ fontSize: 14, fontWeight: 600 }}>{item.label}</span>
+                <Badge tone={item.data_reality === 'SIMULATED' ? 'simulated' : 'info'}>
+                  {item.data_reality === 'SIMULATED' ? 'Simulated' : humanize(item.data_reality)}
+                </Badge>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 7, fontSize: 13, color: 'var(--color-text-muted)' }}>
+                <span>{humanize(item.status)}</span>
+                <span>{item.eta_seconds == null ? 'ETA unknown' : `ETA ${formatSeconds(item.eta_seconds)}`}</span>
+              </div>
+              <div style={{ height: 7, marginTop: 8, overflow: 'hidden', borderRadius: 4, background: 'var(--gray-200)' }}>
+                <div style={{ width: `${Math.round(item.progress_fraction * 100)}%`, height: '100%', borderRadius: 4, background: 'var(--color-accent)' }} />
+              </div>
+              <div style={{ marginTop: 4, fontSize: 12.5, color: 'var(--color-text-muted)' }}>
+                {Math.round(item.progress_fraction * 100)}% along the approved route
+              </div>
+            </Card>
           ))
         )}
       </Fragment>
@@ -193,7 +240,6 @@ function OverviewTab({ state, onSelectTab }: { state: OpsState; onSelectTab: (t:
     : 'var(--color-text-primary)';
   const confLevel = inc?.confidence_level?.toLowerCase() as 'low' | 'medium' | 'high' | undefined;
 
-  const mobileSummary = getMobileSourceSummary(inc);
   const citizenCtx = getMobileCitizenContext(inc);
   const locSummary = getMobileLocationSummary(inc);
   const hasEmergencyGps = !!inc && inc.latitude != null && inc.longitude != null;
@@ -207,7 +253,7 @@ function OverviewTab({ state, onSelectTab }: { state: OpsState; onSelectTab: (t:
         </div>
         <span style={{ width: 1, background: 'var(--color-border-hairline)' }} />
         <div style={{ flex: 1.1 }}>
-          <SubHead>AI confidence</SubHead>
+          <SubHead>{mobileSummary ? 'Source confidence' : 'AI confidence'}</SubHead>
           <div style={{ marginTop: 7 }}>
             <ConfidenceMeter level={confLevel ?? 'low'} label={confLevel ? humanize(confLevel) : 'Not scored'} />
           </div>
@@ -215,13 +261,12 @@ function OverviewTab({ state, onSelectTab }: { state: OpsState; onSelectTab: (t:
       </div>
       {mobileSummary && (
         <Fragment>
-          <SubHead>Request source</SubHead>
-          {mobileSummary.operatorReviewRequired && (
-            <Alert tone="attention" title="Operator review required">
-              This mobile request is queued for operator review. No automated dispatch occurs.
-            </Alert>
-          )}
-          <Fact label="Request source" value="Mobile App" />
+          <SubHead>New emergency request</SubHead>
+          <Alert tone="attention" title="Pending operator review">
+            This citizen request has not dispatched a response. Review the Device GPS and requested service before coordinating a plan.
+          </Alert>
+          <Fact label="Request source" value="SirenGrid Citizen" />
+          <Fact label="Requested service" value={mobileSummary.requestedService ? humanize(mobileSummary.requestedService) : undefined} unknown={!mobileSummary.requestedService} />
           {citizenCtx?.citizenReference && (
             <Fact label="Citizen reference" value={citizenCtx.citizenReference} />
           )}
@@ -230,10 +275,10 @@ function OverviewTab({ state, onSelectTab }: { state: OpsState; onSelectTab: (t:
           )}
           {citizenCtx?.phone && <Fact label="Phone" value={citizenCtx.phone} />}
           {citizenCtx?.registeredAddress && (
-            <Fact label="Registered address" value={citizenCtx.registeredAddress} />
+            <Fact label="Registered address (context only)" value={citizenCtx.registeredAddress} />
           )}
           <Fact
-            label="Emergency location"
+            label="Device GPS emergency location"
             value={
               hasEmergencyGps
                 ? `${inc!.latitude!.toFixed(5)}, ${inc!.longitude!.toFixed(5)}`
@@ -257,6 +302,41 @@ function OverviewTab({ state, onSelectTab }: { state: OpsState; onSelectTab: (t:
             }
             unknown={!inc?.created_at}
           />
+          {!inc?.current_plan_id && inc && (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
+              <Button variant="primary" size="sm" onClick={() => onAdvance('plan')}>
+                Accept & Coordinate
+              </Button>
+              <Button
+                variant="critical"
+                size="sm"
+                disabled={busyAction !== null}
+                onClick={() =>
+                  void run('cancel-mobile-request', {
+                    command: () =>
+                      cancelIncident(inc.id, {
+                        expected_incident_version: inc.version,
+                        operator_reference: OPERATOR_REF,
+                        reason_code: 'FALSE_REPORT',
+                        reason: 'Operator marked mobile request as a false report.',
+                      }),
+                    refetch: async () => {
+                      await refreshGlobal({ includeSelected: false });
+                      await refreshSelectedIncident(inc.id);
+                    },
+                    successText: 'Mobile request marked as a false report. No response was dispatched.',
+                  })
+                }
+              >
+                {busyAction === 'cancel-mobile-request' ? 'Working…' : 'Dismiss / Mark False Report'}
+              </Button>
+            </div>
+          )}
+          {message && (
+            <Alert tone={message.kind === 'success' ? 'info' : 'attention'} title={message.kind === 'success' ? 'Updated' : 'Review needed'}>
+              {message.text}
+            </Alert>
+          )}
         </Fragment>
       )}
       <SubHead>Known</SubHead>
@@ -309,7 +389,13 @@ function sortCandidatePlans(plans: ResponsePlanRead[]): ResponsePlanRead[] {
   });
 }
 
-function PlanTab({ state }: { state: OpsState }) {
+function PlanTab({
+  state,
+  onStateChange,
+}: {
+  state: OpsState;
+  onStateChange: (state: OpsState) => void;
+}) {
   const { plans, replan, resources, selectedIncident, refreshSelectedIncident, refreshGlobal } =
     useOperations();
   const { busyAction, message, run } = useCommandRunner();
@@ -411,6 +497,7 @@ function PlanTab({ state }: { state: OpsState }) {
             operator_reference: OPERATOR_REF,
           }),
         refetch: reconcileAfterPlanCommand(inc.id),
+        onSuccess: () => onStateChange('active'),
         successText: 'Replacement plan approved. Canonical state reloaded.',
       });
     };
@@ -459,13 +546,16 @@ function PlanTab({ state }: { state: OpsState }) {
           )
         ) : replanPlans.length === 0 ? null : (
           <div style={{ display: 'flex', gap: 10 }}>
-            {replanPlans.map((p, idx) => {
+            {replanPlans.slice(0, 3).map((p, idx) => {
               const etaSec = p.metrics?.max_arrival_eta_seconds;
-              const routeRef = p.routes?.[0]?.routing_source || p.metrics?.routing_source || 'Standard route';
               const isSelected = p.id === selectedReplanPlanId;
               const isPending = p.id === pendingPlan?.id;
               return (
-                <div key={p.id} style={{ flex: 1, cursor: 'pointer' }} onClick={() => setSelId(p.id)}>
+                <button
+                  key={p.id}
+                  onClick={() => setSelId(p.id)}
+                  style={{ flex: 1, cursor: 'pointer', border: 'none', padding: 0, background: 'transparent', fontFamily: 'var(--font-en)', textAlign: 'left' }}
+                >
                   <Card
                     padding={13}
                     style={{
@@ -477,20 +567,18 @@ function PlanTab({ state }: { state: OpsState }) {
                       {formatSeconds(etaSec)}
                     </div>
                     <div style={{ fontSize: 13, color: 'var(--color-text-muted)', marginTop: 2 }}>
-                      via {routeRef}
+                      {isPending ? 'Recommended replacement' : 'Alternative replacement'}
                     </div>
                   </Card>
-                </div>
+                </button>
               );
             })}
           </div>
         )}
         <AiBlock title="Replan evaluation">
-          {rep?.explanation && typeof rep.explanation === 'object' && Object.keys(rep.explanation).length > 0
-            ? JSON.stringify(rep.explanation)
-            : rep?.trigger_reasons && rep.trigger_reasons.length > 0
+          {rep?.trigger_reasons && rep.trigger_reasons.length > 0
             ? `Replan triggered by: ${rep.trigger_reasons.map(humanize).join(', ')}.`
-            : 'Replan evaluation is backend-authoritative. Materiality is determined by the server engine.'}
+            : 'The backend evaluates whether the changed conditions require a replacement. The active response stays in place until an operator approves a replacement.'}
         </AiBlock>
         <ApprovalBar
           approved={!!pendingIsApproved}
@@ -542,7 +630,7 @@ function PlanTab({ state }: { state: OpsState }) {
   const activePlan = sortedPlans.find((p) => p.id === selId) ?? sortedPlans[0] ?? null;
   const selectedPlanId = activePlan?.id ?? null;
 
-  const resourceMap = new Map((resources.data ?? []).map((r) => [r.id, r.name || r.id]));
+  const resourceMap = new Map((resources.data ?? []).map((r) => [r.id, r.name || 'Assigned unit']));
 
   // --- Human-authority derivations (all from canonical reads) ---------------
   const currentPlanId = inc?.current_plan_id ?? null;
@@ -583,6 +671,7 @@ function PlanTab({ state }: { state: OpsState }) {
           operator_reference: OPERATOR_REF,
         }),
       refetch: reconcileAfterPlanCommand(inc.id),
+      onSuccess: () => onStateChange('active'),
       successText: 'Plan approved. Canonical state reloaded.',
     });
   };
@@ -606,7 +695,7 @@ function PlanTab({ state }: { state: OpsState }) {
     void run('revise', {
       command: () => generateCandidates(inc.id),
       refetch: reconcileAfterPlanCommand(inc.id),
-      successText: 'Candidate plans recalculated.',
+      successText: 'Response plans generated. Review a plan and approve explicitly.',
     });
   };
 
@@ -663,7 +752,17 @@ function PlanTab({ state }: { state: OpsState }) {
             No candidate response plans generated yet.
           </div>
         )}
-        {renderApprovalBar()}
+        {inc && (
+          <Button
+            variant="primary"
+            size="md"
+            full
+            disabled={!canRevise}
+            onClick={canRevise ? doRevise : undefined}
+          >
+            {busyAction === 'revise' ? 'Generating response plans…' : 'Generate Response Plans'}
+          </Button>
+        )}
       </Fragment>
     );
   }
@@ -732,10 +831,10 @@ function PlanTab({ state }: { state: OpsState }) {
         ))}
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {sortedPlans.map((p, idx) => {
+        {displayCandidates.map((p, idx) => {
           const isSelected = p.id === selectedPlanId;
           const isRecommended = p.status === 'RECOMMENDED';
-          const unitsLabel = p.resource_ids.map((id) => resourceMap.get(id) || id).join(', ') || 'No units specified';
+          const unitsLabel = p.resource_ids.map((id) => resourceMap.get(id) || 'Assigned unit').join(', ') || 'No units specified';
           return (
             <button
               key={p.id}
@@ -752,7 +851,7 @@ function PlanTab({ state }: { state: OpsState }) {
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
                 <span style={{ fontSize: 14, fontWeight: 600 }}>
-                  {`Plan ${candidateLabels[idx] ?? idx + 1}`} · {p.id}
+                  {`Plan ${candidateLabels[idx] ?? idx + 1}`}
                 </span>
                 {isRecommended && <Badge tone="info">Recommended</Badge>}
               </div>
@@ -764,8 +863,16 @@ function PlanTab({ state }: { state: OpsState }) {
         })}
       </div>
       {activePlan && (
-        <AiBlock title={`Plan evaluation · ${activePlan.id}`}>
-          Backend candidate evaluation under policy {activePlan.score_breakdown?.policy_version || 'standard'}. Max ETA: {formatSeconds(activePlan.metrics?.max_arrival_eta_seconds)}. Post-dispatch joint coverage: {getCoverageStr(activePlan)}. Reserve exhausted: {activePlan.score_breakdown?.remaining_reserve_exhausted ? 'Yes' : 'No'}.
+        <AiBlock title="Why this plan?">
+          {activePlan.status === 'RECOMMENDED'
+            ? 'Recommended by the backend for operator review; it is not dispatched until you approve it.'
+            : 'An alternative response plan for operator comparison; it is not dispatched until selected and approved.'}
+          <div style={{ display: 'grid', gap: 4, marginTop: 8 }}>
+            <span>Arrival: {getEtaStr(activePlan)}</span>
+            <span>Coverage after dispatch: {getCoverageStr(activePlan)}</span>
+            <span>Required resource cohorts selected: {activePlan.resource_ids.length > 0 ? 'Yes' : 'Unavailable'}</span>
+            {activePlan.score_breakdown?.remaining_reserve_exhausted === false && <span>Reserve remains available</span>}
+          </div>
         </AiBlock>
       )}
       {renderApprovalBar()}
@@ -782,6 +889,7 @@ function HospitalTab() {
   const options = hospitalOptions?.options ?? [];
   const destination = opState?.selected_destination ?? null;
   const preAlert = opState?.hospital_pre_alert ?? null;
+  const transportRequired = inc?.transport_required === true;
 
   const [selectedOptionId, setSelectedOptionId] = useState<string | null>(null);
 
@@ -868,6 +976,18 @@ function HospitalTab() {
     </Alert>
   ) : null;
 
+  if (!transportRequired && !destination) {
+    return (
+      <Fragment>
+        {opStateNotice}
+        <SubHead>Hospital workflow</SubHead>
+        <div style={{ padding: 16, color: 'var(--color-text-muted)', fontSize: 13.5, lineHeight: 1.55 }}>
+          Hospital selection is available only after transport is confirmed in the incident facts.
+        </div>
+      </Fragment>
+    );
+  }
+
   if (options.length === 0) {
     return (
       <Fragment>
@@ -888,7 +1008,7 @@ function HospitalTab() {
             disabled={busyAction !== null}
             onClick={doGenerateOptions}
           >
-            {busyAction === 'gen-options' ? 'Working…' : 'Generate options'}
+            {busyAction === 'gen-options' ? 'Working…' : 'Generate Hospital Options'}
           </Button>
         )}
         {commandNotice}
@@ -902,7 +1022,7 @@ function HospitalTab() {
         Hospital options are ranked by the backend operational model.
       </AiBlock>
       {opStateNotice}
-      <SubHead>{`Candidates · ${options.length} evaluated`}</SubHead>
+      <SubHead>{`Hospital options · ${options.length} evaluated`}</SubHead>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
         {options.map((opt: HospitalOptionRead) => {
           const h = opt.hospital;
@@ -936,12 +1056,12 @@ function HospitalTab() {
               <IconTile icon={<Ico n="hospital" />} tint={loadPct !== null && loadPct > 85 ? 'red' : 'navy'} size={38} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: 14.5, fontWeight: 600 }}>{h.name || h.id}</span>
+                  <span style={{ fontSize: 14.5, fontWeight: 600 }}>{h.name || 'Hospital name unavailable'}</span>
                   {isRec && <Badge tone="info">Recommended</Badge>}
                   {isStale && <Badge tone="neutral">Stale</Badge>}
                 </div>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, color: 'var(--color-text-muted)', marginTop: 2 }}>
-                  <span>{h.static_capabilities.join(', ') || 'General'}</span>
+                  <span>{h.static_capabilities.map(humanize).join(', ') || 'Capability unknown'}</span>
                   <span>· {humanize(h.accepting_state)}</span>
                 </div>
                 {loadPct !== null && (
@@ -967,10 +1087,10 @@ function HospitalTab() {
       {destination ? (
         <div style={{ borderRadius: 'var(--radius-md)', border: '1px solid var(--blue-300)', background: 'var(--color-confirmed-soft)', padding: 12 }}>
           <div style={{ fontSize: 13.5, fontWeight: 600 }}>
-            Committed destination · {selectedOption?.hospital.name || destination.hospital_id}
+            Confirmed destination · {selectedOption?.hospital.name || 'Hospital name unavailable'}
           </div>
           <div style={{ fontSize: 13, color: 'var(--color-text-muted)', marginTop: 2 }}>
-            Backend status: {humanize(destination.status)}
+            Destination status: {humanize(destination.status)}
             {preAlert ? ` · Pre-alert: ${humanize(preAlert.status)}` : ''}
           </div>
           <div style={{ marginTop: 10 }}>
@@ -991,7 +1111,7 @@ function HospitalTab() {
           disabled={!selectedOption || busyAction !== null || opStateBlocksCommands}
           onClick={doSelectDestination}
         >
-          {busyAction === 'select-dest' ? 'Working…' : 'Select destination'}
+          {busyAction === 'select-dest' ? 'Working…' : 'Confirm Destination'}
         </Button>
       )}
       {commandNotice}
@@ -1090,10 +1210,12 @@ export function DecisionWorkspace({
   state,
   tab,
   setTab,
+  setState,
 }: {
   state: OpsState;
   tab: DecisionTab;
   setTab: (t: DecisionTab) => void;
+  setState: (state: OpsState) => void;
 }) {
   const { selectedIncident, selectedIncidentId, refreshSelectedIncident, incidents } =
     useOperations();
@@ -1129,7 +1251,7 @@ export function DecisionWorkspace({
 
   const headerTitle = inc ? humanize(inc.incident_type) : 'No incident selected';
   const headerSub = inc
-    ? `${inc.id} · ${inc.created_at ? new Date(inc.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}`
+    ? `Received ${inc.created_at ? new Date(inc.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}`
     : '—';
   const headerSevTone = inc ? (inc.severity.toLowerCase() as 'low' | 'moderate' | 'high' | 'critical') : 'low';
   const headerSeverityPending = isUnconfirmedMobileSeverity(inc);
@@ -1239,8 +1361,17 @@ export function DecisionWorkspace({
         {selectedIncidentNotice}
         <StateBanner state={state} />
         <div key={tab} className="sg-fade" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {tab === 'overview' && <OverviewTab state={state} onSelectTab={setTab} />}
-          {tab === 'plan' && <PlanTab state={state} />}
+          {tab === 'overview' && (
+            <OverviewTab
+              state={state}
+              onSelectTab={setTab}
+              onAdvance={(nextState) => {
+                setState(nextState);
+                setTab('plan');
+              }}
+            />
+          )}
+          {tab === 'plan' && <PlanTab state={state} onStateChange={setState} />}
           {tab === 'hospital' && <HospitalTab />}
           {tab === 'evidence' && <EvidenceTab />}
           {tab === 'history' && <HistoryTab />}

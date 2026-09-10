@@ -130,3 +130,12 @@ def test_aggregate_operational_state_exposes_current_phase05_references(
     assert len(data["driver_alerts"]) == 1
     assert data["driver_alerts"][0]["resource_id"] == resource.id
     assert data["driver_alert"]["id"] == data["driver_alerts"][0]["id"]
+    # The Command Center uses the same deterministic projection as the citizen
+    # tracking view.  It must be tied to the approved current plan and retain
+    # simulated provenance; the browser never interpolates a responder itself.
+    tracking = data["responder_tracking"]
+    assert len(tracking) == 1
+    assert tracking[0]["resource_id"] == resource.id
+    assert tracking[0]["data_reality"] == "SIMULATED"
+    assert tracking[0]["tracking_source"] == "SIMULATED_ROUTE_PROJECTION"
+    assert tracking[0]["route"]["type"] == "LineString"

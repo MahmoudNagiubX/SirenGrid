@@ -323,6 +323,13 @@ export function IncidentRail({
           const sevTone = inc.severity.toLowerCase() as 'low' | 'moderate' | 'high' | 'critical';
           const severityPending = isUnconfirmedMobileSeverity(inc);
           const mobileSummary = getMobileSourceSummary(inc);
+          const workflowLabel = inc.pending_replan_plan_id
+            ? 'Replan required'
+            : inc.current_plan_id
+            ? 'Response active'
+            : mobileSummary
+            ? 'Pending operator review'
+            : humanizeStatus(inc.status);
           const arLabel = INCIDENT_TYPE_AR[inc.incident_type.toLowerCase()] ?? '';
           return (
             <button
@@ -351,7 +358,7 @@ export function IncidentRail({
                   {humanizeType(inc.incident_type)}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
-                  {severityPending ? <Badge tone="neutral">Pending</Badge> : <Badge severity={sevTone} />}
+                  {severityPending ? <Badge tone="neutral">Pending review</Badge> : <Badge severity={sevTone} />}
                   <span style={{ fontSize: 13, color: 'var(--color-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {inc.location_text ||
                       (inc.latitude != null && inc.longitude != null
@@ -362,13 +369,13 @@ export function IncidentRail({
                 {mobileSummary && (
                   <div style={{ marginTop: 5 }}>
                     <Badge tone="info">
-                      Mobile Request{mobileSummary.locationSource === 'DEVICE_GPS' ? ' · Device GPS' : ''}
+                      New mobile request{mobileSummary.locationSource === 'DEVICE_GPS' ? ' · Device GPS' : ''}
                     </Badge>
                   </div>
                 )}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginTop: 4 }}>
                   <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-text-secondary)', whiteSpace: 'nowrap' }}>
-                    {humanizeStatus(inc.status)} · {formatIncidentTime(inc.created_at)}
+                    {workflowLabel} · {formatIncidentTime(inc.created_at)}
                   </span>
                   {arLabel && (
                     <span dir="rtl" style={{ fontFamily: 'var(--font-ar)', fontSize: 13, color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>
@@ -432,7 +439,7 @@ export function TimelineDock({ open, setOpen }: { open: boolean; setOpen: (o: bo
         <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <IconTile icon={<Ico n="clock" />} tint="glass" size={28} />
           <span style={{ fontSize: 14, fontWeight: 600 }}>
-            History · {selectedIncidentId ?? 'No incident selected'}
+            {selectedIncidentId ? 'Incident history' : 'No incident selected'}
           </span>
         </span>
         <span style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--color-text-secondary)' }}>
