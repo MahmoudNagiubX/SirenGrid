@@ -10,7 +10,7 @@ from app.mobile_auth import hash_pin, national_id_fingerprint
 from app.models import CitizenProfile
 from app.seed import seed_demo_citizen
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine, select
+from sqlalchemy import Engine, create_engine, select
 from sqlalchemy.orm import Session
 
 # A synthetic 14-digit value. NOT a real Egyptian National ID.
@@ -87,6 +87,33 @@ def test_logout_after_registration(client: TestClient) -> None:
     headers = {"Authorization": f"Bearer {token}"}
     assert client.post("/api/v1/mobile/auth/logout", headers=headers).status_code == 204
     assert client.get("/api/v1/mobile/me", headers=headers).status_code == 401
+
+
+def test_registered_account_survives_database_engine_restart(
+    client: TestClient, tmp_db_url: str
+) -> None:
+    _register(
+        client,
+        display_name="OCR Citizen",
+        registered_address_text="OCR Address, Cairo",
+    )
+
+    restarted_engine = create_engine(
+        tmp_db_url,
+        connect_args={"check_same_thread": False},
+    )
+    try:
+        with Session(restarted_engine) as restarted_session:
+            row = restarted_session.scalars(
+                select(CitizenProfile).where(
+                    CitizenProfile.phone == "01111222333"
+                )
+            ).one()
+            assert row.display_name == "OCR Citizen"
+            assert row.registered_address_text == "OCR Address, Cairo"
+            assert row.national_id_last4 == "3456"
+    finally:
+        restarted_engine.dispose()
 
 
 # --- persistence + privacy ----------------------------------------------------
@@ -208,6 +235,8 @@ def test_invalid_phone_is_422(client: TestClient) -> None:
 def test_invalid_national_id_is_422(client: TestClient) -> None:
     assert _register(client, national_id="123").status_code == 422
     assert _register(client, national_id="abcdefghijklmn").status_code == 422
+    assert _register(client, national_id="49001010123456").status_code == 422
+    assert _register(client, national_id="29002310123456").status_code == 422
 
 
 def test_pin_mismatch_is_422(client: TestClient) -> None:

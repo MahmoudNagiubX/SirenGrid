@@ -14,6 +14,8 @@ from pydantic import (
     model_validator,
 )
 
+from app.mobile_id_ocr import decode_national_id
+
 __all__ = [
     "DataReality",
     "FreshnessStatus",
@@ -1648,9 +1650,10 @@ class MobileRegisterRequest(BaseModel):
     @field_validator("national_id")
     @classmethod
     def _valid_synthetic_national_id(cls, value: str) -> str:
-        digits = re.sub(r"\D", "", value)
-        if not re.fullmatch(r"\d{14}", digits):
+        digits = value.strip()
+        if not re.fullmatch(r"[0-9]{14}", digits):
             raise ValueError("national_id must be 14 digits")
+        decode_national_id(digits)
         return digits
 
     @field_validator("pin", "pin_confirm")

@@ -19,12 +19,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
 import uuid
 from datetime import datetime, timezone
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Response, UploadFile, status
+from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -43,6 +46,7 @@ from app.mobile_auth import (
     normalize_phone,
     verify_pin,
 )
+from app.mobile_id_ocr import scan_id_image
 from app.models import (
     CitizenDeviceToken,
     CitizenIdempotencyRecord,
@@ -84,10 +88,13 @@ from app.websocket import publish_operations_event
 __all__ = ["router"]
 
 router = APIRouter(prefix="/mobile", tags=["mobile"])
+logger = logging.getLogger(__name__)
 
 MOBILE_SOURCE_TYPE = "MOBILE_APP"
 MOBILE_SOURCE = "SIRENGRID_CITIZEN_APP"
 SEVERITY_AUTHORITY_PLACEHOLDER = "UNCONFIRMED_MOBILE_PLACEHOLDER"
+MAX_ID_IMAGE_BYTES = 10 * 1024 * 1024
+_ID_IMAGE_TYPES = {"image/jpeg", "image/png"}
 
 # Locked citizen-facing status projection (mission section 24).
 _STATUS_PROJECTION: dict[IncidentStatus, CitizenRequestStatus] = {
@@ -235,6 +242,55 @@ def _service_from_incident(incident: Incident) -> MobileService:
 
 def _project_status(incident_status: IncidentStatus) -> CitizenRequestStatus:
     return _STATUS_PROJECTION.get(incident_status, CitizenRequestStatus.UNDER_REVIEW)
+
+
+@router.post(
+    "/auth/scan-national-id",
+    status_code=status.HTTP_200_OK,
+    response_model=None,
+)
+async def scan_national_id(
+    file: Annotated[UploadFile, File(description="Front of Egyptian National ID")],
+) -> dict[str, object] | JSONResponse:
+    """Extract editable registration fields without persisting the ID image."""
+    if (file.content_type or "").lower() not in _ID_IMAGE_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail={
+                "code": "UNSUPPORTED_IMAGE_TYPE",
+                "message": "Upload a JPEG or PNG image.",
+            },
+        )
+    try:
+        image_bytes = await file.read(MAX_ID_IMAGE_BYTES + 1)
+    finally:
+        await file.close()
+    if not image_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "EMPTY_IMAGE", "message": "The uploaded image is empty."},
+        )
+    if len(image_bytes) > MAX_ID_IMAGE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail={
+                "code": "IMAGE_TOO_LARGE",
+                "message": "The image must be 10 MB or smaller.",
+            },
+        )
+    try:
+        return await run_in_threadpool(scan_id_image, image_bytes)
+    except Exception:
+        logger.warning("OCR service unavailable")
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={
+                "success": False,
+                "code": "OCR_UNAVAILABLE",
+                "message": "ID scanning is temporarily unavailable. Enter details manually.",
+                "extracted": None,
+            },
+        )
 
 
 @router.post(
