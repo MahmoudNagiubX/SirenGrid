@@ -10,5 +10,6 @@ shapely
 pyproj
 geopandas
 rasterio
+firebase-admin
 pytest
 ruff
