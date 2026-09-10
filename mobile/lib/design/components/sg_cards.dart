@@ -42,7 +42,7 @@ class _SgServiceCardState extends State<SgServiceCard> {
         child: AnimatedContainer(
           duration: SgDur.base,
           curve: SgDur.easeStandard,
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
           decoration: BoxDecoration(
             color: sel ? SgColors.emergencySoft : SgColors.bgSurface,
             borderRadius: BorderRadius.circular(SgRadius.card),
@@ -63,6 +63,7 @@ class _SgServiceCardState extends State<SgServiceCard> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
               AnimatedContainer(
                 duration: SgDur.base,

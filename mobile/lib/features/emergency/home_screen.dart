@@ -69,55 +69,27 @@ class _HomeScreenState extends State<HomeScreen> {
             onOpenAccount: widget.onOpenAccount,
           ),
           Expanded(
-            child: Stack(
-              children: [
-                LayoutBuilder(
-                  builder: (context, constraints) => _ServiceArea(
-                    available: constraints.maxHeight,
-                    showClearTheWay: widget.showClearTheWay,
-                    onDismissClearTheWay: widget.onDismissClearTheWay,
-                    selected: _selected,
-                    onSelect: (s) => setState(() => _selected = s),
+            child: LayoutBuilder(
+              builder: (context, constraints) => _ServiceArea(
+                available: constraints.maxHeight,
+                showClearTheWay: widget.showClearTheWay,
+                onDismissClearTheWay: widget.onDismissClearTheWay,
+                selected: _selected,
+                onSelect: (s) => setState(() => _selected = s),
+                cta: BlocBuilder<HomeCubit, HomeState>(
+                  builder: (context, state) => SgEmergencyButton(
+                    label:
+                        '${context.tr('home.request')} ${context.tr(_selected.labelKey)}',
+                    icon: _selected.icon,
+                    full: true,
+                    pulsing: state is HomeIdle,
+                    loading: state is HomeSubmitting,
+                    onPressed: state is HomeSubmitting
+                        ? null
+                        : () => _request(_selected),
                   ),
                 ),
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  child: IgnorePointer(
-                    ignoring: true,
-                    child: Container(
-                      height: 150,
-                      decoration: const BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [Color(0x00EDF2F4), SgColors.bgApp],
-                          stops: [0, 0.42],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                Positioned(
-                  left: SgSpace.page,
-                  right: SgSpace.page,
-                  bottom: 14,
-                  child: BlocBuilder<HomeCubit, HomeState>(
-                    builder: (context, state) => SgEmergencyButton(
-                      label:
-                          '${context.tr('home.request')} ${context.tr(_selected.labelKey)}',
-                      icon: _selected.icon,
-                      full: true,
-                      pulsing: state is HomeIdle,
-                      loading: state is HomeSubmitting,
-                      onPressed: state is HomeSubmitting
-                          ? null
-                          : () => _request(_selected),
-                    ),
-                  ),
-                ),
-              ],
+              ),
             ),
           ),
         ],
@@ -126,10 +98,12 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-/// The area below the hero: service question + 2×2 service grid + (conditional)
-/// location action card. Sizes the grid to the space the device actually gives
-/// it so the whole Home screen fits one viewport with no scroll on the demo
-/// phone. Only extreme text scale / very short viewports fall back to a scroll.
+/// The area below the hero: the service question, the 2×2 service grid, an
+/// optional location-action card, and the Request CTA — all in one non-scrolling
+/// flow. The grid is sized to the height the device actually hands us and any
+/// leftover is spread thinly across the four vertical gaps, so the composition
+/// stays action-first with no single dead zone. Only extreme text scale / very
+/// short viewports (or the Clear-the-Way banner) fall back to a scroll.
 class _ServiceArea extends StatelessWidget {
   const _ServiceArea({
     required this.available,
@@ -137,6 +111,7 @@ class _ServiceArea extends StatelessWidget {
     required this.onDismissClearTheWay,
     required this.selected,
     required this.onSelect,
+    required this.cta,
   });
 
   final double available;
@@ -144,13 +119,20 @@ class _ServiceArea extends StatelessWidget {
   final VoidCallback? onDismissClearTheWay;
   final EmergencyService selected;
   final ValueChanged<EmergencyService> onSelect;
+  final Widget cta;
 
-  // Reserved at the bottom for the floating Request CTA (button 60 + 14 inset +
-  // 16 breathing room above it).
-  static const double _ctaReserve = 90;
-  static const double _topPad = 14;
-  static const double _headingBand = 40;
-  static const double _headingGap = 12;
+  // Base 8px-grid rhythm (mission §3). On the target device these are the
+  // exact gaps; the service cards take a computed height so the whole column
+  // just fills the viewport with no scroll and no dead band.
+  static const double _heroToTitle = 20;
+  static const double _titleToGrid = 16;
+  static const double _gridRowGap = 12;
+  static const double _gridToCta = 18;
+  static const double _ctaToNav = 14;
+  static const double _titleBand = 28; // one line of the section heading
+  static const double _ctaHeight = 60; // SgEmergencyButton pill
+  static const double _minCell = 112; // keeps icon + label + touch target
+  static const double _maxCell = 140; // dense mobile tile, not a dashboard card
 
   @override
   Widget build(BuildContext context) {
@@ -159,39 +141,42 @@ class _ServiceArea extends StatelessWidget {
         readiness == LocationReadiness.servicesOff ||
         readiness == LocationReadiness.permissionBlocked ||
         readiness == LocationReadiness.permissionRequired;
+    // Rendered height of the location-action card incl. its own top inset.
+    final stripReserve = needsLocationAction ? 92.0 : 0.0;
 
-    final bottomReserve = _ctaReserve + (needsLocationAction ? 92.0 : 0.0);
-    final gridArea =
-        available - _topPad - _headingBand - _headingGap - bottomReserve;
-    final cellExtent = ((gridArea - 12) / 2).clamp(102.0, 132.0);
-    // Enough room for two rows of usable cards + gap? Otherwise let it scroll.
-    final fitsWithoutScroll = !showClearTheWay && gridArea >= 216;
+    // Everything except the two grid rows.
+    final nonGrid =
+        _heroToTitle +
+        _titleBand +
+        _titleToGrid +
+        _gridRowGap +
+        _gridToCta +
+        _ctaHeight +
+        _ctaToNav +
+        stripReserve;
+    final cell = ((available - nonGrid) / 2).clamp(_minCell, _maxCell);
+    // Any pixels left once the cards hit their cap are split — a little above
+    // the section title, a little below the CTA — so no single gap reads as a
+    // dead band and the nav still sits tight (mission §3/§7).
+    final slack = (available - nonGrid - 2 * cell).clamp(0.0, 160.0);
+    final gapTop = slack * 0.4;
+    final gapTail = slack * 0.6;
+    // Below ~2 usable rows, fall back to a real scroll so nothing clips.
+    final fitsWithoutScroll = !showClearTheWay && (available - nonGrid) >= 224;
 
-    final heading = Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Flexible(
-          child: Text(
-            context.tr('home.question'),
-            style: SgType.cardHeading.copyWith(
-              color: SgColors.heading,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ),
-        const SizedBox(width: 8),
-        SgStatusChip(
-          context.tr('home.step1'),
-          tone: SgChipTone.neutral,
-          dot: false,
-        ),
-      ],
+    final heading = Text(
+      context.tr('home.question'),
+      style: SgType.cardHeading.copyWith(
+        color: SgColors.heading,
+        fontWeight: FontWeight.w700,
+      ),
     );
 
     final grid = _ServiceGrid(
       selected: selected,
       onSelect: onSelect,
-      cellExtent: cellExtent,
+      cellExtent: cell,
+      rowGap: _gridRowGap,
     );
 
     final locationStrip = _LocationStrip(
@@ -205,18 +190,21 @@ class _ServiceArea extends StatelessWidget {
       return Padding(
         padding: const EdgeInsets.fromLTRB(
           SgSpace.page,
-          _topPad,
-          SgSpace.page,
           0,
+          SgSpace.page,
+          _ctaToNav,
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            SizedBox(height: _heroToTitle + gapTop),
             heading,
-            const SizedBox(height: _headingGap),
+            const SizedBox(height: _titleToGrid),
             grid,
             locationStrip,
-            const Spacer(),
+            const SizedBox(height: _gridToCta),
+            cta,
+            if (gapTail > 0) SizedBox(height: gapTail),
           ],
         ),
       );
@@ -225,12 +213,7 @@ class _ServiceArea extends StatelessWidget {
     // Accessibility / very short viewport fallback — a real scroll is allowed
     // here so nothing is ever clipped.
     return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(
-        SgSpace.page,
-        _topPad,
-        SgSpace.page,
-        180,
-      ),
+      padding: const EdgeInsets.fromLTRB(SgSpace.page, 16, SgSpace.page, 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -243,25 +226,36 @@ class _ServiceArea extends StatelessWidget {
             const SizedBox(height: 16),
           ],
           heading,
-          const SizedBox(height: _headingGap),
-          _ServiceGrid(selected: selected, onSelect: onSelect, cellExtent: 120),
+          const SizedBox(height: _titleToGrid),
+          _ServiceGrid(
+            selected: selected,
+            onSelect: onSelect,
+            cellExtent: 120,
+            rowGap: _gridRowGap,
+          ),
           locationStrip,
+          const SizedBox(height: _gridToCta),
+          cta,
         ],
       ),
     );
   }
 }
 
+/// The 2×2 service choice. A plain non-scrolling grid with a fixed row height
+/// ([cellExtent], computed by [_ServiceArea] from the space the device gives).
 class _ServiceGrid extends StatelessWidget {
   const _ServiceGrid({
     required this.selected,
     required this.onSelect,
     required this.cellExtent,
+    this.rowGap = 12,
   });
 
   final EmergencyService selected;
   final ValueChanged<EmergencyService> onSelect;
   final double cellExtent;
+  final double rowGap;
 
   @override
   Widget build(BuildContext context) {
@@ -270,7 +264,7 @@ class _ServiceGrid extends StatelessWidget {
       physics: const NeverScrollableScrollPhysics(),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 2,
-        mainAxisSpacing: 12,
+        mainAxisSpacing: rowGap,
         crossAxisSpacing: 12,
         mainAxisExtent: cellExtent,
       ),
@@ -329,9 +323,9 @@ class _Hero extends StatelessWidget {
           Padding(
             padding: EdgeInsets.fromLTRB(
               SgSpace.page,
-              topPad + 12,
+              topPad + 10,
               SgSpace.page,
-              18,
+              14,
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -393,7 +387,7 @@ class _Hero extends StatelessWidget {
                     ),
                   ],
                 ),
-                const SizedBox(height: 18),
+                const SizedBox(height: 16),
                 Text(
                   greeting,
                   style: SgType.caption.copyWith(
@@ -401,7 +395,7 @@ class _Hero extends StatelessWidget {
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-                const SizedBox(height: 6),
+                const SizedBox(height: 5),
                 ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 250),
                   child: Text(
@@ -415,7 +409,7 @@ class _Hero extends StatelessWidget {
                     ),
                   ),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 14),
                 _HeroLocation(),
               ],
             ),
