@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.benchmark_api import router as benchmark_router
 from app.config import settings
 from app.db import init_db
 from app.corridor_api import router as corridor_router
@@ -80,6 +81,7 @@ api_router.include_router(replanning_router)
 api_router.include_router(planning_router)
 api_router.include_router(map_router)
 api_router.include_router(traffic_router)
+api_router.include_router(benchmark_router)
 api_router.include_router(phase06_router)
 api_router.include_router(simulation_router)
 api_router.include_router(mobile_router)

@@ -61,7 +61,8 @@ def build_forward_alert_geometry(
     metric_line = transform(_TO_METERS, line)
     route_length = metric_line.length
     if route_length <= 0:
-        raise ValueError("Approved route geometry must have positive length")
+        # A responder already at the destination has no forward alert region.
+        return None
     start = route_length * route_progress
     if start >= route_length:
         return None

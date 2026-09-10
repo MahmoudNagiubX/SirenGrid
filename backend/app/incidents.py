@@ -350,13 +350,15 @@ def create_manual_incident(
     now_utc = datetime.now(timezone.utc)
 
     # Required resources as JSON-safe enum strings and counts
-    required_resources = [
-        {
+    required_resources = []
+    for req in payload.required_resources:
+        requirement = {
             "resource_type": req.resource_type.value,
             "count": req.count,
         }
-        for req in payload.required_resources
-    ]
+        if req.required_capability_tags is not None:
+            requirement["required_capability_tags"] = list(req.required_capability_tags)
+        required_resources.append(requirement)
 
     # Provenance for manual simulated demo world
     provenance = {
@@ -926,8 +928,23 @@ def patch_incident_facts(
     payload: IncidentFactsPatchRequest,
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
+    return _patch_incident_facts(
+        incident_id, payload, db, acquire_lock=True, commit=True, publish=True
+    )
+
+
+def _patch_incident_facts(
+    incident_id: str,
+    payload: IncidentFactsPatchRequest,
+    db: Session,
+    *,
+    acquire_lock: bool,
+    commit: bool,
+    publish: bool,
+) -> dict[str, Any]:
     """Atomically patch typed incident facts with single version increment, audit event, and dirty flag."""
-    _acquire_write_lock(db)
+    if acquire_lock:
+        _acquire_write_lock(db)
 
     incident = db.get(Incident, incident_id)
     if incident is None:
@@ -1042,10 +1059,12 @@ def patch_incident_facts(
                 new_values[field] = new_val
         elif field == "required_resources":
             old_val = list(incident.required_resources_json or [])
-            new_val = [
-                {"resource_type": req.resource_type.value, "count": req.count}
-                for req in payload.required_resources
-            ]
+            new_val = []
+            for req in payload.required_resources:
+                requirement = {"resource_type": req.resource_type.value, "count": req.count}
+                if req.required_capability_tags is not None:
+                    requirement["required_capability_tags"] = list(req.required_capability_tags)
+                new_val.append(requirement)
             if new_val != old_val:
                 changed_fields.append(field)
                 old_values[field] = old_val
@@ -1169,17 +1188,27 @@ def patch_incident_facts(
                 now=now_utc,
             )
 
-    # One commit for the correction and its trigger together. The write lock is
-    # released here, before any notification work.
-    db.commit()
+    if not commit:
+        return {
+            "incident": serialize_incident(incident),
+            "changed_fields": changed_fields,
+            "downstream_inputs_dirty": downstream_inputs_dirty,
+        }
+
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     db.refresh(incident)
 
     serialized_incident = serialize_incident(incident)
-    publish_operations_event(
-        event="incident.updated",
-        incident_id=incident.id,
-        payload=serialized_incident,
-    )
+    if publish:
+        publish_operations_event(
+            event="incident.updated",
+            incident_id=incident.id,
+            payload=serialized_incident,
+        )
 
     return {
         "incident": serialized_incident,

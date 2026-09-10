@@ -161,6 +161,16 @@ def test_resource_requirement_validation() -> None:
     req = ResourceRequirement(resource_type=ResourceType.AMBULANCE, count=1)
     assert req.count == 1
 
+    tagged = ResourceRequirement(
+        resource_type=ResourceType.AMBULANCE,
+        count=1,
+        required_capability_tags=["advanced_life_support"],
+    )
+    assert tagged.required_capability_tags == ["advanced_life_support"]
+
+    with pytest.raises(ValidationError):
+        ResourceRequirement(resource_type=ResourceType.AMBULANCE, count=1, required_capabilty_tags=[])
+
     req_max = ResourceRequirement(resource_type=ResourceType.FIRE_RESCUE, count=5)
     assert req_max.count == 5
 

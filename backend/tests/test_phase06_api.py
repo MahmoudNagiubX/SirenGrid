@@ -13,6 +13,7 @@ from app.config import settings
 from app.db import init_db
 from app.main import app
 from app.models import Incident, Report, TimelineEvent
+from app.phase06_api import _structured_processing_text
 from app.schemas import IncidentStatus
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\n"
@@ -39,6 +40,38 @@ def _incident_payload() -> dict[str, Any]:
         "required_resources": [{"resource_type": "AMBULANCE", "count": 1}],
         "operator_reference": "phase06-test",
     }
+
+
+def test_structured_processing_prefers_manual_then_asr_then_raw_text() -> None:
+    report = Report(
+        id="transcript-precedence-report",
+        source_type="audio",
+        source_reference="call-transcript-precedence",
+        raw_text="raw report text",
+        evidence_items_json=[
+            {"type": "ASR_TRANSCRIPT", "extracted_facts": {"transcript": "asr transcript"}},
+            {"type": "MANUAL_TRANSCRIPT", "extracted_facts": {"transcript": "manual transcript"}},
+        ],
+    )
+
+    assert _structured_processing_text(report) == "manual transcript"
+    report.evidence_items_json = report.evidence_items_json[:1]
+    assert _structured_processing_text(report) == "asr transcript"
+    report.evidence_items_json = []
+    assert _structured_processing_text(report) == "raw report text"
+
+
+def test_operator_can_explicitly_create_one_incident_from_standalone_report(client: TestClient) -> None:
+    report = client.post(
+        "/api/v1/reports",
+        json={"source_type": "control_room_text", "source_reference": "activation-test", "raw_text": "collision"},
+    ).json()
+    payload = {**_incident_payload(), "operator_reference": "activation-operator"}
+    created = client.post(f"/api/v1/reports/{report['id']}/create-incident", json=payload)
+
+    assert created.status_code == 201, created.text
+    assert created.json()["provenance"]["source"] == "operator_report_activation"
+    assert client.post(f"/api/v1/reports/{report['id']}/create-incident", json=payload).status_code == 409
 
 
 def test_audio_upload_persists_opaque_media_and_requires_manual_transcript(

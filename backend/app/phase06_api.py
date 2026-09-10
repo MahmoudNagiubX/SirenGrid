@@ -24,7 +24,7 @@ from app.fusion import FusionDecision, FusionReport, evaluate_report_association
 from app.incidents import (
     FACT_FIELD_NAMES,
     _acquire_write_lock,
-    patch_incident_facts,
+    _patch_incident_facts,
     serialize_incident,
     serialize_report,
     serialize_timeline_event,
@@ -32,11 +32,16 @@ from app.incidents import (
 from app.media import MediaValidationError, resolve_media_path, store_media
 from app.models import Incident, Report, TimelineEvent, new_timeline_event_id
 from app.schemas import (
+    ConfidenceLevel,
     DataReality,
     FreshnessStatus,
     IncidentFactsPatchRequest,
+    IncidentRead,
     IncidentStatus,
+    ManualIncidentCreate,
     ReportRead,
+    ResourceRequirement,
+    ResourceType,
 )
 from app.websocket import publish_operations_event
 
@@ -51,6 +56,7 @@ class ClaimResolutionRequest(BaseModel):
     field_name: str = Field(min_length=1, max_length=80)
     value: Any
     selected_evidence_id: str | None = None
+    required_resources: list[ResourceRequirement] | None = Field(default=None, min_length=1)
 
 
 class ReportAssociationRequest(BaseModel):
@@ -86,6 +92,36 @@ class ClaimsIngestRequest(BaseModel):
     claims: list[ProviderClaimDraft] = Field(default_factory=list, max_length=32)
 
 
+class ReportIncidentActivationRequest(ManualIncidentCreate):
+    """Explicit operator facts required to activate a standalone report."""
+
+    model_config = ConfigDict(extra="forbid")
+    confidence_level: ConfidenceLevel
+    operator_reference: str = Field(min_length=1)
+
+
+_CANONICAL_SERVICE_RESOURCE_TYPES: dict[str, ResourceType] = {
+    "ambulance": ResourceType.AMBULANCE,
+    "fire rescue": ResourceType.FIRE_RESCUE,
+}
+
+
+def _validated_required_service_types(value: Any, requirements: list[ResourceRequirement] | None) -> None:
+    if not isinstance(value, list) or not value or any(not isinstance(item, str) for item in value):
+        raise HTTPException(status_code=422, detail="required_services claim must contain service names")
+    if requirements is None:
+        raise HTTPException(status_code=422, detail="explicit required_resources are required to resolve required_services")
+    mapped: set[ResourceType] = set()
+    for service in value:
+        normalized = " ".join(service.strip().casefold().replace("_", " ").replace("-", " ").split())
+        resource_type = _CANONICAL_SERVICE_RESOURCE_TYPES.get(normalized)
+        if resource_type is None:
+            raise HTTPException(status_code=422, detail=f"required service '{service}' is unsupported or ambiguous")
+        mapped.add(resource_type)
+    if not mapped.issubset({requirement.resource_type for requirement in requirements}):
+        raise HTTPException(status_code=422, detail="explicit required_resources must cover every resolved service")
+
+
 def _report_claims(report: Report) -> list[EvidenceClaim]:
     claims: list[EvidenceClaim] = []
     for item in report.evidence_items_json or []:
@@ -105,6 +141,28 @@ def _incident_claims(db: Session, incident_id: str) -> list[EvidenceClaim]:
     for report in reports:
         claims.extend(_report_claims(report))
     return claims
+
+
+def _latest_transcript_text(report: Report, transcript_type: str) -> str | None:
+    candidates: list[tuple[str, int, str]] = []
+    for index, item in enumerate(report.evidence_items_json or []):
+        if item.get("type") != transcript_type:
+            continue
+        extracted_facts = item.get("extracted_facts")
+        transcript = extracted_facts.get("transcript") if isinstance(extracted_facts, dict) else None
+        if not isinstance(transcript, str) or not transcript.strip():
+            continue
+        candidates.append((str(item.get("created_at") or ""), index, transcript))
+    return max(candidates, key=lambda candidate: (candidate[0], candidate[1]))[2] if candidates else None
+
+
+def _structured_processing_text(report: Report) -> str:
+    """Select truthful textual evidence without mutating the source report."""
+    return (
+        _latest_transcript_text(report, "MANUAL_TRANSCRIPT")
+        or _latest_transcript_text(report, "ASR_TRANSCRIPT")
+        or (report.raw_text if report.raw_text and report.raw_text.strip() else "")
+    )
 
 
 def _utc(value: datetime) -> datetime:
@@ -317,7 +375,7 @@ def process_report(
         report.id,
     )
     result = process_structured_extraction(
-        report.raw_text,
+        _structured_processing_text(report),
         evidence_id=evidence_id,
         report_id=report.id,
     )
@@ -580,6 +638,73 @@ def transcribe_report(
     return {"status": result.status.value, "result": result.model_dump(mode="json"), "report": serialize_report(report)}
 
 
+@router.post(
+    "/reports/{report_id}/create-incident",
+    status_code=status.HTTP_201_CREATED,
+    response_model=IncidentRead,
+)
+def create_incident_from_report(
+    report_id: str,
+    payload: ReportIncidentActivationRequest,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Create one incident from reviewed evidence using explicit operator facts."""
+    _acquire_write_lock(db)
+    report = db.get(Report, report_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail=f"Report '{report_id}' not found")
+    if report.incident_id is not None:
+        raise HTTPException(status_code=409, detail="report is already associated with an incident")
+    now_utc = datetime.now(timezone.utc)
+    resources = [
+        {
+            "resource_type": requirement.resource_type.value,
+            "count": requirement.count,
+            **({"required_capability_tags": list(requirement.required_capability_tags)} if requirement.required_capability_tags is not None else {}),
+        }
+        for requirement in payload.required_resources
+    ]
+    report_reality = report.data_reality.value if hasattr(report.data_reality, "value") else str(report.data_reality)
+    incident = Incident(
+        id=str(uuid.uuid4()), version=1, incident_type=payload.incident_type,
+        severity=payload.severity, confidence_level=payload.confidence_level,
+        status=IncidentStatus.ACTIVE_UNCONFIRMED,
+        latitude=payload.location.lat if payload.location else None,
+        longitude=payload.location.lon if payload.location else None,
+        location_text=payload.location_text, casualty_count=payload.casualty_count,
+        casualty_range=payload.casualty_range, trapped_person=payload.trapped_person,
+        road_blockage=payload.road_blockage, transport_required=payload.transport_required,
+        required_hospital_capabilities_json=payload.required_hospital_capabilities,
+        required_resources_json=resources, current_plan_id=None, pending_replan_plan_id=None,
+        created_at=now_utc, updated_at=now_utc,
+        provenance_json={
+            "source": "operator_report_activation", "data_reality": report_reality,
+            "freshness_status": (report.provenance_json or {}).get("freshness_status", FreshnessStatus.FRESH.value),
+            "last_updated": now_utc.isoformat(), "location_resolved": payload.location is not None,
+            "source_reference": payload.operator_reference, "source_report_id": report.id,
+            "report_source_reference": report.source_reference,
+        },
+    )
+    event = _timeline_event(
+        incident_id=incident.id, event_type="INCIDENT_CREATED_FROM_REPORT",
+        details={"report_id": report.id, "operator_reference": payload.operator_reference,
+                 "source": "operator_report_activation", "data_reality": report_reality,
+                 "status": IncidentStatus.ACTIVE_UNCONFIRMED.value, "incident_version": 1},
+        created_at=now_utc,
+    )
+    try:
+        report.incident_id = incident.id
+        db.add_all([incident, report, event])
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    db.refresh(incident)
+    result = serialize_incident(incident)
+    publish_operations_event(event="incident.created", incident_id=incident.id, payload=result)
+    return result
+
+
 @router.post("/incidents/{incident_id}/duplicate-merge")
 def merge_duplicate_incident(
     incident_id: str,
@@ -757,7 +882,9 @@ def resolve_incident_claim(
     payload: ClaimResolutionRequest,
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    if payload.field_name not in FACT_FIELD_NAMES:
+    _acquire_write_lock(db)
+    is_required_services = payload.field_name == "required_services"
+    if payload.field_name not in FACT_FIELD_NAMES and not is_required_services:
         raise HTTPException(status_code=422, detail="field is not an approved incident fact")
     claims = [
         claim
@@ -770,18 +897,33 @@ def resolve_incident_claim(
     ):
         raise HTTPException(status_code=409, detail="selected evidence claim does not match the value")
 
+    if is_required_services:
+        if not payload.selected_evidence_id:
+            raise HTTPException(status_code=422, detail="selected_evidence_id is required when resolving required_services")
+        selected_claim = next((claim for claim in claims if claim.evidence_id == payload.selected_evidence_id and claim.value == payload.value), None)
+        if selected_claim is None or selected_claim.fact_state.value != "ASSERTED":
+            raise HTTPException(status_code=422, detail="required_services must be resolved from an asserted selected claim")
+        _validated_required_service_types(payload.value, payload.required_resources)
+    elif payload.required_resources is not None:
+        raise HTTPException(status_code=422, detail="required_resources is only valid for required_services resolution")
+
     try:
         patch_payload = IncidentFactsPatchRequest.model_validate(
             {
                 "expected_incident_version": payload.expected_incident_version,
                 "operator_reference": payload.operator_reference,
-                payload.field_name: payload.value,
+                "required_resources" if is_required_services else payload.field_name: (
+                    [requirement.model_dump(mode="json") for requirement in payload.required_resources or []]
+                    if is_required_services else payload.value
+                ),
             }
         )
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail="resolved value is invalid for the selected fact") from exc
 
-    correction = patch_incident_facts(incident_id, patch_payload, db)
+    correction = _patch_incident_facts(
+        incident_id, patch_payload, db, acquire_lock=False, commit=False, publish=False
+    )
     incident = db.get(Incident, incident_id)
     if incident is None:  # pragma: no cover - correction already validates this
         raise HTTPException(status_code=404, detail=f"Incident '{incident_id}' not found")
@@ -803,12 +945,17 @@ def resolve_incident_claim(
             "operator_reference": payload.operator_reference,
             "incident_version": incident.version,
             "timestamp": now_utc.isoformat(),
+            **({"confirmed_required_resources": [requirement.model_dump(mode="json") for requirement in payload.required_resources or []]} if is_required_services else {}),
         },
         created_at=now_utc,
     )
     db.add(incident)
     db.add(event)
-    db.commit()
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     db.refresh(incident)
     publish_operations_event(
         event="incident.updated",

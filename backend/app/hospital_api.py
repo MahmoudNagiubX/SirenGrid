@@ -156,9 +156,13 @@ def invalidate_selected_hospital_for_replan(
     hospital_id: str,
     reason: str,
     operator_reference: str,
+    acquire_lock: bool = True,
+    commit: bool = True,
+    generate_options: bool = True,
 ) -> bool:
     """Invalidate a selected destination after a confirmed route-health event."""
-    _acquire_write_lock(db)
+    if acquire_lock:
+        _acquire_write_lock(db)
     incident = db.get(Incident, incident_id)
     if incident is None:
         raise HTTPException(
@@ -207,12 +211,15 @@ def invalidate_selected_hospital_for_replan(
             created_at=now,
         )
     )
-    db.commit()
-
-    # Refresh recommendations against the same active response plan. This
-    # creates options only; it never selects or redirects a destination.
-    if plan.resource_ids_json:
-        generate_hospital_options(incident.id, db)
+    try:
+        if generate_options and plan.resource_ids_json:
+            _generate_hospital_options(incident.id, db, acquire_lock=False, commit=False)
+        if commit:
+            db.commit()
+    except Exception:
+        if commit:
+            db.rollback()
+        raise
     return True
 
 
@@ -440,10 +447,12 @@ def patch_hospital_simulation_state(
     return _serialize_hospital(hospital, _snapshot(db, hospital_id))
 
 
-@router.post("/incidents/{incident_id}/hospital-options", response_model=HospitalOptionsResponse)
-def generate_hospital_options(
+def _generate_hospital_options(
     incident_id: str,
-    db: Session = Depends(get_db),
+    db: Session,
+    *,
+    acquire_lock: bool = True,
+    commit: bool = True,
 ) -> dict[str, Any]:
     incident = db.get(Incident, incident_id)
     if incident is None:
@@ -490,7 +499,8 @@ def generate_hospital_options(
         candidates,
         required_capabilities=tuple(incident.required_hospital_capabilities_json or []),
     )
-    _acquire_write_lock(db)
+    if acquire_lock:
+        _acquire_write_lock(db)
     option_set_id = str(uuid.uuid4())
     options = []
     for rank, candidate in enumerate(ranked, start=1):
@@ -536,9 +546,16 @@ def generate_hospital_options(
         created_at=datetime.now(timezone.utc),
     )
     db.add(option_set)
-    db.commit()
-    db.refresh(option_set)
+    db.flush()
+    if commit:
+        db.commit()
+        db.refresh(option_set)
     return _option_response(option_set, incident)
+
+
+@router.post("/incidents/{incident_id}/hospital-options", response_model=HospitalOptionsResponse)
+def generate_hospital_options(incident_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+    return _generate_hospital_options(incident_id, db)
 
 
 @router.get("/incidents/{incident_id}/hospital-options", response_model=HospitalOptionsResponse)

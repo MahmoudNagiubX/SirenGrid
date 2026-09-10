@@ -24,22 +24,21 @@ interface Arterial {
   lx: number;
   ly: number;
   rot: number;
-  traffic: 'med' | 'high' | 'none' | 'low';
 }
 
 const ARTERIALS: Arterial[] = [
-  { d: 'M -20 372 L 1620 336', w: 17, name: 'Abbas El Akkad St.', lx: 180, ly: 356, rot: -1.3, traffic: 'med' },
-  { d: 'M 690 -20 L 622 920', w: 14, name: 'Makram Ebeid St.', lx: 664, ly: 690, rot: 86, traffic: 'high' },
-  { d: 'M 268 -20 L 452 920', w: 13, name: 'Tayaran St.', lx: 372, ly: 790, rot: 79, traffic: 'none' },
-  { d: 'M -20 560 L 1620 524', w: 14, name: 'El Nasr Rd.', lx: 1020, ly: 545, rot: -1.3, traffic: 'med' },
-  { d: 'M 1064 -20 L 1196 920', w: 16, name: 'Mostafa El Nahhas St.', lx: 1128, ly: 430, rot: 82, traffic: 'none' },
-  { d: 'M -20 136 L 1620 112', w: 12, name: 'Youssef Abbas St.', lx: 150, ly: 128, rot: -1, traffic: 'none' },
-  { d: 'M -20 762 L 1620 786', w: 12, name: 'Ahmed Al Zomor St.', lx: 900, ly: 782, rot: 1, traffic: 'low' },
-  { d: 'M 880 -20 L 812 920', w: 11, name: 'Hassan El Mamoun St.', lx: 852, ly: 220, rot: 84, traffic: 'none' },
-  { d: 'M 1380 -20 L 1470 920', w: 13, name: 'Autostrad Rd.', lx: 1424, ly: 300, rot: 81, traffic: 'high' },
-  { d: 'M -20 240 L 1620 214', w: 11, name: 'Al Batrawy St.', lx: 1200, ly: 228, rot: -1, traffic: 'none' },
-  { d: 'M -20 660 L 1620 636', w: 11, name: 'Zaker Hussein St.', lx: 1130, ly: 650, rot: -1, traffic: 'low' },
-  { d: 'M 470 -20 L 392 920', w: 10, name: 'Anwar El Mofty St.', lx: 432, ly: 170, rot: 83, traffic: 'none' },
+  { d: 'M -20 372 L 1620 336', w: 17, name: 'Abbas El Akkad St.', lx: 180, ly: 356, rot: -1.3 },
+  { d: 'M 690 -20 L 622 920', w: 14, name: 'Makram Ebeid St.', lx: 664, ly: 690, rot: 86 },
+  { d: 'M 268 -20 L 452 920', w: 13, name: 'Tayaran St.', lx: 372, ly: 790, rot: 79 },
+  { d: 'M -20 560 L 1620 524', w: 14, name: 'El Nasr Rd.', lx: 1020, ly: 545, rot: -1.3 },
+  { d: 'M 1064 -20 L 1196 920', w: 16, name: 'Mostafa El Nahhas St.', lx: 1128, ly: 430, rot: 82 },
+  { d: 'M -20 136 L 1620 112', w: 12, name: 'Youssef Abbas St.', lx: 150, ly: 128, rot: -1 },
+  { d: 'M -20 762 L 1620 786', w: 12, name: 'Ahmed Al Zomor St.', lx: 900, ly: 782, rot: 1 },
+  { d: 'M 880 -20 L 812 920', w: 11, name: 'Hassan El Mamoun St.', lx: 852, ly: 220, rot: 84 },
+  { d: 'M 1380 -20 L 1470 920', w: 13, name: 'Autostrad Rd.', lx: 1424, ly: 300, rot: 81 },
+  { d: 'M -20 240 L 1620 214', w: 11, name: 'Al Batrawy St.', lx: 1200, ly: 228, rot: -1 },
+  { d: 'M -20 660 L 1620 636', w: 11, name: 'Zaker Hussein St.', lx: 1130, ly: 650, rot: -1 },
+  { d: 'M 470 -20 L 392 920', w: 10, name: 'Anwar El Mofty St.', lx: 432, ly: 170, rot: 83 },
 ];
 
 const PARKS = [
@@ -71,12 +70,6 @@ const NODES: [number, number][] = [
   [341, 364], [663, 357], [381, 560], [649, 546], [1064, 240], [1196, 660],
   [845, 336], [812, 560], [455, 240], [400, 660], [1400, 350], [1440, 545],
 ];
-
-const TRAFFIC_COLOR: Record<'low' | 'med' | 'high', string> = {
-  low: 'var(--blue-300)',
-  med: 'var(--map-congestion-med)',
-  high: 'var(--map-congestion-high)',
-};
 
 const ROUTE_MAIN = 'M 401 660 L 348 392 Q 341 364 368 363 L 646 358';
 const ROUTE_ALT = 'M 401 660 L 383 570 Q 379 549 400 548 L 628 546 Q 651 545 653 522 L 661 374';
@@ -125,7 +118,6 @@ export interface DenseMapProps {
 
 export function DenseMap({ view = 'city', overlays = {}, route = 'plan', children }: DenseMapProps) {
   const box = view === 'incident' ? '250 210 1000 562' : view === 'hospital' ? '330 200 1080 607' : '0 0 1600 900';
-  const showTraffic = overlays.traffic !== false;
   const replan = route === 'replan';
   const primary = replan ? ROUTE_ALT : ROUTE_MAIN;
   const previous = replan ? ROUTE_MAIN : ROUTE_ALT;
@@ -145,19 +137,6 @@ export function DenseMap({ view = 'city', overlays = {}, route = 'plan', childre
         {ARTERIALS.map((a, i) => (
           <path key={'ai' + i} d={a.d} fill="none" stroke={a.w > 13 ? '#FDFEFF' : '#FBFCFE'} strokeWidth={a.w} strokeLinecap="round" />
         ))}
-        {showTraffic &&
-          ARTERIALS.filter((a) => a.traffic !== 'none').map((a, i) => (
-            <path
-              key={'at' + i}
-              d={a.d}
-              fill="none"
-              stroke={TRAFFIC_COLOR[a.traffic as 'low' | 'med' | 'high']}
-              strokeWidth={a.traffic === 'high' ? 4 : 3.6}
-              opacity={a.traffic === 'high' ? 0.8 : 0.72}
-              strokeLinecap="round"
-              strokeDasharray={a.traffic === 'high' ? '1 0' : '34 20'}
-            />
-          ))}
         {NODES.map(([x, y], i) => (
           <circle key={'n' + i} cx={x} cy={y} r="4.2" fill="#fff" stroke="var(--map-road-highway)" strokeWidth="1.8" />
         ))}

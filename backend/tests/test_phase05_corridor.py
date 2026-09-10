@@ -52,6 +52,12 @@ def test_corridor_extraction_uses_real_osm_signals_and_approved_timing() -> None
     assert signals[0].request_time != now.isoformat()
 
 
+def test_zero_distance_approved_route_has_no_corridor_signals() -> None:
+    route = {"type": "LineString", "coordinates": [[31.3304, 30.0571], [31.3304, 30.0571]]}
+
+    assert extract_corridor_signals(route, 0.0, now_iso="2026-09-07T12:00:00+00:00") == []
+
+
 def test_traffic_signal_gateway_exposes_only_simulated_forward_states() -> None:
     gateway = TrafficSignalGateway()
     assert gateway.transition("NORMAL", CorridorSignalState.REQUESTED).data_reality == "SIMULATED"

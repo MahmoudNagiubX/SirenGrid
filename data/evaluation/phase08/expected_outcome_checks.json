@@ -1,0 +1,470 @@
+[
+  {
+    "actual": {
+      "baseline": "PLAN_GENERATED",
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "expected": {
+      "baseline": "PLAN_GENERATED",
+      "notes": null,
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "passed": true,
+    "scenario_id": "T01_urgent_activation"
+  },
+  {
+    "actual": {
+      "baseline": "PLAN_GENERATED",
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "expected": {
+      "baseline": "PLAN_GENERATED",
+      "notes": null,
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "passed": true,
+    "scenario_id": "T02_duplicate_report"
+  },
+  {
+    "actual": {
+      "baseline": "PLAN_GENERATED",
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "expected": {
+      "baseline": "PLAN_GENERATED",
+      "notes": null,
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "passed": true,
+    "scenario_id": "T03_conflicting_details"
+  },
+  {
+    "actual": {
+      "baseline": "PLAN_GENERATED",
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "expected": {
+      "baseline": "PLAN_GENERATED",
+      "notes": null,
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "passed": true,
+    "scenario_id": "T04_blocked_road"
+  },
+  {
+    "actual": {
+      "baseline": "PLAN_GENERATED",
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "expected": {
+      "baseline": "PLAN_GENERATED",
+      "notes": null,
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "passed": true,
+    "scenario_id": "T05_coverage_tradeoff"
+  },
+  {
+    "actual": {
+      "baseline": "PLAN_GENERATED",
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "expected": {
+      "baseline": "PLAN_GENERATED",
+      "notes": null,
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "passed": true,
+    "scenario_id": "T06_hospital_overload"
+  },
+  {
+    "actual": {
+      "baseline": "PLAN_GENERATED",
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "expected": {
+      "baseline": "PLAN_GENERATED",
+      "notes": null,
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "passed": true,
+    "scenario_id": "T07_human_rejection"
+  },
+  {
+    "actual": {
+      "baseline": "INSUFFICIENT_RESOURCES",
+      "sirengrid": "INSUFFICIENT_RESOURCES"
+    },
+    "expected": {
+      "baseline": "INSUFFICIENT_RESOURCES",
+      "notes": null,
+      "sirengrid": "INSUFFICIENT_RESOURCES"
+    },
+    "passed": true,
+    "scenario_id": "T08_missing_location"
+  },
+  {
+    "actual": {
+      "baseline": "INSUFFICIENT_RESOURCES",
+      "sirengrid": "INSUFFICIENT_RESOURCES"
+    },
+    "expected": {
+      "baseline": "INSUFFICIENT_RESOURCES",
+      "notes": null,
+      "sirengrid": "INSUFFICIENT_RESOURCES"
+    },
+    "passed": true,
+    "scenario_id": "T09_resource_unavailable"
+  },
+  {
+    "actual": {
+      "baseline": "PLAN_GENERATED",
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "expected": {
+      "baseline": "PLAN_GENERATED",
+      "notes": null,
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "passed": true,
+    "scenario_id": "T10_public_alert"
+  },
+  {
+    "actual": {
+      "baseline": "PLAN_GENERATED",
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "expected": {
+      "baseline": "PLAN_GENERATED",
+      "notes": null,
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "passed": true,
+    "scenario_id": "T11_hospital_prealert"
+  },
+  {
+    "actual": {
+      "baseline": "PLAN_GENERATED",
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "expected": {
+      "baseline": "PLAN_GENERATED",
+      "notes": null,
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "passed": true,
+    "scenario_id": "T12_ai_failure"
+  },
+  {
+    "actual": {
+      "baseline": "PLAN_GENERATED",
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "expected": {
+      "baseline": "PLAN_GENERATED",
+      "notes": null,
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "passed": true,
+    "scenario_id": "T13_operator_correction"
+  },
+  {
+    "actual": {
+      "baseline": "PLAN_GENERATED",
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "expected": {
+      "baseline": "PLAN_GENERATED",
+      "notes": null,
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "passed": true,
+    "scenario_id": "T14_stale_operational_data"
+  },
+  {
+    "actual": {
+      "baseline": "PLAN_GENERATED",
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "expected": {
+      "baseline": "PLAN_GENERATED",
+      "notes": null,
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "passed": true,
+    "scenario_id": "T15_competing_incident"
+  },
+  {
+    "actual": {
+      "baseline": "PLAN_GENERATED",
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "expected": {
+      "baseline": "PLAN_GENERATED",
+      "notes": null,
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "passed": true,
+    "scenario_id": "X01_greedy_resource"
+  },
+  {
+    "actual": {
+      "baseline": "PLAN_GENERATED",
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "expected": {
+      "baseline": "PLAN_GENERATED",
+      "notes": null,
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "passed": true,
+    "scenario_id": "X02_multi_resource"
+  },
+  {
+    "actual": {
+      "baseline": "PLAN_GENERATED",
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "expected": {
+      "baseline": "PLAN_GENERATED",
+      "notes": null,
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "passed": true,
+    "scenario_id": "X03_joint_coverage"
+  },
+  {
+    "actual": {
+      "baseline": "PLAN_GENERATED",
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "expected": {
+      "baseline": "PLAN_GENERATED",
+      "notes": null,
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "passed": true,
+    "scenario_id": "X04_reposition_useful"
+  },
+  {
+    "actual": {
+      "baseline": "PLAN_GENERATED",
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "expected": {
+      "baseline": "PLAN_GENERATED",
+      "notes": null,
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "passed": true,
+    "scenario_id": "X05_reposition_rejected"
+  },
+  {
+    "actual": {
+      "baseline": "PLAN_GENERATED",
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "expected": {
+      "baseline": "PLAN_GENERATED",
+      "notes": null,
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "passed": true,
+    "scenario_id": "X06_stale_traffic"
+  },
+  {
+    "actual": {
+      "baseline": "PLAN_GENERATED",
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "expected": {
+      "baseline": "PLAN_GENERATED",
+      "notes": null,
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "passed": true,
+    "scenario_id": "X07_valid_closure"
+  },
+  {
+    "actual": {
+      "baseline": "INSUFFICIENT_RESOURCES",
+      "sirengrid": "INSUFFICIENT_RESOURCES"
+    },
+    "expected": {
+      "baseline": "INSUFFICIENT_RESOURCES",
+      "notes": null,
+      "sirengrid": "INSUFFICIENT_RESOURCES"
+    },
+    "passed": true,
+    "scenario_id": "X08_no_path"
+  },
+  {
+    "actual": {
+      "baseline": "INSUFFICIENT_RESOURCES",
+      "sirengrid": "INSUFFICIENT_RESOURCES"
+    },
+    "expected": {
+      "baseline": "INSUFFICIENT_RESOURCES",
+      "notes": null,
+      "sirengrid": "INSUFFICIENT_RESOURCES"
+    },
+    "passed": true,
+    "scenario_id": "X09_outside_graph"
+  },
+  {
+    "actual": {
+      "baseline": "INSUFFICIENT_RESOURCES",
+      "sirengrid": "INSUFFICIENT_RESOURCES"
+    },
+    "expected": {
+      "baseline": "INSUFFICIENT_RESOURCES",
+      "notes": null,
+      "sirengrid": "INSUFFICIENT_RESOURCES"
+    },
+    "passed": true,
+    "scenario_id": "X10_insufficient_resources"
+  },
+  {
+    "actual": {
+      "baseline": "PLAN_GENERATED",
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "expected": {
+      "baseline": "PLAN_GENERATED",
+      "notes": null,
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "passed": true,
+    "scenario_id": "X11_hospital_unknown"
+  },
+  {
+    "actual": {
+      "baseline": "PLAN_GENERATED",
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "expected": {
+      "baseline": "PLAN_GENERATED",
+      "notes": null,
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "passed": true,
+    "scenario_id": "X12_hospital_incompatible"
+  },
+  {
+    "actual": {
+      "baseline": "PLAN_GENERATED",
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "expected": {
+      "baseline": "PLAN_GENERATED",
+      "notes": null,
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "passed": true,
+    "scenario_id": "X13_hospital_not_accepting"
+  },
+  {
+    "actual": {
+      "baseline": "PLAN_GENERATED",
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "expected": {
+      "baseline": "PLAN_GENERATED",
+      "notes": null,
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "passed": true,
+    "scenario_id": "X14_hospital_unreachable"
+  },
+  {
+    "actual": {
+      "baseline": "PLAN_GENERATED",
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "expected": {
+      "baseline": "PLAN_GENERATED",
+      "notes": null,
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "passed": true,
+    "scenario_id": "X15_material_eta_replan"
+  },
+  {
+    "actual": {
+      "baseline": "PLAN_GENERATED",
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "expected": {
+      "baseline": "PLAN_GENERATED",
+      "notes": null,
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "passed": true,
+    "scenario_id": "X16_nonmaterial_eta"
+  },
+  {
+    "actual": {
+      "baseline": "PLAN_GENERATED",
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "expected": {
+      "baseline": "PLAN_GENERATED",
+      "notes": null,
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "passed": true,
+    "scenario_id": "X17_resource_outage"
+  },
+  {
+    "actual": {
+      "baseline": "PLAN_GENERATED",
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "expected": {
+      "baseline": "PLAN_GENERATED",
+      "notes": null,
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "passed": true,
+    "scenario_id": "X18_hospital_invalidation"
+  },
+  {
+    "actual": {
+      "baseline": "PLAN_GENERATED",
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "expected": {
+      "baseline": "PLAN_GENERATED",
+      "notes": null,
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "passed": true,
+    "scenario_id": "X19_two_incidents_available"
+  },
+  {
+    "actual": {
+      "baseline": "PLAN_GENERATED",
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "expected": {
+      "baseline": "PLAN_GENERATED",
+      "notes": null,
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "passed": true,
+    "scenario_id": "X20_two_incidents_contention"
+  },
+  {
+    "actual": {
+      "baseline": "PLAN_GENERATED",
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "expected": {
+      "baseline": "PLAN_GENERATED",
+      "notes": null,
+      "sirengrid": "PLAN_GENERATED"
+    },
+    "passed": true,
+    "scenario_id": "X21_concurrency_idempotency"
+  }
+]

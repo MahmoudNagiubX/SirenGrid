@@ -1,0 +1,184 @@
+{
+  "baseline": {
+    "baseline_population_weighted_coverage": {
+      "availability_rate": 0.8611111111111112,
+      "available_count": 31,
+      "max": 0.9860473489699796,
+      "mean": 0.983492546019072,
+      "median": 0.9860473489699796,
+      "min": 0.9432743893377958,
+      "missing_count": 5,
+      "p95": 0.9860473489699796,
+      "total_count": 36
+    },
+    "count": 36,
+    "hospital_eta_seconds": {
+      "availability_rate": 0.19444444444444445,
+      "available_count": 7,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "missing_count": 29,
+      "total_count": 36
+    },
+    "hospital_status_counts": {
+      "REQUIRES_REVIEW": 24,
+      "SELECTED": 7
+    },
+    "incident_eta_seconds": {
+      "availability_rate": 0.8611111111111112,
+      "available_count": 31,
+      "max": 231.9811561943243,
+      "mean": 166.37686995633308,
+      "median": 179.55737863434118,
+      "min": 48.765155875192406,
+      "missing_count": 5,
+      "p95": 227.7295100205387,
+      "total_count": 36
+    },
+    "outcome_counts": {
+      "INSUFFICIENT_RESOURCES": 5,
+      "PLAN_GENERATED": 31
+    },
+    "post_dispatch_population_weighted_coverage": {
+      "availability_rate": 0.8611111111111112,
+      "available_count": 31,
+      "max": 0.9860473489699796,
+      "mean": 0.916425396909185,
+      "median": 0.9860473489699796,
+      "min": 0.0,
+      "missing_count": 5,
+      "p95": 0.9860473489699796,
+      "total_count": 36
+    },
+    "post_dispatch_undercovered_zone_count": {
+      "availability_rate": 0.8611111111111112,
+      "available_count": 31,
+      "max": 416.0,
+      "mean": 81.38709677419355,
+      "median": 42.0,
+      "min": 42.0,
+      "missing_count": 5,
+      "p95": 271.5,
+      "total_count": 36
+    },
+    "post_dispatch_unreachable_zone_count": {
+      "availability_rate": 0.8611111111111112,
+      "available_count": 31,
+      "max": 416.0,
+      "mean": 50.225806451612904,
+      "median": 25.0,
+      "min": 25.0,
+      "missing_count": 5,
+      "p95": 220.5,
+      "total_count": 36
+    },
+    "replan_eta_delta_seconds": {
+      "availability_rate": 0.8611111111111112,
+      "available_count": 31,
+      "max": 118.76154322922278,
+      "mean": 12.981030135839218,
+      "median": 0.0,
+      "min": 0.0,
+      "missing_count": 5,
+      "p95": 84.6241948120078,
+      "total_count": 36
+    },
+    "replan_status_counts": {
+      "MATERIAL": 6,
+      "NO_MATERIAL_CHANGE": 25
+    }
+  },
+  "sirengrid": {
+    "baseline_population_weighted_coverage": {
+      "availability_rate": 0.8611111111111112,
+      "available_count": 31,
+      "max": 0.9860473489699796,
+      "mean": 0.983492546019072,
+      "median": 0.9860473489699796,
+      "min": 0.9432743893377958,
+      "missing_count": 5,
+      "p95": 0.9860473489699796,
+      "total_count": 36
+    },
+    "count": 36,
+    "hospital_eta_seconds": {
+      "availability_rate": 0.19444444444444445,
+      "available_count": 7,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "missing_count": 29,
+      "total_count": 36
+    },
+    "hospital_status_counts": {
+      "REQUIRES_REVIEW": 24,
+      "SELECTED": 7
+    },
+    "incident_eta_seconds": {
+      "availability_rate": 0.8611111111111112,
+      "available_count": 31,
+      "max": 231.9811561943243,
+      "mean": 169.8942060504806,
+      "median": 179.55737863434118,
+      "min": 48.765155875192406,
+      "missing_count": 5,
+      "p95": 231.9811561943243,
+      "total_count": 36
+    },
+    "outcome_counts": {
+      "INSUFFICIENT_RESOURCES": 5,
+      "PLAN_GENERATED": 31
+    },
+    "post_dispatch_population_weighted_coverage": {
+      "availability_rate": 0.8611111111111112,
+      "available_count": 31,
+      "max": 0.9860473489699796,
+      "mean": 0.9191849426919065,
+      "median": 0.9860473489699796,
+      "min": 0.0,
+      "missing_count": 5,
+      "p95": 0.9860473489699796,
+      "total_count": 36
+    },
+    "post_dispatch_undercovered_zone_count": {
+      "availability_rate": 0.8611111111111112,
+      "available_count": 31,
+      "max": 416.0,
+      "mean": 75.90322580645162,
+      "median": 42.0,
+      "min": 42.0,
+      "missing_count": 5,
+      "p95": 266.5,
+      "total_count": 36
+    },
+    "post_dispatch_unreachable_zone_count": {
+      "availability_rate": 0.8611111111111112,
+      "available_count": 31,
+      "max": 416.0,
+      "mean": 50.225806451612904,
+      "median": 25.0,
+      "min": 25.0,
+      "missing_count": 5,
+      "p95": 220.5,
+      "total_count": 36
+    },
+    "replan_eta_delta_seconds": {
+      "availability_rate": 0.8611111111111112,
+      "available_count": 31,
+      "max": 45.85741637760222,
+      "mean": 3.690387140573463,
+      "median": 0.0,
+      "min": 0.0,
+      "missing_count": 5,
+      "p95": 34.272292490087565,
+      "total_count": 36
+    },
+    "replan_status_counts": {
+      "MATERIAL": 3,
+      "NO_MATERIAL_CHANGE": 28
+    }
+  }
+}

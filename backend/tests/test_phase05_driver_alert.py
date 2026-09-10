@@ -9,6 +9,7 @@ import app.models as _models  # noqa: F401
 from app.db import init_db
 from app.main import app
 from app.models import DriverAlert, EmergencyResource
+from app.driver_alert import build_forward_alert_geometry
 from app.schemas import ResourceStatus
 from test_phase05_hospital_api import _create_approved_transport_plan
 
@@ -33,6 +34,12 @@ def _move(client: TestClient, incident_id: str, resource_id: str, version: int, 
             "operator_reference": "operator-driver-alert",
         },
     )
+
+
+def test_zero_distance_approved_route_has_no_forward_alert_geometry() -> None:
+    route = {"type": "LineString", "coordinates": [[31.3304, 30.0571], [31.3304, 30.0571]]}
+
+    assert build_forward_alert_geometry(route, 0.5) is None
 
 
 def test_movement_updates_forward_simulated_driver_alert_and_route_end_expires(

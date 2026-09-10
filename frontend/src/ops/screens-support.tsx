@@ -1,4 +1,7 @@
+import { useEffect, useState } from 'react';
 import { Alert, Badge, Button, Card, GlassPanel, IconTile } from '../components';
+import { getPhase08Benchmark } from '../api/operations';
+import type { BenchmarkArtifactRead, BenchmarkEngineAggregate } from '../api/types';
 import { Ico } from '../lib/icon';
 import { PanelHeader, Screen, SubHead } from './primitives';
 import {
@@ -182,7 +185,7 @@ export function DemoScreen() {
   );
 }
 
-export function BenchmarkScreen() {
+export function BenchmarkLegacyPresentation() {
   return (
     <Screen>
       <Alert tone="attention" title="No performance claims yet">
@@ -241,6 +244,73 @@ export function BenchmarkScreen() {
               <div key={m} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--color-border-hairline)', fontSize: 12 }}>
                 <span>{m}</span>
                 <span style={{ color: 'var(--color-text-muted)' }}>—</span>
+              </div>
+            ))}
+          </GlassPanel>
+        </div>
+      </div>
+    </Screen>
+  );
+}
+
+export function BenchmarkScreen() {
+  const [artifact, setArtifact] = useState<BenchmarkArtifactRead | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void getPhase08Benchmark()
+      .then((value) => {
+        if (active) setArtifact(value);
+      })
+      .catch((reason: unknown) => {
+        if (active) setError(reason instanceof Error ? reason.message : 'Benchmark artifact unavailable.');
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const engines: Array<[string, BenchmarkEngineAggregate | undefined]> = [
+    ['Baseline', artifact?.aggregate.baseline],
+    ['SirenGrid', artifact?.aggregate.sirengrid],
+  ];
+
+  return (
+    <Screen>
+      <Alert tone="attention" title="Committed Phase 08 benchmark artifact">
+        This view shows backend-owned benchmark evidence. Missing measurements remain unavailable; it does not calculate browser-side performance claims.
+      </Alert>
+      {error && <Alert tone="attention" title="Benchmark artifact unavailable">{error}</Alert>}
+      <div style={{ display: 'flex', gap: 14, flex: 1, minHeight: 0 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <GlassPanel padding={0} style={{ overflow: 'hidden' }}>
+            <div style={{ display: 'flex', padding: '11px 16px', borderBottom: '1px solid var(--color-border-hairline)', fontSize: 12, fontWeight: 600, letterSpacing: '.05em', color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>
+              <span style={{ flex: 0.8 }}>Engine</span>
+              <span style={{ flex: 0.7 }}>Scenarios</span>
+              <span style={{ flex: 2 }}>Outcomes</span>
+              <span style={{ flex: 1.2 }}>ETA measured / unavailable</span>
+            </div>
+            {engines.map(([label, values]) => (
+              <div key={label} style={{ display: 'flex', padding: '12px 16px', borderBottom: '1px solid var(--color-border-hairline)', fontSize: 12.5, alignItems: 'center' }}>
+                <span style={{ flex: 0.8, fontWeight: 600 }}>{label}</span>
+                <span style={{ flex: 0.7 }}>{values?.count ?? '—'}</span>
+                <span style={{ flex: 2, color: 'var(--color-text-secondary)' }}>{values ? Object.entries(values.outcome_counts).map(([name, count]) => `${name}: ${count}`).join(' · ') : '—'}</span>
+                <span style={{ flex: 1.2 }}>{values ? `${values.incident_eta_seconds.available_count} / ${values.incident_eta_seconds.missing_count}` : '—'}</span>
+              </div>
+            ))}
+          </GlassPanel>
+        </div>
+        <div style={{ width: 320, display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <GlassPanel padding={14}>
+            <PanelHeader icon="list-checks" title="T01–T15 validation" />
+            <div style={{ fontSize: 12.5, color: 'var(--color-text-secondary)', lineHeight: 1.7 }}>
+              {artifact ? `${artifact.validation.length} recorded checks` : 'Loading committed validation evidence…'}
+            </div>
+            {(artifact?.validation ?? []).slice(0, 15).map((item) => (
+              <div key={item.scenario_id} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--color-border-hairline)', fontSize: 12 }}>
+                <span>{item.case_id}</span>
+                <Badge tone={item.passed ? 'confirmed' : 'neutral'}>{item.passed ? 'PASS' : 'FAIL'}</Badge>
               </div>
             ))}
           </GlassPanel>
