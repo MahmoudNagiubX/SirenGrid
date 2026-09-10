@@ -27,11 +27,6 @@ function hospitalName(raw: string | null | undefined): string {
   return name;
 }
 
-/** Compact unit id — full UUIDs are noise in a list. */
-function shortUnitId(id: string): string {
-  return /^[0-9a-f-]{20,}$/i.test(id) ? `#${id.slice(-4)}` : id;
-}
-
 export function ResourceScreen() {
   const { resources, hospitals, refreshGlobal } = useOperations();
   const { busyAction, message, run } = useCommandRunner();
@@ -227,7 +222,7 @@ export function ResourceScreen() {
                           {u.name || u.resource_type}
                         </div>
                         <div style={{ fontSize: 11.5, color: 'var(--color-text-muted)' }}>
-                          {u.resource_type.replace(/_/g, ' ')} · {shortUnitId(u.id)}
+                          {u.resource_type.replace(/_/g, ' ')}
                         </div>
                       </span>
                     </span>
@@ -249,7 +244,7 @@ export function ResourceScreen() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               <IconTile icon={<Ico n={sel.resource_type === 'AMBULANCE' || sel.type === 'AMBULANCE' ? 'ambulance' : 'truck'} />} tint="navy" size={42} />
               <div>
-                <div style={{ fontSize: 15, fontWeight: 600 }}>{sel.name || sel.id}</div>
+                <div style={{ fontSize: 15, fontWeight: 600 }}>{sel.name || sel.resource_type.replace(/_/g, ' ')}</div>
                 <Badge tone={STATUS_TONE[sel.status] ?? 'neutral'}>{sel.status.replace(/_/g, ' ')}</Badge>
               </div>
             </div>
@@ -257,7 +252,7 @@ export function ResourceScreen() {
               <Fact label="Home base" value="—" unknown />
               <Fact label="Current zone" value={sel.home_zone || '—'} prov="source" unknown={!sel.home_zone} />
               <Fact label="Capability" value={sel.capability_tags.join(', ') || '—'} prov="source" unknown={sel.capability_tags.length === 0} />
-              <Fact label="Assignment" value={sel.assigned_incident_id || '—'} prov="operator" unknown={!sel.assigned_incident_id} />
+              <Fact label="Assignment" value={sel.assigned_incident_id ? 'Assigned to an active incident' : '—'} prov="operator" unknown={!sel.assigned_incident_id} />
               <Fact label="ETA" value="—" unknown />
             </div>
             <Alert tone="simulated" title="Position telemetry">
@@ -357,7 +352,7 @@ export function TimelineScreen() {
         <GlassPanel padding={16} style={{ flex: 1, minWidth: 0, overflowY: 'auto' }}>
           <PanelHeader
             icon="clock"
-            title={`${selectedIncidentId ?? 'No incident'} · audit timeline`}
+            title={selectedIncidentId ? 'Incident audit timeline' : 'No incident selected'}
             right={<Badge tone="neutral">Append-only</Badge>}
           />
           <div style={{ display: 'flex', flexDirection: 'column' }}>

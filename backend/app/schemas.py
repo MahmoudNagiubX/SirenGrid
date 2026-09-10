@@ -73,6 +73,7 @@ __all__ = [
     "CorridorPriorityRequest",
     "DriverAlertRefreshRequest",
     "DriverAlertRead",
+    "OperationalResponderTrackingRead",
     "IncidentOperationalStateRead",
     "MobileService",
     "MobileLoginRequest",
@@ -1521,6 +1522,28 @@ class DriverAlertRead(BaseModel):
     provenance: dict[str, Any] = Field(default_factory=dict)
 
 
+class OperationalResponderTrackingRead(BaseModel):
+    """Canonical Command Center projection for one approved responder.
+
+    This is deliberately a read-only projection of the current approved plan.
+    It shares the deterministic tracking engine used by the citizen surface and
+    carries explicit reality/freshness labels so the browser never simulates a
+    responder position or remaining ETA itself.
+    """
+
+    resource_id: str
+    label: str
+    location: Coordinate
+    eta_seconds: float | None = None
+    progress_fraction: float
+    status: str
+    route: dict[str, Any]
+    data_reality: DataReality
+    freshness_status: FreshnessStatus
+    tracking_source: str
+    last_updated: str
+
+
 class IncidentOperationalStateRead(BaseModel):
     incident_id: str
     incident_version: int
@@ -1532,6 +1555,7 @@ class IncidentOperationalStateRead(BaseModel):
     corridors: list[CorridorRead] = Field(default_factory=list)
     driver_alert: DriverAlertRead | None = None
     driver_alerts: list[DriverAlertRead] = Field(default_factory=list)
+    responder_tracking: list[OperationalResponderTrackingRead] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

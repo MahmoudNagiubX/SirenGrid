@@ -532,6 +532,8 @@ interface RunCommandOptions {
   refetch: () => Promise<unknown>;
   /** Shown only after `refetch` completes — never from the command result alone. */
   successText?: string;
+  /** Runs only after the command and its canonical reconciliation succeed. */
+  onSuccess?: () => void;
 }
 
 const CONFLICT_MESSAGE =
@@ -559,6 +561,7 @@ export function useCommandRunner() {
     try {
       await options.command();
       await options.refetch();
+      options.onSuccess?.();
       if (options.successText) {
         setMessage({ kind: 'success', text: options.successText });
       }

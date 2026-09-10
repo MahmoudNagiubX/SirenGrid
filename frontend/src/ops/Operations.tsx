@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { DecisionWorkspace } from './DecisionWorkspace';
 import { MapControls, MapLegend, MapScale } from './DenseMap';
 import { IncidentRail, TimelineDock } from './workspace';
@@ -53,6 +53,7 @@ export function Operations({ initialState = 'idle' }: { initialState?: OpsState 
     resources,
     hospitals,
     plans,
+    operationalState,
     replan,
     traffic,
     mapBoundary,
@@ -101,10 +102,16 @@ export function Operations({ initialState = 'idle' }: { initialState?: OpsState 
     const list: RealMapMarker[] = [];
     const incidentMarker = toIncidentMarker(incident);
     if (incidentMarker) list.push(incidentMarker);
-    list.push(...toResourceMarkers(resources.data ?? [], selectedIncidentId));
+    list.push(
+      ...toResourceMarkers(
+        resources.data ?? [],
+        selectedIncidentId,
+        operationalState.data?.responder_tracking ?? [],
+      ),
+    );
     list.push(...toHospitalMarkers(hospitals.data ?? []));
     return list;
-  }, [incident, resources.data, hospitals.data, selectedIncidentId]);
+  }, [incident, resources.data, hospitals.data, selectedIncidentId, operationalState.data]);
 
   const routes = useMemo(
     () =>
@@ -118,6 +125,17 @@ export function Operations({ initialState = 'idle' }: { initialState?: OpsState 
   );
 
   const center = useMemo(() => resolveMapCenter(incident), [incident]);
+
+  // The backend owns the deterministic responder projection. Reconcile it at
+  // a bounded interval while an approved response is active; no browser-side
+  // route interpolation or ETA calculation is performed.
+  useEffect(() => {
+    if (!incident?.current_plan_id) return;
+    const timer = window.setInterval(() => {
+      void refreshSelectedIncident(incident.id);
+    }, 15_000);
+    return () => window.clearInterval(timer);
+  }, [incident?.id, incident?.current_plan_id, refreshSelectedIncident]);
 
   // UI overlay keys → renderer layer visibility. `coverage` drives the zones layer;
   // boundary and roads stay visible whenever their backend layer is available. The
@@ -245,7 +263,7 @@ export function Operations({ initialState = 'idle' }: { initialState?: OpsState 
         </div>
         <TimelineDock open={dock} setOpen={setDock} />
       </div>
-      <DecisionWorkspace state={state} tab={tab} setTab={setTab} />
+      <DecisionWorkspace state={state} tab={tab} setTab={setTab} setState={setState} />
     </div>
   );
 }

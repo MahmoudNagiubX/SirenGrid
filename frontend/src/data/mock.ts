@@ -199,14 +199,11 @@ export const LEGEND: Record<string, LegendItem[]> = {
     { color: 'var(--color-critical)', label: 'Closure', dot: true },
   ],
   active: [
-    { color: 'var(--map-corridor)', label: 'Corridor' },
     { color: 'var(--map-route-primary)', label: 'Active route' },
-    { color: 'var(--map-congestion-high)', label: 'Heavy' },
   ],
   default: [
     { color: 'var(--map-route-primary)', label: 'Primary route' },
     { color: 'var(--map-route-alt)', label: 'Alternate' },
-    { color: 'var(--map-congestion-high)', label: 'Heavy traffic' },
     { color: 'var(--map-incident)', label: 'Incident', dot: true },
   ],
 };

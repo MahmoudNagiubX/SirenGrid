@@ -97,6 +97,7 @@ export interface HealthRead {
 export interface ResourceRequirement {
   resource_type: ResourceType;
   count: number;
+  required_capability_tags?: string[];
 }
 
 export interface IncidentRead {
@@ -374,6 +375,21 @@ export interface DriverAlertRead {
   provenance: Record<string, unknown>;
 }
 
+/** Read-only current-plan responder projection for the Command Center. */
+export interface OperationalResponderTrackingRead {
+  resource_id: string;
+  label: string;
+  location: Coordinate;
+  eta_seconds: number | null;
+  progress_fraction: number;
+  status: string;
+  route: Record<string, unknown>;
+  data_reality: DataReality;
+  freshness_status: FreshnessStatus;
+  tracking_source: string;
+  last_updated: string;
+}
+
 export interface IncidentOperationalStateRead {
   incident_id: string;
   incident_version: number;
@@ -385,6 +401,7 @@ export interface IncidentOperationalStateRead {
   corridors: CorridorRead[];
   driver_alert: DriverAlertRead | null;
   driver_alerts: DriverAlertRead[];
+  responder_tracking: OperationalResponderTrackingRead[];
 }
 
 export interface TrafficPrototypePolicyRead {

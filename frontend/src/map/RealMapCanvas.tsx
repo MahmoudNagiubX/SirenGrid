@@ -16,7 +16,6 @@ import {
   Map as MapLibreMap,
   Marker,
   NavigationControl,
-  GeoJSONSource,
   type MapOptions,
 } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
@@ -201,7 +200,10 @@ function setSourceData(
   data: GeoJSON.FeatureCollection,
 ): void {
   const source = map.getSource(sourceId);
-  if (source instanceof GeoJSONSource) {
+  // `getSource()` returns a runtime source object; a cross-bundle `instanceof`
+  // check is not reliable in Vite development builds. Only a source that
+  // implements MapLibre's GeoJSON `setData` contract receives backend geometry.
+  if (source && 'setData' in source && typeof source.setData === 'function') {
     void source.setData(data);
   }
 }

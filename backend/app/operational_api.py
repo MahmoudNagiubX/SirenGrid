@@ -13,12 +13,14 @@ from app.hospital_api import _approved_plan, _option_response, _serialize_destin
 from app.models import (
     CorridorState,
     DriverAlert,
+    EmergencyResource,
     HospitalDestination,
     HospitalOptionSet,
     HospitalPreAlert,
     Incident,
 )
-from app.schemas import IncidentOperationalStateRead
+from app.responder_tracking import resolve_responder_tracking_snapshot
+from app.schemas import IncidentOperationalStateRead, OperationalResponderTrackingRead
 
 __all__ = ["router"]
 
@@ -43,7 +45,45 @@ def get_incident_operational_state(
     pre_alert = None
     corridors: list[dict[str, Any]] = []
     alerts: list[dict[str, Any]] = []
+    responder_tracking: list[OperationalResponderTrackingRead] = []
     if plan is not None:
+        # The Command Center receives the same deterministic, read-only
+        # projection used by the citizen tracking read.  It is restricted to
+        # responders on the exact approved current plan, never candidates or
+        # pending replacements.
+        resource_rows = db.scalars(
+            select(EmergencyResource)
+            .where(
+                EmergencyResource.assigned_incident_id == incident.id,
+                EmergencyResource.id.in_(plan.resource_ids_json or []),
+            )
+            .order_by(EmergencyResource.id.asc())
+        ).all()
+        for resource in resource_rows:
+            snapshot = resolve_responder_tracking_snapshot(
+                db,
+                incident=incident,
+                plan=plan,
+                resource=resource,
+            )
+            if snapshot is None:
+                continue
+            responder_tracking.append(
+                OperationalResponderTrackingRead(
+                    resource_id=resource.id,
+                    label=resource.name,
+                    location=snapshot.effective_location,
+                    eta_seconds=snapshot.remaining_eta_seconds,
+                    progress_fraction=snapshot.progress_fraction,
+                    status=snapshot.tracking_state.value,
+                    route=snapshot.route_geometry,
+                    data_reality=snapshot.data_reality,
+                    freshness_status=snapshot.freshness_status,
+                    tracking_source=snapshot.tracking_source,
+                    last_updated=snapshot.last_updated.isoformat(),
+                )
+            )
+
         option_set = db.scalars(
             select(HospitalOptionSet)
             .where(HospitalOptionSet.incident_id == incident.id, HospitalOptionSet.plan_id == plan.id)
@@ -98,4 +138,5 @@ def get_incident_operational_state(
         corridors=corridors,
         driver_alert=alerts[0] if alerts else None,
         driver_alerts=alerts,
+        responder_tracking=responder_tracking,
     ).model_dump(mode="json")
