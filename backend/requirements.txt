@@ -11,5 +11,8 @@ pyproj
 geopandas
 rasterio
 firebase-admin
+opencv-python
+ultralytics
+easyocr
 pytest
 ruff
