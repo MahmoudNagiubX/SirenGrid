@@ -262,9 +262,11 @@ function OverviewTab({
       {mobileSummary && (
         <Fragment>
           <SubHead>New emergency request</SubHead>
-          <Alert tone="attention" title="Pending operator review">
-            This citizen request has not dispatched a response. Review the Device GPS and requested service before coordinating a plan.
-          </Alert>
+          {!inc?.current_plan_id && (
+            <Alert tone="attention" title="Pending operator review">
+              This citizen request has not dispatched a response. Review the Device GPS and requested service before coordinating a plan.
+            </Alert>
+          )}
           <Fact label="Request source" value="SirenGrid Citizen" />
           <Fact label="Requested service" value={mobileSummary.requestedService ? humanize(mobileSummary.requestedService) : undefined} unknown={!mobileSummary.requestedService} />
           {citizenCtx?.citizenReference && (
