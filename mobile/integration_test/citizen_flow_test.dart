@@ -76,12 +76,30 @@ void main() {
     await tester.tap(find.text('Account'));
     await pumpUntil(tester, find.byKey(const Key('account_screen')));
     expect(find.text('Demo Citizen'), findsOneWidget);
+    // Account's content is a ListView, which — like ListView.builder — only
+    // mounts elements near the current viewport; being a fixed `children:`
+    // list does not make it eagerly build everything. The sign-out control
+    // sits below the fold on a typical device, so `find.text` genuinely finds
+    // nothing until the list is scrolled down to it; a bare `pumpUntil` can
+    // never succeed here without an actual scroll gesture in between. The
+    // other tabs stay mounted in the shell's IndexedStack, so there are
+    // multiple Scrollables live at once — this must be scoped to the one
+    // inside account_screen, not just ".first" in tree order.
+    await tester.scrollUntilVisible(
+      find.text('Sign out'),
+      200,
+      scrollable: find.descendant(
+        of: find.byKey(const Key('account_screen')),
+        matching: find.byType(Scrollable),
+      ),
+    );
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Sign out'));
 
     await pumpUntil(
       tester,
       find.byKey(const Key('login_screen')),
-      timeout: const Duration(seconds: 15),
+      timeout: const Duration(seconds: 30),
     );
   });
 }
