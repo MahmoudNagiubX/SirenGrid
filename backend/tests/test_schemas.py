@@ -265,6 +265,9 @@ def test_model_metadata_registers_all_five_tables(isolated_engine) -> None:
         "response_plans",
         "approvals",
         "timeline_events",
+        "hospital_operational_states",
+        "citizen_profiles",
+        "citizen_sessions",
     }
     assert expected_tables.issubset(Base.metadata.tables.keys())
 

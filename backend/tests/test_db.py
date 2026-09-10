@@ -5,10 +5,12 @@ from unittest.mock import patch
 
 import pytest
 from sqlalchemy import Engine, Integer, String, inspect, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 import app.db as db_module
+from app.config import REPO_ROOT, Settings, get_settings
 from app.db import Base, get_db, init_db
 
 
@@ -82,6 +84,28 @@ def test_sqlite_busy_timeout_is_explicit_when_driver_default_is_disabled(
 
 def test_non_sqlite_database_url_has_no_sqlite_connect_args() -> None:
     assert db_module._connect_args_for_database_url("postgresql://db/test") == {}
+
+
+def test_default_sqlite_database_is_backend_relative_not_cwd_relative(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.chdir(tmp_path)
+
+    expected = (REPO_ROOT / "backend" / "sirengrid.db").resolve()
+    configured = get_settings().DATABASE_URL
+
+    assert Path(make_url(configured).database).resolve() == expected
+    assert Path(make_url(Settings().DATABASE_URL).database).resolve() == expected
+
+
+def test_database_url_environment_override_is_preserved(
+    tmp_db_url: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DATABASE_URL", tmp_db_url)
+    assert get_settings().DATABASE_URL == tmp_db_url
 
 
 def test_isolated_temporary_db(isolated_engine: Engine, tmp_db_file: Path) -> None:
@@ -243,7 +267,8 @@ def test_startup_schema_failure_is_logged_not_silently_swallowed() -> None:
                 async with main_module.lifespan(main_module.app):
                     pass
 
-            asyncio.run(_run_lifespan())
+            with pytest.raises(RuntimeError, match="simulated schema failure"):
+                asyncio.run(_run_lifespan())
     finally:
         main_module.logger.removeHandler(handler)
 

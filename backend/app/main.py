@@ -9,8 +9,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.benchmark_api import router as benchmark_router
 from app.config import settings
-from app.db import init_db
 from app.corridor_api import router as corridor_router
+from app.db import init_db
 from app.driver_alert_api import router as driver_alert_router
 from app.incidents import router as incidents_router
 from app.hospital_api import router as hospital_router
@@ -52,12 +52,13 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     try:
         init_db()
         logger.info("init_db() succeeded, database=%s", settings.DATABASE_URL)
-    except Exception:  # pragma: no cover - startup must not crash the server
+    except Exception:  # pragma: no cover - startup must fail closed
         logger.exception(
             "init_db() failed during startup, database=%s — database-backed "
-            "endpoints will fail until this is fixed and the server restarted",
+            "startup aborted until schema initialization succeeds",
             settings.DATABASE_URL,
         )
+        raise
     yield
 
 
