@@ -29,6 +29,14 @@ class _TrackingScreenState extends State<TrackingScreen>
     with WidgetsBindingObserver {
   final _mapKey = GlobalKey<TrackingMapState>();
 
+  // Captured in didChangeDependencies, not read at dispose time: if this
+  // screen is torn down as part of an ancestor unmounting (e.g. the shell
+  // swapping away on logout), this widget's own BuildContext is already
+  // deactivated by the time dispose() runs, and context.read() on a
+  // deactivated context throws. The cubit instance itself is still valid to
+  // call into during dispose; only the context lookup is unsafe.
+  late TrackingCubit _cubit;
+
   @override
   void initState() {
     super.initState();
@@ -39,18 +47,24 @@ class _TrackingScreenState extends State<TrackingScreen>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _cubit = context.read<TrackingCubit>();
+  }
+
+  @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    context.read<TrackingCubit>().pause();
+    _cubit.pause();
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      context.read<TrackingCubit>().refreshNow();
+      _cubit.refreshNow();
     } else if (state == AppLifecycleState.paused) {
-      context.read<TrackingCubit>().pause();
+      _cubit.pause();
     }
   }
 

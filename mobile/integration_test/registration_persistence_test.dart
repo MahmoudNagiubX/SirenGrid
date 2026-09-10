@@ -43,9 +43,9 @@ void main() {
     (tester) async {
       // Unique per run so repeat runs against a persistent backend DB never
       // collide with a prior run's phone/National ID.
-      final suffix = DateTime.now().millisecondsSinceEpoch
-          .toString()
-          .substring(3);
+      final suffix = DateTime.now().millisecondsSinceEpoch.toString().substring(
+        3,
+      );
       final phone = '01${suffix.padLeft(9, '0').substring(0, 9)}';
       final nationalId = suffix.padLeft(14, '1');
       const name = 'Automated QA Citizen';
@@ -61,11 +61,20 @@ void main() {
         find.byKey(const Key('login_screen')),
         timeout: const Duration(seconds: 40),
       );
-      await tester.tap(find.text('Create account'));
+      // The link renders as one Text.rich combining "New to SirenGrid? " with
+      // a child TextSpan "Create account" — find.text only matches a
+      // widget's full combined text content, so it must be textContaining.
+      await tester.tap(find.textContaining('Create account'));
       await pumpUntil(tester, find.byKey(const Key('register_screen')));
 
       // --- Fill registration form --------------------------------------
-      final fields = find.byType(TextField);
+      // Navigator keeps the pushed-from LoginScreen mounted (just offstage),
+      // so its own 2 TextFields are still in the tree — scope to
+      // register_screen specifically rather than every TextField in the app.
+      final fields = find.descendant(
+        of: find.byKey(const Key('register_screen')),
+        matching: find.byType(TextField),
+      );
       expect(fields, findsNWidgets(6));
       await tester.enterText(fields.at(0), name);
       await tester.enterText(fields.at(1), phone);
@@ -74,6 +83,26 @@ void main() {
       await tester.enterText(fields.at(4), pin);
       await tester.enterText(fields.at(5), address);
       await tester.pump(const Duration(milliseconds: 200));
+      // The submit button sits below the fold of the form's own
+      // SingleChildScrollView on a typical device; scroll it into view
+      // before tapping instead of assuming its position is on-screen.
+      // scrollUntilVisible requires the finder to resolve to an actual
+      // Scrollable (not the higher-level SingleChildScrollView), but each
+      // TextField's own EditableText contributes its own internal Scrollable
+      // too, so plain find.byType(Scrollable) is ambiguous here. The outer
+      // form's own Scrollable is encountered first in tree order, ahead of
+      // any TextField nested beneath it.
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('register_submit')),
+        200,
+        scrollable: find
+            .descendant(
+              of: find.byKey(const Key('register_screen')),
+              matching: find.byType(Scrollable),
+            )
+            .at(0),
+      );
+      await tester.pump(const Duration(milliseconds: 300));
       await tester.tap(find.byKey(const Key('register_submit')));
 
       // --- Registration succeeds straight to Home -----------------------
@@ -108,12 +137,15 @@ void main() {
           matching: find.byType(Scrollable),
         ),
       );
-      await tester.pumpAndSettle();
+      // Not pumpAndSettle: Home's pulsing CTA keeps animating in the
+      // background (all tabs stay mounted via the shell's IndexedStack), so
+      // a settle wait for every animation to stop never returns.
+      await tester.pump(const Duration(milliseconds: 300));
       await tester.tap(find.text('Sign out'));
       await pumpUntil(
         tester,
         find.byKey(const Key('login_screen')),
-        timeout: const Duration(seconds: 15),
+        timeout: const Duration(seconds: 30),
       );
 
       // --- Log back in with the same phone + PIN --------------------------
