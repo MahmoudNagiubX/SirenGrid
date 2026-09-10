@@ -32,8 +32,15 @@ Widget _homeHost() {
 }
 
 Future<void> _pumpAt(WidgetTester tester, Size size) async {
-  await tester.binding.setSurfaceSize(size);
-  addTearDown(() => tester.binding.setSurfaceSize(null));
+  // `TestWidgetsFlutterBinding.setSurfaceSize` only resizes the root render
+  // view; it does not update `tester.view.physicalSize`, which is what
+  // `MediaQuery.sizeOf` actually reads. That mismatch silently ran every test
+  // below against the default 800x600 test window instead of the requested
+  // size. Setting the view directly keeps both in sync.
+  tester.view.physicalSize = size;
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
   await tester.pumpWidget(_homeHost());
   await tester.pump(const Duration(milliseconds: 350));
 }
@@ -60,11 +67,14 @@ void main() {
     }
     expect(find.textContaining('Request'), findsOneWidget);
 
-    // No scroll view in the Home body at the target size.
+    // No wrapping scroll container in the Home body at the target size — the
+    // service grid's own inert `Scrollable` (shrink-wrapped,
+    // NeverScrollableScrollPhysics) is a GridView implementation detail, not a
+    // scrolling section, so it is deliberately not what this asserts against.
     expect(
       find.descendant(
         of: find.byKey(const Key('home_screen')),
-        matching: find.byType(Scrollable),
+        matching: find.byType(SingleChildScrollView),
       ),
       findsNothing,
     );

@@ -69,24 +69,34 @@ class _HomeScreenState extends State<HomeScreen> {
             onOpenAccount: widget.onOpenAccount,
           ),
           Expanded(
-            child: LayoutBuilder(
-              builder: (context, constraints) => _ServiceArea(
-                available: constraints.maxHeight,
-                showClearTheWay: widget.showClearTheWay,
-                onDismissClearTheWay: widget.onDismissClearTheWay,
-                selected: _selected,
-                onSelect: (s) => setState(() => _selected = s),
-                cta: BlocBuilder<HomeCubit, HomeState>(
-                  builder: (context, state) => SgEmergencyButton(
-                    label:
-                        '${context.tr('home.request')} ${context.tr(_selected.labelKey)}',
-                    icon: _selected.icon,
-                    full: true,
-                    pulsing: state is HomeIdle,
-                    loading: state is HomeSubmitting,
-                    onPressed: state is HomeSubmitting
-                        ? null
-                        : () => _request(_selected),
+            // The hero above already consumes the top status-bar inset for its
+            // own padding; without removing it here too, the service grid's
+            // GridView (a ScrollView, which safe-pads its main axis by
+            // MediaQuery.padding automatically) silently adds that same inset
+            // a second time, overflowing the non-scrolling layout below by
+            // exactly the status-bar height.
+            child: MediaQuery.removePadding(
+              context: context,
+              removeTop: true,
+              child: LayoutBuilder(
+                builder: (context, constraints) => _ServiceArea(
+                  available: constraints.maxHeight,
+                  showClearTheWay: widget.showClearTheWay,
+                  onDismissClearTheWay: widget.onDismissClearTheWay,
+                  selected: _selected,
+                  onSelect: (s) => setState(() => _selected = s),
+                  cta: BlocBuilder<HomeCubit, HomeState>(
+                    builder: (context, state) => SgEmergencyButton(
+                      label:
+                          '${context.tr('home.request')} ${context.tr(_selected.labelKey)}',
+                      icon: _selected.icon,
+                      full: true,
+                      pulsing: state is HomeIdle,
+                      loading: state is HomeSubmitting,
+                      onPressed: state is HomeSubmitting
+                          ? null
+                          : () => _request(_selected),
+                    ),
                   ),
                 ),
               ),
@@ -129,10 +139,34 @@ class _ServiceArea extends StatelessWidget {
   static const double _gridRowGap = 12;
   static const double _gridToCta = 18;
   static const double _ctaToNav = 14;
-  static const double _titleBand = 28; // one line of the section heading
   static const double _ctaHeight = 60; // SgEmergencyButton pill
   static const double _minCell = 112; // keeps icon + label + touch target
   static const double _maxCell = 140; // dense mobile tile, not a dashboard card
+
+  /// The section heading's real rendered height for [text] at [maxWidth],
+  /// honoring the current locale direction and system font scale — the
+  /// non-scrolling layout below must reserve the space the heading actually
+  /// takes, not an assumed single-line constant.
+  ///
+  /// Resolves against the ambient [DefaultTextStyle] first (the app theme
+  /// applies Google Fonts Rubik there, not on [SgType.cardHeading] itself) so
+  /// this measures the same font the real `Text` widget below renders with —
+  /// the previously unresolved fallback-font measurement under-counted the
+  /// wider/taller Rubik render and made the overflow worse, not better.
+  static double _measureHeadingHeight(
+    BuildContext context,
+    String text,
+    double maxWidth,
+  ) {
+    final effectiveStyle = DefaultTextStyle.of(context).style
+        .merge(SgType.cardHeading.copyWith(fontWeight: FontWeight.w700));
+    final painter = TextPainter(
+      text: TextSpan(text: text, style: effectiveStyle),
+      textDirection: Directionality.of(context),
+      textScaler: MediaQuery.textScalerOf(context),
+    )..layout(maxWidth: maxWidth);
+    return painter.height;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -144,10 +178,21 @@ class _ServiceArea extends StatelessWidget {
     // Rendered height of the location-action card incl. its own top inset.
     final stripReserve = needsLocationAction ? 92.0 : 0.0;
 
+    // `_titleBand` assumes one line; a long translated question or a larger
+    // system font scale can wrap it to two, which the fixed constant doesn't
+    // account for and silently overflows the non-scrolling layout below. Measure
+    // the heading's real height for this context/width instead of assuming it.
+    final headingWidth = MediaQuery.sizeOf(context).width - SgSpace.page * 2;
+    final headingHeight = _measureHeadingHeight(
+      context,
+      context.tr('home.question'),
+      headingWidth,
+    );
+
     // Everything except the two grid rows.
     final nonGrid =
         _heroToTitle +
-        _titleBand +
+        headingHeight +
         _titleToGrid +
         _gridRowGap +
         _gridToCta +
