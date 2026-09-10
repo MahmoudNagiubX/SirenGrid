@@ -98,7 +98,7 @@ export function AiBlock({ title, children, footer }: { title: string; children: 
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
         <IconTile icon={<Ico n="brain" />} tint="blue" size={26} />
         <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--blue-700)' }}>{title}</span>
-        <Badge tone="info">Recommendation · not executed</Badge>
+        <Badge tone="info">Recommended plan · awaiting approval</Badge>
       </div>
       <div style={{ fontSize: 13.5, color: 'var(--gray-700)', lineHeight: 1.55 }}>{children}</div>
       {footer && <div style={{ marginTop: 10 }}>{footer}</div>}
