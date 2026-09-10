@@ -182,6 +182,75 @@ def test_get_db_session_lifecycle(isolated_engine: Engine) -> None:
         mock_close.assert_called_once()
 
 
+def test_default_database_url_is_absolute_regardless_of_cwd(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Regression: a real P0 where /health returned 200 but every DB-backed
+    endpoint 500'd with "no such table". Root cause: the default
+    DATABASE_URL was a bare relative ``sqlite:///./sirengrid.db``, so a
+    server launched from an unexpected working directory silently opened
+    (and, via CREATE TABLE IF NOT EXISTS, silently created) a different,
+    empty database. The default must resolve to the same absolute
+    ``backend/sirengrid.db`` no matter what the process's cwd is at launch.
+    """
+    from app.config import DEFAULT_DATABASE_PATH, get_settings
+
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.chdir(tmp_path)  # simulate launching from an unrelated cwd
+
+    settings = get_settings()
+
+    assert not settings.DATABASE_URL.startswith("sqlite:///./")
+    assert not settings.DATABASE_URL.startswith("sqlite:///.")
+    assert DEFAULT_DATABASE_PATH.is_absolute()
+    assert DEFAULT_DATABASE_PATH.as_posix() in settings.DATABASE_URL
+
+
+def test_startup_schema_failure_is_logged_not_silently_swallowed() -> None:
+    """Regression: a schema-init failure must never leave a server that
+    looks healthy without any trace. Previously the exception was caught
+    and logged through a logger with no handler configured anywhere in the
+    app, so the failure was completely invisible (the exact "false healthy
+    server" this test guards against).
+    """
+    import asyncio
+    import logging as logging_module
+    from unittest.mock import patch
+
+    import app.main as main_module
+
+    # The fix attaches a handler directly to this logger; a startup failure
+    # must never rely on some other part of the app configuring one.
+    assert main_module.logger.handlers, (
+        "app.main's logger has no handler — a startup failure would be "
+        "silently dropped, exactly as in the original P0."
+    )
+
+    captured: list[logging_module.LogRecord] = []
+
+    class _Capture(logging_module.Handler):
+        def emit(self, record: logging_module.LogRecord) -> None:
+            captured.append(record)
+
+    handler = _Capture()
+    main_module.logger.addHandler(handler)
+    try:
+        with patch.object(
+            main_module, "init_db", side_effect=RuntimeError("simulated schema failure")
+        ):
+
+            async def _run_lifespan() -> None:
+                async with main_module.lifespan(main_module.app):
+                    pass
+
+            asyncio.run(_run_lifespan())
+    finally:
+        main_module.logger.removeHandler(handler)
+
+    assert any(record.levelno >= logging_module.ERROR for record in captured)
+    assert any("init_db" in record.getMessage() for record in captured)
+
+
 def test_get_db_session_cleanup_on_exception() -> None:
     """Verify get_db() reliably closes the Session if an exception is raised in caller."""
     gen = get_db()

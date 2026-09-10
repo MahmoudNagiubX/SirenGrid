@@ -26,6 +26,17 @@ from app.traffic.api import router as traffic_router
 from app.websocket import router as websocket_router
 
 logger = logging.getLogger(__name__)
+# The app configures no root logging handler/level, so a bare logger.exception()
+# call here would be silently dropped (default root level is WARNING with no
+# handler at all) — exactly how a real init_db() startup failure previously
+# went unnoticed while the server kept serving as if healthy. Attach a
+# handler directly to this logger only.
+if not logger.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter("%(asctime)s %(name)s %(message)s"))
+    logger.addHandler(_handler)
+    logger.propagate = False
+logger.setLevel(logging.INFO)
 
 
 @asynccontextmanager
@@ -40,8 +51,13 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     """
     try:
         init_db()
+        logger.info("init_db() succeeded, database=%s", settings.DATABASE_URL)
     except Exception:  # pragma: no cover - startup must not crash the server
-        logger.exception("init_db() failed during startup")
+        logger.exception(
+            "init_db() failed during startup, database=%s — database-backed "
+            "endpoints will fail until this is fixed and the server restarted",
+            settings.DATABASE_URL,
+        )
     yield
 
 

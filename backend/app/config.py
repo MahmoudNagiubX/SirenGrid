@@ -15,6 +15,16 @@ except ImportError:  # pragma: no cover
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DATA_DIR = REPO_ROOT / "data" / "processed" / "nasr_city"
 DEFAULT_PHASE06_MEDIA_DIR = REPO_ROOT / "backend" / ".runtime" / "media"
+# Absolute, anchored to this file's own location rather than the process's
+# current working directory. A bare relative "sqlite:///./sirengrid.db"
+# silently opens (and, via CREATE TABLE IF NOT EXISTS, silently *creates*) a
+# different empty database whenever the server is launched from a different
+# cwd than expected — reproduced as a real P0 (dashboard 500s with "no such
+# table" while a manually-run script against the same relative path saw the
+# real, populated database). Anchoring to REPO_ROOT makes the operational
+# database deterministic regardless of launch cwd.
+DEFAULT_DATABASE_PATH = REPO_ROOT / "backend" / "sirengrid.db"
+DEFAULT_DATABASE_URL = f"sqlite:///{DEFAULT_DATABASE_PATH.as_posix()}"
 DEFAULT_CORS_ORIGINS = (
     "http://localhost:5173",
     "http://127.0.0.1:5173",
@@ -44,7 +54,7 @@ def _parse_cors_origins(raw: str | None) -> list[str]:
 class Settings(BaseModel):
     app_name: str = Field(default="SirenGrid API")
     api_prefix: str = Field(default="/api/v1")
-    database_url: str = Field(default="sqlite:///./sirengrid.db")
+    database_url: str = Field(default_factory=lambda: DEFAULT_DATABASE_URL)
     cors_origins: list[str] = Field(default_factory=lambda: list(DEFAULT_CORS_ORIGINS))
     max_route_snap_distance_m: float = Field(default=1500.0)
     prototype_target_response_time_seconds: Literal[600] = 600
@@ -262,7 +272,7 @@ def get_settings() -> Settings:
     return Settings(
         app_name=os.getenv("APP_NAME", "SirenGrid API"),
         api_prefix=os.getenv("API_PREFIX", "/api/v1"),
-        database_url=os.getenv("DATABASE_URL", "sqlite:///./sirengrid.db"),
+        database_url=os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL),
         cors_origins=cors_origins,
         max_route_snap_distance_m=float(
             os.getenv("MAX_ROUTE_SNAP_DISTANCE_M", "1500.0")
