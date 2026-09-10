@@ -67,7 +67,6 @@ class _SirenGridAppState extends State<SirenGridApp> {
         title: 'SirenGrid Citizen',
         debugShowCheckedModeBanner: false,
         theme: sgTheme(),
-        locale: const Locale('en'),
         supportedLocales: SgStrings.supportedLocales,
         localizationsDelegates: const [
           GlobalMaterialLocalizations.delegate,

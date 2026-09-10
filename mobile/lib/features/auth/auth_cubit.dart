@@ -90,7 +90,7 @@ class AuthCubit extends Cubit<AuthState> {
       emit(const AuthFailure('login.err_required', loginFailure: true));
       return;
     }
-    if (!RegExp(r'^\d{4}$').hasMatch(cleanPin)) {
+    if (!RegExp(r'^\d{4,8}$').hasMatch(cleanPin)) {
       emit(const AuthFailure('login.err_pin', loginFailure: true));
       return;
     }
@@ -159,6 +159,9 @@ class AuthCubit extends Cubit<AuthState> {
       emit(const AuthFailure('login.err_network', loginFailure: true));
     }
   }
+
+  Future<Map<String, dynamic>> scanNationalId(String imagePath) =>
+      _api.scanNationalId(imagePath);
 
   Future<void> _loadProfile({required bool isRestore}) async {
     try {

@@ -51,6 +51,8 @@ class SgIcons {
   static const eyeOff =
       '<path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"/><path d="m2 2 20 20"/>';
   static const chevronRight = '<path d="m9 18 6-6-6-6"/>';
+  static const camera =
+      '<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3z"/><circle cx="12" cy="13" r="3"/>';
 
   static const _registry = <String, String>{
     'ambulance': ambulance,
@@ -76,6 +78,7 @@ class SgIcons {
     'eye': eye,
     'eye-off': eyeOff,
     'chevron-right': chevronRight,
+    'camera': camera,
   };
 
   static String? byName(String name) => _registry[name];

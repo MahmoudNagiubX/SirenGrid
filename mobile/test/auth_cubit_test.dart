@@ -85,7 +85,7 @@ void main() {
   );
 
   test(
-    'non-4-digit PIN is rejected client-side without a network call',
+    'PIN outside the supported 4-8 digit range is rejected client-side',
     () async {
       final c = ScriptedClient();
       final cubit = build(c);
@@ -94,6 +94,21 @@ void main() {
       expect(c.requests, isEmpty);
     },
   );
+
+  test('a 6-digit registered PIN can be used to log in', () async {
+    final c = ScriptedClient()
+      ..enqueue(200, {
+        'access_token': 'tok-123',
+        'token_type': 'bearer',
+      }, matchPathEndsWith: '/auth/login')
+      ..enqueue(200, _profileJson, matchPathEndsWith: '/me');
+    final cubit = build(c);
+
+    await cubit.login('01000000000', '123456');
+
+    expect(cubit.state, isA<Authenticated>());
+    expect(c.bodyOf(c.requests.first)['pin'], '123456');
+  });
 
   test('restoreSession validates the stored token via /me', () async {
     await SecureStore.saveAccessToken('tok-xyz');

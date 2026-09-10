@@ -2,9 +2,11 @@
 // `_accessToken` field (kept private so it is only mutated via setAccessToken),
 // while staying easy to seed from tests.
 // ignore_for_file: prefer_initializing_formals
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 
 import 'config.dart';
 
@@ -69,6 +71,57 @@ class ApiClient {
         .timeout(AppConfig.httpTimeout);
   }
 
+  Future<Map<String, dynamic>> scanNationalId(
+    String imagePath, {
+    Duration timeout = const Duration(seconds: 60),
+  }) async {
+    try {
+      final lowerPath = imagePath.toLowerCase();
+      final contentType = lowerPath.endsWith('.png')
+          ? MediaType('image', 'png')
+          : MediaType('image', 'jpeg');
+      final request = http.MultipartRequest(
+        'POST',
+        _uri('/auth/scan-national-id'),
+      )..headers.addAll(buildHeaders(json: false));
+      request.files.add(
+        await http.MultipartFile.fromPath(
+          'file',
+          imagePath,
+          filename: lowerPath.endsWith('.png')
+              ? 'id-front.png'
+              : 'id-front.jpg',
+          contentType: contentType,
+        ),
+      );
+      final streamed = await _client.send(request).timeout(timeout);
+      final response = await http.Response.fromStream(streamed);
+      final decoded = jsonDecode(response.body);
+      if (decoded is Map<String, dynamic>) {
+        final detail = decoded['detail'];
+        if (detail is Map) {
+          return _scanFailure(
+            detail['code']?.toString() ?? 'OCR_NOT_CLEAR',
+            detail['message']?.toString() ??
+                'We could not accept this image. Retake the photo.',
+          );
+        }
+        return decoded;
+      }
+      return _scanFailure(
+        'OCR_NOT_CLEAR',
+        'We could not read the ID clearly. Retake the photo.',
+      );
+    } on TimeoutException {
+      return _scanFailure('TIMEOUT', 'The scan timed out. Retake the photo.');
+    } catch (_) {
+      return _scanFailure(
+        'BACKEND_UNAVAILABLE',
+        'ID scanning is unavailable. Enter details manually.',
+      );
+    }
+  }
+
   Future<http.Response> delete(
     String mobilePath, {
     Map<String, dynamic>? body,
@@ -84,3 +137,10 @@ class ApiClient {
 
   void close() => _client.close();
 }
+
+Map<String, dynamic> _scanFailure(String code, String message) => {
+  'success': false,
+  'code': code,
+  'message': message,
+  'extracted': null,
+};

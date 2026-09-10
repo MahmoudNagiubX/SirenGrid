@@ -93,7 +93,10 @@ void main() {
         matching: find.byType(Scrollable),
       ),
     );
-    await tester.pumpAndSettle();
+    // Not pumpAndSettle: Home's pulsing CTA keeps animating in the
+    // background (all tabs stay mounted via the shell's IndexedStack), so a
+    // settle wait for every animation to stop never returns.
+    await tester.pump(const Duration(milliseconds: 300));
     await tester.tap(find.text('Sign out'));
 
     await pumpUntil(
