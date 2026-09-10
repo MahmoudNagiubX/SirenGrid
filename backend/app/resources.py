@@ -31,6 +31,7 @@ __all__ = [
     "is_planner_eligible",
     "serialize_resource",
     "interpolate_route_progress",
+    "remaining_route_coordinates",
     "list_resources",
     "get_resource",
     "assign_resource",
@@ -177,6 +178,44 @@ def interpolate_route_progress(
         accumulated_distance += seg_len
 
     return normalized_coordinates[-1]
+
+
+def remaining_route_coordinates(
+    coordinates: list[list[float]],
+    progress: float,
+) -> list[list[float]]:
+    """The route polyline from the current interpolated position to the end.
+
+    Presentation companion to :func:`interpolate_route_progress`: walks the
+    same cumulative-distance logic to find which segment ``progress`` sits
+    on, then returns ``[current_point, *vertices_after_it]`` so a rendered
+    route visibly shrinks behind the responder as it advances instead of
+    staying drawn as the full original route for the whole trip. Does not
+    modify ``interpolate_route_progress`` itself, which stays the single
+    source of truth for the current point.
+    """
+    current_point = list(interpolate_route_progress(coordinates, progress))
+    if progress >= 1.0:
+        return [current_point]
+
+    normalized_coordinates = [(float(c[0]), float(c[1])) for c in coordinates]
+    segment_lengths = [
+        haversine_distance_m(*normalized_coordinates[i], *normalized_coordinates[i + 1])
+        for i in range(len(normalized_coordinates) - 1)
+    ]
+    total_distance = sum(segment_lengths)
+    if total_distance <= 0.0 or progress <= 0.0:
+        return [list(c) for c in normalized_coordinates]
+
+    target_distance = progress * total_distance
+    accumulated_distance = 0.0
+    for i, seg_len in enumerate(segment_lengths):
+        if accumulated_distance + seg_len >= target_distance:
+            remaining_vertices = normalized_coordinates[i + 1 :]
+            return [current_point] + [list(c) for c in remaining_vertices]
+        accumulated_distance += seg_len
+
+    return [current_point]
 
 
 def serialize_resource(resource: EmergencyResource) -> dict[str, Any]:

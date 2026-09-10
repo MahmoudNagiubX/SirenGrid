@@ -38,7 +38,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import Approval, EmergencyResource, Incident, ResponsePlan
-from app.resources import interpolate_route_progress
+from app.resources import interpolate_route_progress, remaining_route_coordinates
 from app.schemas import (
     CitizenRequestStatus,
     Coordinate,
@@ -244,19 +244,28 @@ def resolve_responder_tracking_snapshot(
     if is_real_live:
         # Genuine live provenance: trust the resource's own coordinate and keep
         # its reality / freshness labels. The route simulation never overrides
-        # a real location.
+        # a real location. `progress` here is time-derived, not matched to the
+        # real GPS fix, so trimming the route by it would fabricate a
+        # "remaining route" not actually tied to the real position — the full
+        # route stays as the only truthful geometry in this branch.
         effective_location = Coordinate(
             lat=resource.latitude, lon=resource.longitude
         )
         tracking_source = TRACKING_SOURCE_REAL
         out_reality = DataReality.REAL_LIVE
         out_freshness = resource_freshness
+        route_coordinates = coordinates
     else:
         lon, lat = interpolate_route_progress(coordinates, progress)
         effective_location = Coordinate(lat=lat, lon=lon)
         tracking_source = TRACKING_SOURCE_SIMULATED
         out_reality = DataReality.SIMULATED
         out_freshness = FreshnessStatus.FRESH
+        # The displayed route is the remaining path from here to the
+        # incident, not the full original route — it visibly shrinks behind
+        # the responder as `progress` advances, on both mobile and dashboard
+        # (both consume this same field).
+        route_coordinates = remaining_route_coordinates(coordinates, progress)
 
     tracking_state = (
         CitizenRequestStatus.ARRIVED
@@ -271,7 +280,7 @@ def resolve_responder_tracking_snapshot(
         remaining_eta_seconds=remaining_eta,
         progress_fraction=progress,
         tracking_state=tracking_state,
-        route_geometry={"type": "LineString", "coordinates": coordinates},
+        route_geometry={"type": "LineString", "coordinates": route_coordinates},
         started_at=started_at,
         last_updated=now_utc,
         data_reality=out_reality,

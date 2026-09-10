@@ -120,8 +120,9 @@ export function Operations({ initialState = 'idle' }: { initialState?: OpsState 
         incident: incident ?? null,
         plans: plans.data ?? [],
         replan: replan.data ?? null,
+        responderTracking: operationalState.data?.responder_tracking ?? [],
       }),
-    [state, incident, plans.data, replan.data],
+    [state, incident, plans.data, replan.data, operationalState.data],
   );
 
   const center = useMemo(() => resolveMapCenter(incident), [incident]);

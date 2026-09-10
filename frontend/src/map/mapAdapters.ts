@@ -308,11 +308,49 @@ export function planToRealMapRoutes(
   return routes;
 }
 
+/**
+ * Translate live responder-tracking entries (the same canonical projection
+ * Flutter's tracking screen consumes) into renderer routes. Unlike the
+ * plan's persisted route, this geometry is the *remaining* path from the
+ * responder's current projected position to the incident — so the line
+ * drawn on the map shrinks behind the responder as it advances, instead of
+ * staying fixed at the full route drawn at approval time. Falls back to
+ * nothing (never reconstructed) when a resource has no valid geometry.
+ */
+export function trackingToRealMapRoutes(
+  tracking: readonly OperationalResponderTrackingRead[],
+  role: RealMapRouteRole,
+): RealMapRoute[] {
+  const routes: RealMapRoute[] = [];
+  tracking.forEach((entry, index) => {
+    const coordinates = lineStringCoordinates(entry.route);
+    if (!coordinates) return;
+    routes.push({
+      id: `tracking:${entry.resource_id}:${index}`,
+      role,
+      label: role,
+      geometry: {
+        type: 'FeatureCollection',
+        features: [
+          {
+            type: 'Feature',
+            geometry: { type: 'LineString', coordinates },
+            properties: { resource_id: entry.resource_id },
+          },
+        ],
+      },
+    });
+  });
+  return routes;
+}
+
 export interface RouteResolutionInput {
   opsState: MapRouteOpsState;
   incident: IncidentRead | null;
   plans: readonly ResponsePlanRead[];
   replan: ReplanEvaluationRead | null;
+  /** Live canonical projection for the incident's assigned responder(s), when available. */
+  responderTracking?: readonly OperationalResponderTrackingRead[];
 }
 
 function sameCandidateSetAlternatives(
@@ -335,16 +373,23 @@ function sameCandidateSetAlternatives(
  * never fabricates a route.
  */
 export function buildRouteSet(input: RouteResolutionInput): RealMapRoute[] {
-  const { opsState, incident, plans, replan } = input;
+  const { opsState, incident, plans, replan, responderTracking } = input;
   if (!incident) return [];
 
   const currentPlan = resolveCurrentPlan(incident, plans);
+  // Once live tracking exists for this incident's responder(s), it is the
+  // more current truth than the plan's static route (mission: the drawn
+  // route must shrink behind the responder, not stay fixed at approval).
+  const liveTracking = (responderTracking ?? []).filter(
+    (entry) => entry.resource_id && currentPlan?.resource_ids?.includes(entry.resource_id),
+  );
 
   switch (opsState) {
     case 'idle':
     case 'incident':
     case 'active':
     case 'hospital':
+      if (liveTracking.length > 0) return trackingToRealMapRoutes(liveTracking, 'primary');
       return currentPlan ? planToRealMapRoutes(currentPlan, 'primary') : [];
 
     case 'plan': {

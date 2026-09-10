@@ -26,7 +26,11 @@ from app.schemas import (
     ResponsePlanStatus,
     Severity,
 )
-from app.resources import interpolate_route_progress, is_planner_eligible
+from app.resources import (
+    interpolate_route_progress,
+    is_planner_eligible,
+    remaining_route_coordinates,
+)
 from app.seed import DEFAULT_SCENARIO_PATH, main as seed_main, seed_resources
 from app.websocket import operations_manager, reset_operations_stream
 
@@ -1147,6 +1151,52 @@ def test_interpolate_route_progress_pure_helper() -> None:
     colocated = [[31.34, 30.05], [31.34, 30.05]]
     for progress in (0.0, 0.5, 1.0):
         assert interpolate_route_progress(colocated, progress) == (31.34, 30.05)
+
+
+def test_remaining_route_coordinates_shrinks_behind_progress() -> None:
+    """The displayed route must be the remaining path, not the full trip.
+
+    Regression for the dashboard/mobile bug where the drawn route stayed
+    fixed at its full approval-time geometry no matter how far the
+    responder had advanced.
+    """
+    coords = [
+        [31.3400, 30.0500],
+        [31.3450, 30.0550],
+        [31.3500, 30.0600],
+        [31.3550, 30.0650],
+    ]
+
+    # No progress yet: the full route remains (nothing has been travelled).
+    at_start = remaining_route_coordinates(coords, 0.0)
+    assert at_start == [list(c) for c in coords]
+
+    # Partway: starts at the current interpolated point, keeps only the
+    # vertices still ahead, and is strictly shorter than the full route.
+    at_half = remaining_route_coordinates(coords, 0.5)
+    assert len(at_half) < len(coords)
+    assert len(at_half) >= 2
+    current = interpolate_route_progress(coords, 0.5)
+    assert at_half[0] == pytest.approx(list(current))
+    # The last vertex is always still the final destination.
+    assert at_half[-1] == pytest.approx(coords[-1])
+
+    # More progress -> a strictly shorter (or equal) remaining route than less progress.
+    at_quarter = remaining_route_coordinates(coords, 0.25)
+    assert len(at_half) <= len(at_quarter)
+
+    # Arrival: only the destination point remains, which callers/renderers
+    # treat as "no route line" (both mobile and dashboard require >= 2
+    # points to draw a line) — a clean, non-fabricated empty state.
+    at_arrival = remaining_route_coordinates(coords, 1.0)
+    assert at_arrival == [list(coords[-1])]
+
+    # A zero-length (colocated) route never raises and every point resolves
+    # to the single occupied location.
+    colocated = [[31.34, 30.05], [31.34, 30.05]]
+    for progress in (0.0, 0.5, 1.0):
+        for point in remaining_route_coordinates(colocated, progress):
+            assert point == pytest.approx([31.34, 30.05])
 
 
 def test_resource_movement_success_full_lifecycle(client: TestClient, db_session: Session) -> None:
