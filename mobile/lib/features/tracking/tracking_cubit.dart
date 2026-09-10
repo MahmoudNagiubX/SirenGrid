@@ -119,17 +119,19 @@ class TrackingCubit extends Cubit<TrackingState> {
           await SecureStore.clearActiveRequestId();
         }
       } else if (res.statusCode == 404) {
-        // Anti-enumeration 404: the contract doesn't say this clears the active
-        // id, so keep it and surface honestly.
+        // Authoritative "this request no longer exists / isn't yours" — even
+        // if a prior poll had a TrackingReady snapshot on screen, that
+        // snapshot is now stale and must not keep being shown as current
+        // truth (e.g. a responder marker for a request that no longer
+        // exists). The stored id is intentionally kept (anti-enumeration
+        // contract, matches the resolvable/retriable framing of this state).
         _stop();
-        if (state is! TrackingReady) {
-          emit(
-            const TrackingUnavailable(
-              'We could not find this request on the server.',
-              recoverable: false,
-            ),
-          );
-        }
+        emit(
+          const TrackingUnavailable(
+            'We could not find this request on the server.',
+            recoverable: false,
+          ),
+        );
       } else if (res.statusCode == 401 || res.statusCode == 403) {
         _stop();
         emit(

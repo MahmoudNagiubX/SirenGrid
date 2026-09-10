@@ -199,6 +199,23 @@ void main() {
       expect(await SecureStore.readActiveRequestId(), 'req-1');
       await cubit.close();
     });
+
+    test('a 404 after an already-ready snapshot replaces it instead of '
+        'freezing stale tracking data (e.g. a demo/dev reset)', () async {
+      await SecureStore.saveActiveRequestId('req-1');
+      final c = ScriptedClient()
+        ..enqueue(200, snap(responder: _responder))
+        ..enqueue(404, {'detail': 'not found'});
+      final cubit = TrackingCubit(
+        c.asApi(),
+        pollInterval: const Duration(hours: 1),
+      );
+      await cubit.start();
+      expect(cubit.state, isA<TrackingReady>());
+      await cubit.refreshNow();
+      expect(cubit.state, isA<TrackingUnavailable>());
+      await cubit.close();
+    });
   });
 }
 
